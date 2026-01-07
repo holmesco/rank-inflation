@@ -1,0 +1,29 @@
+{
+  "name": "clippep-cert-dev",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "runArgs": [
+    "--gpus=all",
+    "--shm-size=16gb"
+  ],
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspace,type=bind",
+    "source=python_packages,target=/usr/local/lib/python3.10/site-packages,type=volume"
+  ],
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-toolsai.jupyter"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/conda/bin/python"
+      }
+    }
+  },
+  // "postCreateCommand": "pip install -e .",
+  "remoteUser": "cho"
+}
