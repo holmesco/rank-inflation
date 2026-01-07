@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     libxext6 \
     libopenblas-dev \
+    libboost-all-dev \
     nvtop \
     && rm -rf /var/lib/apt/lists/*
 
@@ -41,6 +42,7 @@ RUN apt-get update && apt-get install -y \
 
 # utilities
 RUN apt-get update && apt-get install -y tmux
+
     
 # Set up user inside container to avoid issues with permissions.
 ARG USERNAME=cho

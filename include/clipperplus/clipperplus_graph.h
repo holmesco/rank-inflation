@@ -16,14 +16,24 @@ using Neighborlist = std::vector<Node>;
 class Graph
 {
 public:
+    // Create a graph
     Graph() = default;
+
+    // Build a Graph object from an adjacency matrix
     Graph(Eigen::MatrixXd adj_matrix);
+
     // static Graph from_list(const std::vector<Neighborlist> &adj_list);
 
+    // number of nodes in the graph
     int size() const;
+
+    // Return the degree of a node
     int degree(Node v) const;
+
+    // Return the degrees of the nodes in the graph
     std::vector<int> degrees() const;
 
+    // Return a list of nodes representing the neighbors of v
     const std::vector<Node> &neighbors(Node v) const;
 
     inline bool is_edge(Node u, Node v) const
@@ -31,6 +41,7 @@ public:
         return adj_matrix(u, v) != 0;
     }
 
+    // Merge with graph g by combining edges
     void merge(const Graph &g);
     Graph induced(const std::vector<Node> &nodes) const;
 
@@ -40,7 +51,10 @@ public:
     
     const Eigen::MatrixXd &get_adj_matrix() const;
 
+    std::vector<Edge> get_absent_edges() const;
+
 private:
+    // Calculate the k-cores of the nodes in the graphs. Updates the 'kcore' and 'kcore_ordering'
     void calculate_kcores() const;
 
 private:
