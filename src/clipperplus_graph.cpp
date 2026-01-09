@@ -19,6 +19,22 @@ namespace clipperplus
         }
     }
 
+    std::vector<Edge> Graph::get_absent_edges() const
+    {
+        auto absent_edges = std::vector<Edge>();
+        for (int i = 0; i < size(); i++)
+        {
+            for (int j = i + 1; j < size(); j++)
+            {
+                if (!is_edge(i, j))
+                {
+                    absent_edges.push_back({i, j});
+                }
+            }
+        }
+        return absent_edges;
+    }
+
     const std::vector<Node> &Graph::neighbors(Node v) const
     {
         assert(v < adj_list.size());
@@ -126,22 +142,6 @@ namespace clipperplus
     const Eigen::MatrixXd &Graph::get_adj_matrix() const
     {
         return adj_matrix;
-    }
-
-    std::vector<Edge> Graph::get_absent_edges() const
-    {
-        auto absent_edges = std::vector<Edge>();
-        for (int i = 0; i < size(); i++)
-        {
-            for (int j = i + 1; j < size(); j++)
-            {
-                if (!is_edge(i, j))
-                {
-                    absent_edges.push_back({i, j});
-                }
-            }
-        }
-        return absent_edges;
     }
 
     void Graph::calculate_kcores() const
