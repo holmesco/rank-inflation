@@ -32,8 +32,11 @@ include(FetchContent)
 
 find_package(Eigen3 REQUIRED)
 message(STATUS "Eigen Version: ${EIGEN3_VERSION_STRING} ${EIGEN3_VERSION}")
-
 find_package(OpenMP REQUIRED)
+find_package(Boost REQUIRED)
+find_package(Boost REQUIRED COMPONENTS filesystem system)
+message(STATUS "Boost Version: ${Boost_VERSION}")
+
 
 if(BUILD_TESTS)
   FetchContent_Declare(
@@ -65,6 +68,7 @@ set(CLLIPPER_PLUS_SOURCE_FILES
         ${CMAKE_CURRENT_SOURCE_DIR}/src/clique_optimization.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/clipperplus_heuristic.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/utils.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/max_clique_sdp.cpp
 )
 
 # source files
@@ -77,10 +81,11 @@ target_include_directories(clipperplus PUBLIC
         $<INSTALL_INTERFACE:include>)
 
 # link libraries:
+target_link_libraries(clipperplus PRIVATE
+    Boost::filesystem 
+    Boost::system)
 target_link_libraries(clipperplus PUBLIC Eigen3::Eigen)
 target_link_libraries(clipperplus PUBLIC OpenMP::OpenMP_CXX)
-
-
 
 # debug flag  
 if(DEBUG_FLAG)

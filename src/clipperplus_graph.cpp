@@ -128,14 +128,14 @@ namespace clipperplus
         return adj_matrix;
     }
 
-    std::vector<Edge> get_absent_edges() const
+    std::vector<Edge> Graph::get_absent_edges() const
     {
         auto absent_edges = std::vector<Edge>();
         for (int i = 0; i < size(); i++)
         {
             for (int j = i + 1; j < size(); j++)
             {
-                if (!adj_matrix(i, j))
+                if (!is_edge(i, j))
                 {
                     absent_edges.push_back({i, j});
                 }
