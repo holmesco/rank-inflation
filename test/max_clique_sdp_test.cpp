@@ -8,9 +8,7 @@ c++ tests for max clique with SDP
 #include <Eigen/Dense>
 #include <gtest/gtest.h>
 
-// for computating core numbers and PMC-heuristic clique
-#include "clipperplus/clipperplus_clique.h"
-#include "max_clique_sdp.hpp"
+#include "max_clique_sdp/max_clique_sdp.hpp"
 
 using namespace clipperplus;
 
@@ -68,5 +66,6 @@ TEST(MAX_CLQ_SDP, clique2)
     ASSERT_NEAR(cost, solution.primal_opt, 1e-3);
 
     // Test rank reduction
-    auto V = rank_reduction(problem.abs_edges, solution.Y);
+    auto V = RankReduction::rank_reduction(problem.abs_edges, solution.Y);
+    std::cout << V << std::endl;
 };

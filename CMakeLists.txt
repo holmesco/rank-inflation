@@ -63,18 +63,11 @@ FetchContent_MakeAvailable(googletest)
 # Targets
 ###############################################################################
 
-set(CLLIPPER_PLUS_SOURCE_FILES
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/clipperplus_clique.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/clipperplus_graph.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/clique_optimization.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/clipperplus_heuristic.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/max_clique_sdp.cpp
-)
 
 # source files
+file(GLOB CLIPPER_PLUS_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
 add_library(clipperplus SHARED)
-target_sources(clipperplus PRIVATE ${CLLIPPER_PLUS_SOURCE_FILES})
+target_sources(clipperplus PRIVATE ${CLIPPER_PLUS_SOURCE_FILES})
 
 # headers:
 target_include_directories(clipperplus PUBLIC

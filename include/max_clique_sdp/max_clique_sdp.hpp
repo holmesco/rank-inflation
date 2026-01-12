@@ -1,6 +1,5 @@
 #pragma once
 
-#include "clipperplus/clipperplus_graph.h"
 #include <Eigen/Dense>
 #include <Eigen/SVD>
 #include <string>
@@ -10,9 +9,13 @@
 #include <cmath>
 #include <algorithm>
 
+// include graph and rank reduction code.
+#include "clipperplus/clipperplus_graph.h"
+#include "max_clique_sdp/rank_reduction.hpp"
+
 namespace clipperplus
 {
-
+    // Object to store the low rank solution of a max clique SDP problem
     struct MaxCliqueSolution
     {
         // primal solution
@@ -23,6 +26,7 @@ namespace clipperplus
         float primal_opt;
     };
 
+    // Object to encode the maximum clique problem.
     class MaxCliqueProblem
     {
 
@@ -46,15 +50,5 @@ namespace clipperplus
         MaxCliqueSolution retrieve_cuhallar_solution();
     };
 
-    // Apply rank reduction algorithm
-    Eigen::MatrixXd rank_reduction(
-        const std::vector<Edge> &absent_edges,
-        const Eigen::MatrixXd &V_init,
-        double rank_tol = 1e-5,
-        double null_tol = 1e-5,
-        double eig_tol = 1e-9,
-        int targ_rank = -1,
-        int max_iter = -1,
-        bool verbose = true);
 
 }
