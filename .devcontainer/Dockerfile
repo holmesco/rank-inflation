@@ -40,10 +40,25 @@ RUN apt-get update && apt-get install -y \
 #     libxkbcommon-dev \
 #     libxkbcommon-x11-dev
 
-# utilities
+# more utilities
 RUN apt-get update && apt-get install -y tmux
 
-    
+# Install cuHALLaR and add to path
+ADD tmp/cuHALLaR.tar.xz /opt
+RUN chmod +x /opt/cuHALLaR/bin/cuHallar
+ENV PATH="/opt/cuHALLaR/bin:${PATH}"
+
+# Set locale (required for cuHALLaR)
+# Install the locales package
+RUN apt-get update && apt-get install -y locales && rm -rf /var/lib/apt/lists/*
+# Select and generate the specific locale (e.g., en_US.UTF-8)
+RUN sed -i -e 's/# en_US.UTF-8 UTF-8/en_US.UTF-8 UTF-8/' /etc/locale.gen && \
+    locale-gen
+# Set the environment variables
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US:en
+ENV LC_ALL en_US.UTF-8
+
 # Set up user inside container to avoid issues with permissions.
 ARG USERNAME=cho
 ARG USER_UID=1094
@@ -53,8 +68,7 @@ RUN groupadd --gid $USER_GID $USERNAME \
 && useradd --uid $USER_UID --gid $USER_GID -m $USERNAME \
 && chown -R $USERNAME /opt/conda
 
-# give user sudo privilege inside container
-RUN usermod -aG sudo $USERNAME
+RUN chown -R $USERNAME /opt/cuHALLaR
 
 USER $USERNAME
 WORKDIR /workspace

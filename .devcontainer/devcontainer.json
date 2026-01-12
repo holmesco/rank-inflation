@@ -1,6 +1,7 @@
 {
   "name": "clippep-cert-dev",
   "build": {
+    "context": "..",
     "dockerfile": "Dockerfile"
   },
   "runArgs": [
