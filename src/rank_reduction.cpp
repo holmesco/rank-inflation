@@ -42,8 +42,6 @@ namespace RankReduction
         return A;
     }
 
-    // --- Implementation Logic ---
-
     Matrix get_constraint_op(const std::vector<Edge> &absent_edges, const Matrix &V)
     {
         // Get solution space null space operator. Specialized to the Lovasz-theta problem.
@@ -89,8 +87,6 @@ namespace RankReduction
         }
         return vAv_updated;
     }
-
-    // --- Main Algorithm ---
 
     Matrix rank_reduction(
         const std::vector<Edge> &absent_edges,
