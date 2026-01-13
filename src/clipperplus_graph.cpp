@@ -35,6 +35,21 @@ namespace clipperplus
         return absent_edges;
     }
 
+    bool Graph::is_clique(std::vector<Node> clique) const 
+    {
+        for (int i = 0; i < clique.size(); i++) 
+        {
+            for (int j = i + 1; j < clique.size(); j++) 
+            {
+                if (!is_edge(clique[i], clique[j])) 
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     const std::vector<Node> &Graph::neighbors(Node v) const
     {
         assert(v < adj_list.size());
