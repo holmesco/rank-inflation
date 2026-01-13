@@ -13,7 +13,7 @@ namespace clipperplus
         abs_edges = graph.get_absent_edges();
     }
 
-    int MaxCliqueProblem::build_mc_hslr_problem(const std::string &filepath)
+    int MaxCliqueProblem::build_mc_hslr_problem(const std::string &filepath) const
     {
         // get absent edges in the graph
         std::vector<Edge> edges = graph.get_absent_edges();
@@ -64,17 +64,51 @@ namespace clipperplus
         return 0;
     }
 
-    MaxCliqueSolution MaxCliqueProblem::optimize_cuhallar()
+    int MaxCliqueProblem::build_initialization_file(const std::string &filepath, const std::vector<Node> &init_clique) const
     {
-        // To call cuHALLaR, we need to
-        // generate the problem file for this graph
-        std::string filepath = "/workspace/tmp/mc_hslr_problem.txt";
-        build_mc_hslr_problem(filepath);
-        // run cuhallar        
+        std::ofstream ofs(filepath);
+        // check fail
+        if (ofs.fail())
+        {
+            std::string error_msg = "File not found or could not be opened: ";
+            error_msg += filepath;
+            throw std::runtime_error(error_msg);
+        }
+
+        // Build initialization vector
+        Vector init_soln = clique_to_soln(init_clique, size);
+
+        // Write to file as CSV
+        for (int i = 0; i < init_soln.size(); ++i)
+        {
+            ofs << init_soln(i);
+            if (i < init_soln.size() - 1)
+                ofs << std::endl;
+        }
+        ofs << std::endl;
+
+        // Close file
+        ofs.close();
+        std::cout << "Successfully wrote initialization file." << std::endl;
+
+        return 0;
+    }
+
+    MaxCliqueSolution MaxCliqueProblem::optimize_cuhallar(const std::vector<int> &init_clique) const
+    {
+        // Set up input and output files
+        std::string input_file = "/workspace/tmp/mc_hslr_problem.txt";
+        std::string init_file = "/workspace/tmp/mc_initialization.txt";
         std::string primal_out = "/workspace/tmp/primal_out.txt";
         std::string dual_out = "/workspace/tmp/dual_out.txt";
+        std::string options = "/workspace/parameters/cuhallar_params.cfg";
+        // To call cuHALLaR, we need to generate the problem file for this graph
+        build_mc_hslr_problem(input_file);
+        // Set up initial clique file if provided
+        build_initialization_file(init_file, init_clique);
+        // Set up output file paths
         // Launch the child process
-        bp::child c(bp::search_path("cuHallar"), "-i", filepath,"-p",primal_out, "-d", dual_out);
+        bp::child c(bp::search_path("cuHallar"), "-i", input_file, "-p", primal_out, "-d", dual_out, "-w", init_file, "-c", options);
 
         // Wait for the process to exit and get the exit code
         c.wait();
@@ -83,11 +117,11 @@ namespace clipperplus
 
         // retrieve solution from output files
         MaxCliqueSolution solution = retrieve_cuhallar_solution();
-        
+
         return solution;
     }
 
-    MaxCliqueSolution MaxCliqueProblem::retrieve_cuhallar_solution()
+    MaxCliqueSolution MaxCliqueProblem::retrieve_cuhallar_solution() const
     {
         // Read primal and dual outputs into Eigen types
         MaxCliqueSolution solution;
@@ -171,6 +205,35 @@ namespace clipperplus
         dual_file.close();
 
         return solution;
+    }
+
+    std::vector<int> MaxCliqueProblem::soln_to_clique(const Vector &soln) const
+    {
+        // Convert to abs array
+        auto sol_array = soln.array().abs();
+        // Identify the clique indices
+        double mid_val = (sol_array.maxCoeff() - sol_array.minCoeff()) / 2;
+        std::vector<int> clique;
+        for (int i = 0; i < sol_array.size(); i++)
+        {
+            if (sol_array(i) > mid_val)
+            {
+                clique.push_back(i);
+            }
+        }
+        return clique;
+    }
+
+    Vector MaxCliqueProblem::clique_to_soln(const std::vector<int> clique, int size) const
+    {
+        assert(clique.size() > 0);
+        double factor = 1 / std::sqrt(clique.size());
+        Eigen::VectorXd soln = Eigen::VectorXd::Zero(size);
+        for (int i; i < clique.size(); i++)
+        {
+            soln(i) = factor;
+        }
+        return soln;
     }
 
 }
