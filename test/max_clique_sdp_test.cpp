@@ -46,7 +46,7 @@ TEST_P(MaxCliqueParamTest, FindsMaxClique)
     Eigen::RowVectorXd col_sums = solution.Y.colwise().sum();
     double cost = col_sums.array().square().sum();
     std::cout << "Max Clique: " << cost << std::endl;
-    // ASSERT_NEAR(cost, solution.primal_opt, 1e-3);
+    ASSERT_NEAR(cost, solution.primal_opt, 1e-3);
 
     // Test rank reduction
     // Run until reach rank 1 solution, regardless of singular value
