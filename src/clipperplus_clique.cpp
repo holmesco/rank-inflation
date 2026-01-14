@@ -26,7 +26,7 @@ namespace clipperplus
             return {heuristic_clique, CERTIFICATE::HEURISTIC};
         }
         // prune the graph based on core numbers
-        auto [keep, keep_pos] = graph.get_pruned_vertices(heuristic_clique.size() - 1);
+        auto [keep, keep_pos] = graph.get_pruned_vertices(heuristic_clique.size());
 
         // get the pruned adjacency matrix and augment with identity
         Eigen::MatrixXd M_pruned = graph.get_adj_matrix()(keep, keep);
@@ -72,7 +72,7 @@ namespace clipperplus
         if (certificate == CERTIFICATE::NONE && check_sdp)
         {
             // Reprune based on current largest clique
-            auto [keep_lt, keep_pos_lt] = graph.get_pruned_vertices(optimal_clique.size() - 1);
+            auto [keep_lt, keep_pos_lt] = graph.get_pruned_vertices(optimal_clique.size());
             // Generate reduced graph
             auto graph_sdp = Graph(graph.get_adj_matrix()(keep_lt, keep_lt));
             // run optimization

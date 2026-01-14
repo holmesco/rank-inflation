@@ -162,7 +162,6 @@ namespace clipperplus
         std::vector<int> keep, keep_pos(n, -1);
         for (Node i = 0, j = 0; i < n; ++i)
         {
-            // if (core_number[i] + 1 >= heuristic_clique.size())
             if (core_number[i] >= min_kcore)
             {
                 keep.push_back(i);
