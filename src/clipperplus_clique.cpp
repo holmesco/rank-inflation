@@ -6,11 +6,13 @@ Author: kaveh fathian (kavehfathian@gmail.com)
 
 #include "clipperplus/clipperplus_heuristic.h"
 #include "clipperplus/clipperplus_clique.h"
+#include "max_clique_sdp/max_clique_sdp.hpp"
+#include "max_clique_sdp/rank_reduction.hpp"
 
 namespace clipperplus
 {
 
-    std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph)
+    std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph, bool check_sdp)
     {
         int n = graph.size();
         // generate the chromatic number upper bound
@@ -23,23 +25,14 @@ namespace clipperplus
         {
             return {heuristic_clique, CERTIFICATE::HEURISTIC};
         }
+        // prune the graph based on core numbers
+        auto [keep, keep_pos] = graph.get_pruned_vertices(heuristic_clique.size() - 1);
 
-        std::vector<int> core_number = graph.get_core_numbers();
-        std::vector<int> keep, keep_pos(n, -1);
-        for (Node i = 0, j = 0; i < n; ++i)
-        {
-            if (core_number[i] + 1 >= heuristic_clique.size())
-            {
-                keep.push_back(i);
-                keep_pos[i] = j++;
-            }
-        }
-        
         // get the pruned adjacency matrix and augment with identity
         Eigen::MatrixXd M_pruned = graph.get_adj_matrix()(keep, keep);
         M_pruned.diagonal().setOnes();
 
-        // initialize using a vector of all ones except for the 
+        // initialize using a vector orthogonal to the heuristic clique
         Eigen::VectorXd u0 = Eigen::VectorXd::Ones(keep.size());
         for (auto v : heuristic_clique)
         {
@@ -47,15 +40,17 @@ namespace clipperplus
             u0(keep_pos[v]) = 0;
         }
         u0.normalize();
-
+        // Run optimization
         auto clique_optim_pruned = clipperplus::clique_optimization(M_pruned, u0, Params());
         std::vector<Node> optimal_clique;
         if (clique_optim_pruned.size() < heuristic_clique.size())
         {
+            // if heuristic clique is larger, return it
             optimal_clique = heuristic_clique;
         }
         else
         {
+            // map back to original graph nodes
             for (auto v : clique_optim_pruned)
             {
                 assert(v >= 0 && v < keep.size());
@@ -71,6 +66,53 @@ namespace clipperplus
         else if (optimal_clique.size() == chromatic_welsh)
         {
             certificate = CERTIFICATE::CHROMATIC_BOUND;
+        }
+
+        // Lovasz-Theta SDP Optimization
+        if (certificate == CERTIFICATE::NONE && check_sdp)
+        {
+            // Reprune based on current largest clique
+            auto [keep_lt, keep_pos_lt] = graph.get_pruned_vertices(optimal_clique.size() - 1);
+            // Generate reduced graph
+            auto graph_sdp = Graph(graph.get_adj_matrix()(keep_lt, keep_lt));
+            // run optimization
+            auto max_clique_prob = MaxCliqueProblem(graph_sdp);
+            auto soln = max_clique_prob.optimize_cuhallar(optimal_clique);
+            // Check if LT bound is satisfied
+            // TODO: replace hardcoded value
+            if (soln.primal_opt < optimal_clique.size() + 1.0E-2)
+            {
+                certificate = CERTIFICATE::LOVASZ_THETA_BOUND;
+            }
+            else
+            {
+                // SDP potentially found a larger clique.
+                // Apply rank reduction, if necessary
+                Eigen::VectorXd V;
+                if (soln.Y.cols() > 1)
+                {
+                    auto non_edges = graph_sdp.get_absent_edges();
+                    V = RankReduction::rank_reduction(non_edges, soln.Y, 1);
+                }
+                else
+                {
+                    V = soln.Y;
+                }
+                // Get clique from solution
+                auto clique_sdp = max_clique_prob.soln_to_clique(V);
+                // Check if we found a better solution.
+                if (clique_sdp.size() > optimal_clique.size() && graph_sdp.is_clique(clique_sdp))
+                {   
+                    // map back to original graph nodes
+                    optimal_clique.clear();
+                    for (auto v : clique_sdp)
+                    {
+                        optimal_clique.push_back(keep[v]);
+                    }
+                    // set certificate
+                    certificate = CERTIFICATE::LOVASZ_THETA_SOLN;
+                }
+            }
         }
 
         return {optimal_clique, certificate};

@@ -49,6 +49,9 @@ public:
     const std::vector<int> &get_core_numbers() const;
     const std::vector<Node> &get_core_ordering() const;
     
+    // get the vertices after pruning based on min k-core allowed
+    std::pair<std::vector<Node>, std::vector<Node>> get_pruned_vertices(int min_kcore) const;
+    
     const Eigen::MatrixXd &get_adj_matrix() const;
 
     // Get the list of absent edges in the graph. Used for max clique problem formulation
@@ -56,6 +59,7 @@ public:
 
     // Check if a set of nodes form a clique
     bool is_clique(std::vector<Node> clique) const;
+
 
 private:
     // Calculate the k-cores of the nodes in the graphs. Updates the 'kcore' and 'kcore_ordering'

@@ -36,10 +36,9 @@ namespace RankReduction
     Matrix rank_reduction(
         const std::vector<Edge> &absent_edges,
         const Matrix &V_init,
-        double rank_tol = 1e-5,
+        int targ_rank = -1,
         double null_tol = 1e-5,
         double eig_tol = 1e-9,
-        int targ_rank = -1,
         int max_iter = -1,
         bool verbose = true);
 }

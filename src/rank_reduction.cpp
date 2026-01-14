@@ -90,7 +90,7 @@ namespace RankReduction
 
     Matrix rank_reduction(
         const std::vector<Edge> &absent_edges,
-        const Matrix &V_init, double rank_tol, double null_tol, double eig_tol, int targ_rank, int max_iter,
+        const Matrix &V_init, int targ_rank, double null_tol, double eig_tol, int max_iter,
         bool verbose)
     {
         // get initial matrix

@@ -20,7 +20,7 @@ class ClipperPlusParamTest : public ::testing::TestWithParam<CliqueTestCase> {};
 TEST_P(ClipperPlusParamTest, FindsCorrectMaxClique) {
     const auto& params = GetParam();
     // Execute logic
-    auto [clique, certificate] = clipperplus::find_clique(params.adj);
+    auto [clique, certificate] = clipperplus::find_clique(params.adj, true);
     std::sort(clique.begin(), clique.end());
     std::cout << "Test case: " << params.test_name << "\n";
     std::cout << "Found clique nodes: ";

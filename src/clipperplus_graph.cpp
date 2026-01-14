@@ -35,13 +35,13 @@ namespace clipperplus
         return absent_edges;
     }
 
-    bool Graph::is_clique(std::vector<Node> clique) const 
+    bool Graph::is_clique(std::vector<Node> clique) const
     {
-        for (int i = 0; i < clique.size(); i++) 
+        for (int i = 0; i < clique.size(); i++)
         {
-            for (int j = i + 1; j < clique.size(); j++) 
+            for (int j = i + 1; j < clique.size(); j++)
             {
-                if (!is_edge(clique[i], clique[j])) 
+                if (!is_edge(clique[i], clique[j]))
                 {
                     return false;
                 }
@@ -154,6 +154,24 @@ namespace clipperplus
         return kcore_ordering;
     }
 
+    std::pair<std::vector<Node>, std::vector<Node>>
+    Graph::get_pruned_vertices(int min_kcore) const
+    {
+        int n = size();
+        std::vector<int> core_number = get_core_numbers();
+        std::vector<int> keep, keep_pos(n, -1);
+        for (Node i = 0, j = 0; i < n; ++i)
+        {
+            // if (core_number[i] + 1 >= heuristic_clique.size())
+            if (core_number[i] >= min_kcore)
+            {
+                keep.push_back(i);
+                keep_pos[i] = j++;
+            }
+        }
+        return {keep, keep_pos};
+    }
+
     const Eigen::MatrixXd &Graph::get_adj_matrix() const
     {
         return adj_matrix;
@@ -171,6 +189,7 @@ namespace clipperplus
         std::vector<int> pos(n, 0);
         kcore_ordering.resize(n);
 
+        // bin[d] is the starting index in the sorted array for nodes with degree d
         std::vector<int> bin(max_degree + 1, 0);
         for (auto d : degree)
         {
@@ -199,7 +218,7 @@ namespace clipperplus
         }
         bin[0] = 0;
 
-        // iteratively remove edges from v with lowest degree
+        // iteratively remove edges from v with lowest degree (effectively removing v)
         for (auto v : kcore_ordering)
         {
             for (auto u : neighbors(v))
@@ -221,8 +240,9 @@ namespace clipperplus
                     kcore_ordering[pos[w]] = u;
                     std::swap(pos[u], pos[w]);
                 }
-
+                // shift bucket start index to the right (drop out u)
                 ++bin[degree[u]];
+                // decrement the degree (kcore) of u
                 --degree[u];
             }
         }
