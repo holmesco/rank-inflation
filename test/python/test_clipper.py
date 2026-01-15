@@ -1,5 +1,5 @@
 import numpy as np
-import clipperpluspy
+from clipperpluspy import find_clique, ClipperParams
 import unittest
 
 class TestClipperplus(unittest.TestCase):
@@ -60,10 +60,15 @@ class TestClipperplus(unittest.TestCase):
     ]
     
     def test_clique(self):
+        # Set up parameters
+        params = ClipperParams()
+        params.check_lovasz_theta = False
+        params.cuhallar_params.options = "/workspace/parameters/cuhallar_params_inexact.cfg"
+        
         for i in range(len(self.test_data)):
             with self.subTest("Finding cliques on predetermined adjacency matrices", i=i):
                 adj = self.test_data[i]["adj"]
-                clique_size, clique, certificate = clipperpluspy.clipperplus_clique(adj)
+                clique_size, clique, certificate = find_clique(adj, params)
                 print(f"\nTest {i}: {self.test_data[i]['name']}\n")
                 print(f"{self.test_data[i]['adj']}\n", flush=True)
                 self.assertEqual(clique_size, self.test_data[i]["expected_clique_size"])

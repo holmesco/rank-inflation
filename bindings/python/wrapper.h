@@ -12,11 +12,12 @@
 class Wrapper
 {
 public:
-  static std::tuple<long, std::vector<int>, int> clipperplus_clique_wrapper(const Eigen::MatrixXd &adj)
+  static std::tuple<long, std::vector<int>, std::string> find_clique_wrapper(const Eigen::MatrixXd &adj, 
+                                                                      clipperplus::ClipperParams params = clipperplus::ClipperParams())
   {
-    auto [clique, certificate] = clipperplus::find_clique(adj);
-
-    return std::make_tuple((long)clique.size(), clique, (int)certificate);
+    auto [clique, certificate] = clipperplus::find_clique(adj, params);
+    std::string cert_str = clipperplus::to_string(certificate);
+    return std::make_tuple((long)clique.size(), clique, cert_str);
   }
 
   static std::vector<int> find_heuristic_clique_wrapper(
@@ -29,9 +30,10 @@ public:
 
   static std::tuple<int, unsigned long, std::vector<long>> clique_optimization_wrapper(
       const Eigen::MatrixXd &M,
-      const Eigen::VectorXd &u0)
+      const Eigen::VectorXd &u0,
+      const clipperplus::ClipperOptParams params)
   {
-    std::vector<long> clique = clipperplus::clique_optimization(M, u0, clipperplus::ClipperOptParams());
+    std::vector<long> clique = clipperplus::clique_optimization(M, u0, params);
     return std::make_tuple(1, clique.size(), clique);
   }
 };

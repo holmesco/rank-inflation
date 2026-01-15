@@ -27,6 +27,13 @@ elseif(WIN32)
     set(DIST "win10")
 endif()
 
+add_custom_command(
+    TARGET py_clipperplus POST_BUILD
+    COMMAND ${PYTHON_EXECUTABLE} -m pybind11_stubgen clipperpluspy -o .
+    WORKING_DIRECTORY ${PYPKG_DIR}
+    COMMENT "Generating .pyi stubs for py_clipperplus with stubgen"
+)
+
 set(PKGSTR clipperpluspy-py3-${DIST}-${PROJECT_VERSION})
 add_custom_target(pypkg
     DEPENDS py_clipperplus
