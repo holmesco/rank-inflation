@@ -79,8 +79,9 @@ namespace clipperplus
             auto max_clique_prob = MaxCliqueProblem(graph_sdp);
             auto soln = max_clique_prob.optimize_cuhallar(optimal_clique);
             // Check if LT bound is satisfied
-            // TODO: replace hardcoded value
-            if (soln.primal_opt < optimal_clique.size() + 1.0E-2)
+            // NOTE: Hardcoded 1 because the LT bound is continuous, but still upper bounding
+            // we obtain a valid certificate as long as this inequality holds.
+            if (soln.primal_opt < optimal_clique.size() + 1.0)
             {
                 certificate = CERTIFICATE::LOVASZ_THETA_BOUND;
             }
@@ -109,8 +110,10 @@ namespace clipperplus
                     {
                         optimal_clique.push_back(keep[v]);
                     }
-                    // set certificate
-                    certificate = CERTIFICATE::LOVASZ_THETA_SOLN;
+                    // re-check for certificate
+                    if (soln.primal_opt < optimal_clique.size() + 1.0){
+                        certificate = CERTIFICATE::LOVASZ_THETA_SOLN_BOUND;
+                    }
                 }
             }
         }

@@ -19,7 +19,7 @@ namespace clipperplus
         CORE_BOUND,
         CHROMATIC_BOUND,
         LOVASZ_THETA_BOUND,
-        LOVASZ_THETA_SOLN,
+        LOVASZ_THETA_SOLN_BOUND,
     };
     
     inline std::string to_string(CERTIFICATE cert)
