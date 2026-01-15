@@ -6,18 +6,14 @@ c++ tests for max clique with SDP
 #include <stdlib.h>
 #include <stdio.h>
 #include <Eigen/Dense>
-#include <gtest/gtest.h>
 
-#include "max_clique_sdp/max_clique_sdp.hpp"
-
-using namespace clipperplus;
-
-#include <iostream>
 #include <vector>
 #include <algorithm>
 #include <Eigen/Dense>
 #include <gtest/gtest.h>
 #include "clipperplus/clipperplus_clique.h"
+
+using namespace clipperplus;
 
 // 1. Data structure to bundle the input and expected outputs
 struct CliqueTestCase
@@ -29,20 +25,20 @@ struct CliqueTestCase
 };
 
 // 2. The Fixture Class
-class MaxCliqueParamTest : public ::testing::TestWithParam<CliqueTestCase>
+class LovascThetaParamTest : public ::testing::TestWithParam<CliqueTestCase>
 {
 };
 
 // 3. The Single Generalized Test Function
-TEST_P(MaxCliqueParamTest, FindsMaxClique)
+TEST_P(LovascThetaParamTest, FindsMaxClique)
 {
     const auto &params = GetParam();
     // Generate problem
     auto graph = Graph(params.adj);
-    auto problem = MaxCliqueProblem(graph);
+    auto problem = LovaszThetaProblem(graph);
     // run optimization
     auto solution = problem.optimize_cuhallar(params.expected_clique);
-    
+
     // Check cost
     Eigen::RowVectorXd col_sums = solution.Y.colwise().sum();
     double cost = col_sums.array().square().sum();
@@ -51,7 +47,7 @@ TEST_P(MaxCliqueParamTest, FindsMaxClique)
 
     // Test rank reduction
     // Run until reach rank 1 solution, regardless of singular value
-    auto V = RankReduction::rank_reduction(problem.abs_edges, solution.Y, 1);
+    auto V = RankReduction::rank_reduction(problem.abs_edges, solution.Y, RankReduction::RankRedParams());
     std::cout << "Reduced rank solution matrix V: \n"
               << V.transpose() << "\n"
               << std::endl;
@@ -75,7 +71,7 @@ TEST_P(MaxCliqueParamTest, FindsMaxClique)
 // 4. The Parameter Suite
 INSTANTIATE_TEST_SUITE_P(
     MaxCliqueSDPSuite,
-    MaxCliqueParamTest,
+    LovascThetaParamTest,
     ::testing::Values(
         // CASE 1
         CliqueTestCase{
@@ -147,7 +143,7 @@ INSTANTIATE_TEST_SUITE_P(
             clipperplus::CERTIFICATE::HEURISTIC,
             "Clique4_Disconnected"}),
     // This helper function names the tests based on the 'test_name' field
-    [](const ::testing::TestParamInfo<MaxCliqueParamTest::ParamType> &info)
+    [](const ::testing::TestParamInfo<LovascThetaParamTest::ParamType> &info)
     {
         return info.param.test_name;
     });

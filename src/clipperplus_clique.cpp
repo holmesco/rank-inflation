@@ -12,7 +12,7 @@ Author: kaveh fathian (kavehfathian@gmail.com)
 namespace clipperplus
 {
 
-    std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph, bool check_sdp)
+    std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph, ClipperParams params)
     {
         int n = graph.size();
         // generate the chromatic number upper bound
@@ -41,7 +41,7 @@ namespace clipperplus
         }
         u0.normalize();
         // Run optimization
-        auto clique_optim_pruned = clipperplus::clique_optimization(M_pruned, u0, Params());
+        auto clique_optim_pruned = clipperplus::clique_optimization(M_pruned, u0, params.optim_params);
         std::vector<Node> optimal_clique;
         if (clique_optim_pruned.size() < heuristic_clique.size())
         {
@@ -69,14 +69,14 @@ namespace clipperplus
         }
 
         // Lovasz-Theta SDP Optimization
-        if (certificate == CERTIFICATE::NONE && check_sdp)
+        if (certificate == CERTIFICATE::NONE && params.check_lovasz_theta)
         {
             // Reprune based on current largest clique
             auto [keep_lt, keep_pos_lt] = graph.get_pruned_vertices(optimal_clique.size());
             // Generate reduced graph
             auto graph_sdp = Graph(graph.get_adj_matrix()(keep_lt, keep_lt));
             // run optimization
-            auto max_clique_prob = MaxCliqueProblem(graph_sdp);
+            auto max_clique_prob = LovaszThetaProblem(graph_sdp, params.cuhallar_params);
             auto soln = max_clique_prob.optimize_cuhallar(optimal_clique);
             // Check if LT bound is satisfied
             // NOTE: Hardcoded 1 because the LT bound is continuous, but still upper bounding
@@ -86,14 +86,13 @@ namespace clipperplus
                 certificate = CERTIFICATE::LOVASZ_THETA_BOUND;
             }
             else
-            {
-                // SDP potentially found a larger clique.
+            { // SDP potentially found a larger clique.
                 // Apply rank reduction, if necessary
                 Eigen::VectorXd V;
                 if (soln.Y.cols() > 1)
                 {
                     auto non_edges = graph_sdp.get_absent_edges();
-                    V = RankReduction::rank_reduction(non_edges, soln.Y, 1);
+                    V = RankReduction::rank_reduction(non_edges, soln.Y, params.rank_red_params);
                 }
                 else
                 {
@@ -103,7 +102,7 @@ namespace clipperplus
                 auto clique_sdp = max_clique_prob.soln_to_clique(V);
                 // Check if we found a better solution.
                 if (clique_sdp.size() > optimal_clique.size() && graph_sdp.is_clique(clique_sdp))
-                {   
+                {
                     // map back to original graph nodes
                     optimal_clique.clear();
                     for (auto v : clique_sdp)
@@ -111,7 +110,8 @@ namespace clipperplus
                         optimal_clique.push_back(keep[v]);
                     }
                     // re-check for certificate
-                    if (soln.primal_opt < optimal_clique.size() + 1.0){
+                    if (soln.primal_opt < optimal_clique.size() + 1.0)
+                    {
                         certificate = CERTIFICATE::LOVASZ_THETA_SOLN_BOUND;
                     }
                 }

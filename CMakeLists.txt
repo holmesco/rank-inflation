@@ -74,7 +74,7 @@ target_include_directories(clipperplus PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 
-# link libraries:
+# link external libraries:
 target_link_libraries(clipperplus PRIVATE
     Boost::filesystem 
     Boost::system)

@@ -10,6 +10,20 @@ namespace RankReduction
     using Node = int;
     using Edge = std::pair<Node, Node>;
 
+    struct RankRedParams
+    {
+        // Target rank, supercedes other conditionals (ignored if -1)
+        int targ_rank = 1; 
+        // Tolerance on null space singular value. If no null space and target rank not set, exit.
+        double null_tol = 1e-5;
+        // Tolerance on eigenvalues when removing dims from SDP solution space. 
+        double eig_tol = 1e-9;
+        // Maximum number of iterations (-1 for unlimited)
+        int max_iter = -1;
+        // Set verbosity
+        bool verbose = true;
+    };
+
     // ---- Symmetric matrix vectorization helper functions ----
 
     // Converts a symmetric matrix to a vectorized form (unique elements)
@@ -36,9 +50,5 @@ namespace RankReduction
     Matrix rank_reduction(
         const std::vector<Edge> &absent_edges,
         const Matrix &V_init,
-        int targ_rank = -1,
-        double null_tol = 1e-5,
-        double eig_tol = 1e-9,
-        int max_iter = -1,
-        bool verbose = true);
+        RankRedParams params=RankRedParams());
 }

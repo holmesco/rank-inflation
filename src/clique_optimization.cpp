@@ -13,7 +13,7 @@ namespace clipperplus
     std::vector<long> clique_optimization(
         const Eigen::MatrixXd &_M,
         const Eigen::VectorXd &u0,
-        const Params &params)
+        const ClipperOptParams &params)
     {
         const auto t_start = std::chrono::high_resolution_clock::now();
 
@@ -120,7 +120,7 @@ namespace clipperplus
                     else
                     {
                         alpha = alpha / sqrt(params.beta); // increase step size
-                        break;                              // stop line search
+                        break;                             // stop line search
                     }
                     ksum++;
 
