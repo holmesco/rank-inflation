@@ -1,4 +1,4 @@
-#include "max_clique_sdp/max_clique_sdp.hpp"
+#include "max_clique_sdp/lovasz_theta_sdp.hpp"
 
 namespace bp = boost::process;
 using Matrix = Eigen::MatrixXd;

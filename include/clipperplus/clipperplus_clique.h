@@ -8,7 +8,7 @@
 #include "clipperplus/clipperplus_heuristic.h"
 #include "clipperplus/clique_optimization.h"
 #include "clipperplus/utils.h"
-#include "max_clique_sdp/max_clique_sdp.hpp"
+#include "max_clique_sdp/lovasz_theta_sdp.hpp"
 
 namespace clipperplus {
 struct ClipperParams {
@@ -48,6 +48,7 @@ inline std::string to_string(CERTIFICATE cert) {
   }
 }
 
-std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph, ClipperParams params = ClipperParams());
+std::pair<std::vector<Node>, CERTIFICATE>
+find_clique(const Graph &graph, ClipperParams params = ClipperParams());
 
 } // namespace clipperplus
