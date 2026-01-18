@@ -54,9 +54,6 @@ public:
     
     const Eigen::MatrixXd &get_adj_matrix() const;
 
-    // Get the list of absent edges in the graph. Used for max clique problem formulation
-    std::vector<Edge> get_absent_edges() const;
-
     // Check if a set of nodes form a clique
     bool is_clique(std::vector<Node> clique) const;
 

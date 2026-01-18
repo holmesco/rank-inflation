@@ -61,15 +61,17 @@ std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph,
 
   // Lovasz-Theta SDP Optimization
   if (certificate == CERTIFICATE::NONE && params.check_lovasz_theta) {
+    std::cout << "Running Lovasz-Theta SDP optimization..." << std::endl;
     // Reprune based on current largest clique
     auto [keep_lt, keep_pos_lt] =
         graph.get_pruned_vertices(optimal_clique.size());
     // Generate reduced graph
     auto graph_sdp = Graph(graph.get_adj_matrix()(keep_lt, keep_lt));
     // run optimization
-    auto max_clique_prob =
+    auto lovasz_sdp =
         LovaszThetaProblem(graph_sdp, params.cuhallar_params);
-    auto soln = max_clique_prob.optimize_cuhallar(optimal_clique);
+    std::cout << "Preprocessing complete..." << std::endl;
+    auto soln = lovasz_sdp.optimize_cuhallar(optimal_clique);
     // Check if LT bound is satisfied
     // NOTE: Hardcoded 1 because the LT bound is continuous, but still upper
     // bounding we obtain a valid certificate as long as this inequality holds.
@@ -79,14 +81,13 @@ std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph,
       // Apply rank reduction, if necessary
       Eigen::VectorXd V;
       if (soln.Y.cols() > 1) {
-        auto non_edges = graph_sdp.get_absent_edges();
-        V = RankReduction::rank_reduction(non_edges, soln.Y,
+        V = RankReduction::rank_reduction(lovasz_sdp.nonedges, soln.Y,
                                           params.rank_red_params);
       } else {
         V = soln.Y;
       }
       // Get clique from solution
-      auto clique_sdp = max_clique_prob.soln_to_clique(V);
+      auto clique_sdp = lovasz_sdp.soln_to_clique(V);
       // Check if we found a better solution.
       if (clique_sdp.size() > optimal_clique.size() &&
           graph_sdp.is_clique(clique_sdp)) {

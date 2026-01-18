@@ -62,7 +62,7 @@ class TestClipperplus(unittest.TestCase):
     def test_clique(self):
         # Set up parameters
         params = ClipperParams()
-        params.check_lovasz_theta = False
+        params.check_lovasz_theta = True
         params.cuhallar_params.options = "/workspace/parameters/cuhallar_params_inexact.cfg"
         
         for i in range(len(self.test_data)):

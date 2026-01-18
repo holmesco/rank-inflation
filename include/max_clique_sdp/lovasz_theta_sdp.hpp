@@ -31,6 +31,7 @@ struct LovaszThetaSolution {
   Eigen::VectorXd lagrange;
   // primal optimum
   float primal_opt;
+  // 
 };
 
 // Object to encode the Lovasz-theta SDP problem.
@@ -39,8 +40,12 @@ class LovaszThetaProblem {
 public:
   // problem size
   int size;
-  // set of edges absent from the graph
-  std::vector<Edge> abs_edges;
+  // list of edges (for sparse formulation)
+  std::vector<Edge> edges;
+  // list of non-edges (for dense formulation)
+  std::vector<Edge> nonedges;
+  // flag use sparse formulation
+  bool use_sparse;
   // problem consistency graph
   const Graph &graph;
   // parameters for CuHALLaR optimizer
@@ -63,8 +68,11 @@ public:
   Eigen::VectorXd clique_to_soln(const std::vector<int> clique, int size) const;
 
 private:
-  // Build max clique problem in hslr format for cuhallar
-  int build_mc_hslr_problem(const std::string &filepath) const;
+  // Build dense max clique formulation in hslr format for cuhallar
+  int build_dense_mc_hslr_problem(const std::string &filepath) const;
+  
+  // Build sparse max clique formulation in hslr format for cuhallar
+  int build_sparse_mc_hslr_problem(const std::string &filepath) const;
 
   // Build initialization file
   int build_initialization_file(const std::string &filepath,

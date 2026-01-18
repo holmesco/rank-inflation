@@ -10,16 +10,31 @@ LovaszThetaProblem::LovaszThetaProblem(const Graph &graph_in,
                                        CuhallarParams cuhallar_params_in)
     : graph(graph_in), cuhallar_params(cuhallar_params_in) {
   size = graph.size();
-  abs_edges = graph.get_absent_edges();
+  // generate list of edges and nonedges
+  for (int i = 0; i < size; i++) {
+    for (int j = i + 1; j < size; j++) {
+      if (graph.is_edge(i, j)) {
+        edges.push_back({i, j});
+      } else {
+        nonedges.push_back({i, j});
+      }
+    }
+  }
+  // Determine whether to use the sparse formulation based on number of
+  // constraints that will appear in the problem
+  if (size + edges.size() < nonedges.size()) {
+    use_sparse = true;
+  } else {
+    use_sparse = false;
+  }
 }
 
-int LovaszThetaProblem::build_mc_hslr_problem(
+int LovaszThetaProblem::build_dense_mc_hslr_problem(
     const std::string &filepath) const {
-  // get absent edges in the graph
-  std::vector<Edge> edges = graph.get_absent_edges();
-  // get sizes
+  // Formulation of the problem used when the graph is dense. Corresponds to the
+  // standard primal Lovasz Theta formulation get sizes
   int n = graph.size();
-  int m = edges.size();
+  int m = nonedges.size();
   std::ofstream ofs(filepath);
   // check fail
   if (ofs.fail()) {
@@ -49,8 +64,67 @@ int LovaszThetaProblem::build_mc_hslr_problem(
     Edge e = edges[i];
     ofs << std::endl;
     ofs << i + 1 << " SP" << std::endl;
-    ofs << edges[i].first + 1 << " " << edges[i].second + 1 << " 0.5"
+    ofs << edges[i].first + 1 << " " << edges[i].second + 1 << " 1.0"
         << std::endl;
+  }
+
+  // Close file
+  ofs.close();
+  std::cout << "Successfully wrote model file." << std::endl;
+
+  return 0;
+}
+
+int LovaszThetaProblem::build_sparse_mc_hslr_problem(
+    const std::string &filepath) const {
+  // Sparse Formulation implements the problem in dual form, to leverage the
+  // fact that there are fewer edges than non-edges
+
+  // Our variable size is now (n+1) because we need to add a dual variable
+  // for the trace constraint. Number of
+  int n = graph.size() + 1;
+  // "constraints" actually enumerate the variables in the solution matrix
+  int m = edges.size() + graph.size();
+  std::ofstream ofs(filepath);
+  // check fail
+  if (ofs.fail()) {
+    std::string error_msg = "File not found or could not be opened: ";
+    error_msg += filepath;
+    throw std::runtime_error(error_msg);
+  }
+  // parameters: num constraints, problem size
+  ofs << m << " " << n << std::endl;
+  // constraint vector (diagonal cost terms)
+  for (int i = 0; i < n - 1; i++) {
+    ofs << "-1.0 ";
+  }
+  // constraint vector (off-diagonal cost terms)
+  for (Edge edge : edges) {
+    ofs << "-2.0 ";
+  }
+  ofs << std::endl;
+  // Trace value
+  ofs << "1.0" << std::endl << std::endl;
+
+  // objective (implements trace constraint)
+  ofs << "0 SP" << std::endl;
+  ofs << n << " " << n << " 1.0 " << std::endl << std::endl;
+
+  // matrix count
+  int mat_num = 1;
+  // constraints (diagonal elements)
+  for (int i = 0; i < n - 1; i++) {
+    ofs << mat_num << " SP" << std::endl;
+    ofs << i + 1 << " " << i + 1 << " 1.0 " << std::endl;
+    ofs << n << " " << n << " -1.0 " << std::endl << std::endl;
+    mat_num++;
+  }
+  // constraints (offdiagonal elements)
+  for (Edge edge : edges) {
+    ofs << mat_num << " SP" << std::endl;
+    ofs << edge.first + 1 << " " << edge.second + 1 << " 1.0" << std::endl
+        << std::endl;
+    mat_num++;
   }
 
   // Close file
@@ -74,12 +148,37 @@ int LovaszThetaProblem::build_initialization_file(
   Vector init_soln = clique_to_soln(init_clique, size);
 
   // Write to file as CSV
-  for (int i = 0; i < init_soln.size(); ++i) {
-    ofs << init_soln(i);
-    if (i < init_soln.size() - 1)
+  if (use_sparse) {
+    int n = size + 1;
+    int cols = 5;
+    Matrix M;
+    double frob;
+    do {
+      M = Matrix::Random(n, cols);
+      frob = M.norm();
+    } while (frob == 0.0);
+    // ensure Frobenius norm strictly less than 1
+    if (frob >= 1.0) {
+      M *= 0.999 / frob;
+    }
+    // write as CSV (rows)
+    for (int i = 0; i < n; ++i) {
+      for (int j = 0; j < cols; ++j) {
+        ofs << M(i, j);
+        if (j < cols - 1) ofs << ",";
+      }
       ofs << std::endl;
+    }
+    ofs << std::endl;
+    
+  } else {
+    for (int i = 0; i < init_soln.size(); ++i) {
+      ofs << init_soln(i);
+      if (i < init_soln.size() - 1)
+        ofs << std::endl;
+    }
+    ofs << std::endl;
   }
-  ofs << std::endl;
 
   // Close file
   ofs.close();
@@ -96,15 +195,17 @@ LovaszThetaSolution LovaszThetaProblem::optimize_cuhallar(
   std::string primal_out = cuhallar_params.primal_out;
   std::string dual_out = cuhallar_params.dual_out;
   std::string options = cuhallar_params.options;
-  // To call cuHALLaR, we need to generate the problem file for this graph
-  build_mc_hslr_problem(input_file);
+  // Generate the problem description
+  if (use_sparse) {
+    build_sparse_mc_hslr_problem(input_file);
+  } else {
+    build_dense_mc_hslr_problem(input_file);
+  }
   // Set up initial clique file if provided
   build_initialization_file(init_file, init_clique);
-  // Set up output file paths
   // Launch the child process
   bp::child c(bp::search_path("cuHallar"), "-i", input_file, "-p", primal_out,
               "-d", dual_out, "-w", init_file, "-c", options);
-
   // Wait for the process to exit and get the exit code
   c.wait();
   int result = c.exit_code();
@@ -175,11 +276,8 @@ LovaszThetaSolution LovaszThetaProblem::retrieve_cuhallar_solution() const {
       lag(static_cast<int>(i)) = temp_dual[i];
     }
     solution.lagrange = std::move(lag);
-    solution.primal_opt =
-        solution.lagrange.size() > 0 ? solution.lagrange(0) : 0.0;
   } else {
     solution.lagrange = Vector(); // empty
-    solution.primal_opt = 0.0;
   }
 
   primal_file.close();
