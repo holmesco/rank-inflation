@@ -80,8 +80,8 @@ int LovaszThetaProblem::build_sparse_mc_hslr_problem(
   // Sparse Formulation implements the problem in dual form, to leverage the
   // fact that there are fewer edges than non-edges
 
-  // Our variable size is now (n+1) because we need to add a dual variable
-  // for the trace constraint. Number of
+  // Our variable size is now (n+2) because we need to add a dual variable
+  // for the trace constraint.
   int n = graph.size() + 1;
   // "constraints" actually enumerate the variables in the solution matrix
   int m = edges.size() + graph.size();
@@ -95,7 +95,7 @@ int LovaszThetaProblem::build_sparse_mc_hslr_problem(
   // parameters: num constraints, problem size
   ofs << m << " " << n << std::endl;
   // constraint vector (diagonal cost terms)
-  for (int i = 0; i < n - 1; i++) {
+  for (int i = 0; i < graph.size(); i++) {
     ofs << "-1.0 ";
   }
   // constraint vector (off-diagonal cost terms)
@@ -103,20 +103,25 @@ int LovaszThetaProblem::build_sparse_mc_hslr_problem(
     ofs << "-2.0 ";
   }
   ofs << std::endl;
-  // Trace value
-  ofs << "1.0" << std::endl << std::endl;
+  // Trace value (set large to "remove" the constraint)
+  float trace_val_pri = n * 100.0;
+  float trace_val_dual = trace_val_pri;
+  ofs << trace_val_pri << std::endl << std::endl;
 
-  // objective (implements trace constraint)
+  // objective (implements trace constraint in the dual)
   ofs << "0 SP" << std::endl;
-  ofs << n << " " << n << " 1.0 " << std::endl << std::endl;
+  ofs << graph.size() + 1 << " " << graph.size() + 1 << " " << trace_val_dual
+      << std::endl
+      << std::endl;
 
   // matrix count
   int mat_num = 1;
   // constraints (diagonal elements)
-  for (int i = 0; i < n - 1; i++) {
+  for (int i = 0; i < graph.size(); i++) {
     ofs << mat_num << " SP" << std::endl;
     ofs << i + 1 << " " << i + 1 << " 1.0 " << std::endl;
     ofs << n << " " << n << " -1.0 " << std::endl << std::endl;
+
     mat_num++;
   }
   // constraints (offdiagonal elements)
@@ -150,7 +155,7 @@ int LovaszThetaProblem::build_initialization_file(
   // Write to file as CSV
   if (use_sparse) {
     int n = size + 1;
-    int cols = 5;
+    int cols = 1;
     Matrix M;
     double frob;
     do {
@@ -165,12 +170,13 @@ int LovaszThetaProblem::build_initialization_file(
     for (int i = 0; i < n; ++i) {
       for (int j = 0; j < cols; ++j) {
         ofs << M(i, j);
-        if (j < cols - 1) ofs << ",";
+        if (j < cols - 1)
+          ofs << ",";
       }
       ofs << std::endl;
     }
     ofs << std::endl;
-    
+
   } else {
     for (int i = 0; i < init_soln.size(); ++i) {
       ofs << init_soln(i);
@@ -197,6 +203,7 @@ LovaszThetaSolution LovaszThetaProblem::optimize_cuhallar(
   std::string options = cuhallar_params.options;
   // Generate the problem description
   if (use_sparse) {
+    options = "/workspace/parameters/cuhallar_params_sparse.cfg";
     build_sparse_mc_hslr_problem(input_file);
   } else {
     build_dense_mc_hslr_problem(input_file);
