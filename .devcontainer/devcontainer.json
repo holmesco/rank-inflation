@@ -1,16 +1,17 @@
 {
-  "name": "clippep-cert-dev",
+  "name": "clipperp-cert-dev",
   "build": {
     "context": "..",
     "dockerfile": "Dockerfile"
   },
   "runArgs": [
     "--gpus=all",
-    "--shm-size=16gb"
+    "--shm-size=16gb",
+    "--cap-add=SYS_PTRACE"
   ],
   "mounts": [
     "source=${localWorkspaceFolder},target=/workspace,type=bind",
-    "source=python_packages,target=/usr/local/lib/python3.10/site-packages,type=volume"
+    "source=python_packages,target=/opt/conda/lib/python3.10/site-packages,type=volume"
   ],
   "workspaceFolder": "/workspace",
   "customizations": {
@@ -18,7 +19,12 @@
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance",
-        "ms-toolsai.jupyter"
+        "ms-toolsai.jupyter",
+        "ms-vscode.cpptools",
+        "ms-vscode.cpptools-extension-pack",
+        "GitHub.vscode-pull-request-github",
+        "GitHub.copilot",
+        "ms-vscode.cmake-tools"
       ],
       "settings": {
         "python.defaultInterpreterPath": "/opt/conda/bin/python"

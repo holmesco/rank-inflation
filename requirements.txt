@@ -1,0 +1,5 @@
+scipy
+matplotlib
+pandas
+open3d
+pybind11-stubgen

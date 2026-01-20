@@ -22,7 +22,7 @@ LovaszThetaProblem::LovaszThetaProblem(const Graph &graph_in,
   }
   // Determine whether to use the sparse formulation based on number of
   // constraints that will appear in the problem
-  if (size + edges.size() < nonedges.size()) {
+  if ((size + edges.size() < nonedges.size()) && cuhallar_params.enable_sparse) {
     use_sparse = true;
   } else {
     use_sparse = false;

@@ -59,6 +59,8 @@ ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US:en
 ENV LC_ALL en_US.UTF-8
 
+# Install original clippe
+
 # Set up user inside container to avoid issues with permissions.
 ARG USERNAME=cho
 ARG USER_UID=1094
