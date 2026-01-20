@@ -8,6 +8,7 @@
 #include <cmath>
 #include <fstream>
 #include <iostream>
+#include <regex>
 #include <string>
 
 // include graph and rank reduction code.
@@ -21,9 +22,24 @@ struct CuhallarParams {
   std::string primal_out = "/workspace/tmp/primal_out.txt";
   std::string dual_out = "/workspace/tmp/dual_out.txt";
   std::string options = "/workspace/parameters/cuhallar_params.cfg";
+  std::string options_sparse = "/workspace/parameters/cuhallar_params_sparse.cfg";
+  std::string log_file = "/workspace/tmp/log.txt";
+  
 };
 
-// Object to store the low rank solution of a max clique SDP problem
+struct CuhallarStats {
+  double primal_obj;
+  double dual_obj;
+  double pd_gap;
+  double primal_infeasibility;
+  int adap_fista_calls;
+  int acg_iterations;
+  int fw_calls;
+  double primal_val_unscaled;
+  double run_time_seconds;
+};
+
+// Struct to store the low rank solution of a max clique SDP problem
 struct LovaszThetaSolution {
   // primal solution
   Eigen::MatrixXd Y;
@@ -31,7 +47,8 @@ struct LovaszThetaSolution {
   Eigen::VectorXd lagrange;
   // primal optimum
   float primal_opt;
-  // 
+  // solver stats
+  CuhallarStats stats;
 };
 
 // Object to encode the Lovasz-theta SDP problem.
@@ -70,7 +87,7 @@ public:
 private:
   // Build dense max clique formulation in hslr format for cuhallar
   int build_dense_mc_hslr_problem(const std::string &filepath) const;
-  
+
   // Build sparse max clique formulation in hslr format for cuhallar
   int build_sparse_mc_hslr_problem(const std::string &filepath) const;
 
@@ -80,7 +97,12 @@ private:
 
   // Retrieve the solution from the cuhallar output files
   // Assumes that outputs are in the root directory with default names
-  LovaszThetaSolution retrieve_cuhallar_solution() const;
+  LovaszThetaSolution
+  retrieve_cuhallar_solution(std::vector<std::string> log) const;
+
+  // Helper for parsing info from cuhallar
+  CuhallarStats
+  parse_solver_output(const std::vector<std::string> &lines) const;
 };
 
 } // namespace clipperplus

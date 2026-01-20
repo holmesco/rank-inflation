@@ -61,10 +61,10 @@ int LovaszThetaProblem::build_dense_mc_hslr_problem(
 
   // constraints
   for (int i = 0; i < m; ++i) {
-    Edge e = edges[i];
+    Edge e = nonedges[i];
     ofs << std::endl;
     ofs << i + 1 << " SP" << std::endl;
-    ofs << edges[i].first + 1 << " " << edges[i].second + 1 << " 1.0"
+    ofs << nonedges[i].first + 1 << " " << nonedges[i].second + 1 << " 1.0"
         << std::endl;
   }
 
@@ -155,7 +155,7 @@ int LovaszThetaProblem::build_initialization_file(
   // Write to file as CSV
   if (use_sparse) {
     int n = size + 1;
-    int cols = 1;
+    int cols = std::max(size / 10, 1);
     Matrix M;
     double frob;
     do {
@@ -203,28 +203,42 @@ LovaszThetaSolution LovaszThetaProblem::optimize_cuhallar(
   std::string options = cuhallar_params.options;
   // Generate the problem description
   if (use_sparse) {
-    options = "/workspace/parameters/cuhallar_params_sparse.cfg";
+    options = cuhallar_params.options_sparse;
     build_sparse_mc_hslr_problem(input_file);
   } else {
     build_dense_mc_hslr_problem(input_file);
   }
+
   // Set up initial clique file if provided
   build_initialization_file(init_file, init_clique);
-  // Launch the child process
+  // Launch the child process and capture stdout/stderr
+  bp::ipstream os;
   bp::child c(bp::search_path("cuHallar"), "-i", input_file, "-p", primal_out,
-              "-d", dual_out, "-w", init_file, "-c", options);
+              "-d", dual_out, "-w", init_file, "-c", options, bp::std_out > os,
+              bp::std_err > bp::null);
+
+  std::vector<std::string> log;
+  std::string line;
+  while (c.running()) {
+    while (std::getline(os, line) && !line.empty()) {
+      log.push_back(line);
+      std::cout << line << std::endl;
+    }
+  }
+
   // Wait for the process to exit and get the exit code
   c.wait();
   int result = c.exit_code();
   std::cout << "Process finished with code: " << result << std::endl;
 
   // retrieve solution from output files
-  LovaszThetaSolution solution = retrieve_cuhallar_solution();
+  LovaszThetaSolution solution = retrieve_cuhallar_solution(log);
 
   return solution;
 }
 
-LovaszThetaSolution LovaszThetaProblem::retrieve_cuhallar_solution() const {
+LovaszThetaSolution LovaszThetaProblem::retrieve_cuhallar_solution(
+    const std::vector<std::string> log) const {
   // Read primal and dual outputs into Eigen types
   LovaszThetaSolution solution;
   std::ifstream primal_file(cuhallar_params.primal_out);
@@ -290,7 +304,53 @@ LovaszThetaSolution LovaszThetaProblem::retrieve_cuhallar_solution() const {
   primal_file.close();
   dual_file.close();
 
+  // process logged data
+  solution.stats = parse_solver_output(log);
+
   return solution;
+}
+
+CuhallarStats LovaszThetaProblem::parse_solver_output(
+    const std::vector<std::string> &lines) const {
+  CuhallarStats stats{};
+
+  // Regex patterns
+  const std::regex primal_obj_re(R"(Primal Obj\s*=\s*([-+eE0-9\.]+))");
+  const std::regex dual_obj_re(R"(Dual Obj\s*=\s*([-+eE0-9\.]+))");
+  const std::regex pd_gap_re(R"(PD Gap\s*=\s*([-+eE0-9\.]+))");
+  const std::regex primal_infeas_re(
+      R"(Primal infeasibility\s*=\s*([-+eE0-9\.]+))");
+  const std::regex adap_fista_re(R"(#ADAP FISTA Calls:\s*(\d+))");
+  const std::regex acg_iter_re(R"(#ACG Iterations:\s*(\d+))");
+  const std::regex fw_calls_re(R"(#FW Calls:\s*(\d+))");
+  const std::regex primal_unscaled_re(
+      R"(Primal val unscaled\s*=\s*([-+eE0-9\.]+))");
+  const std::regex runtime_re(R"(Run time\s*=\s*([-+eE0-9\.]+)\s*seconds)");
+
+  std::smatch match;
+
+  for (const auto &line : lines) {
+    if (std::regex_search(line, match, primal_obj_re))
+      stats.primal_obj = std::abs(std::stod(match[1]));
+    else if (std::regex_search(line, match, dual_obj_re))
+      stats.dual_obj = std::abs(std::stod(match[1]));
+    else if (std::regex_search(line, match, pd_gap_re))
+      stats.pd_gap = std::stod(match[1]);
+    else if (std::regex_search(line, match, primal_infeas_re))
+      stats.primal_infeasibility = std::stod(match[1]);
+    else if (std::regex_search(line, match, adap_fista_re))
+      stats.adap_fista_calls = std::stoi(match[1]);
+    else if (std::regex_search(line, match, acg_iter_re))
+      stats.acg_iterations = std::stoi(match[1]);
+    else if (std::regex_search(line, match, fw_calls_re))
+      stats.fw_calls = std::stoi(match[1]);
+    else if (std::regex_search(line, match, primal_unscaled_re))
+      stats.primal_val_unscaled = std::abs(std::stod(match[1]));
+    else if (std::regex_search(line, match, runtime_re))
+      stats.run_time_seconds = std::stod(match[1]);
+  }
+
+  return stats;
 }
 
 std::vector<int> LovaszThetaProblem::soln_to_clique(const Vector &soln) const {

@@ -68,14 +68,13 @@ std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph,
     // Generate reduced graph
     auto graph_sdp = Graph(graph.get_adj_matrix()(keep_lt, keep_lt));
     // run optimization
-    auto lovasz_sdp =
-        LovaszThetaProblem(graph_sdp, params.cuhallar_params);
+    auto lovasz_sdp = LovaszThetaProblem(graph_sdp, params.cuhallar_params);
     std::cout << "Preprocessing complete..." << std::endl;
     auto soln = lovasz_sdp.optimize_cuhallar(optimal_clique);
     // Check if LT bound is satisfied
     // NOTE: Hardcoded 1 because the LT bound is continuous, but still upper
     // bounding we obtain a valid certificate as long as this inequality holds.
-    if (soln.primal_opt < optimal_clique.size() + 1.0) {
+    if (soln.stats.primal_obj < optimal_clique.size() + 1.0) {
       certificate = CERTIFICATE::LOVASZ_THETA_BOUND;
     } else { // SDP potentially found a larger clique.
       // Apply rank reduction, if necessary
