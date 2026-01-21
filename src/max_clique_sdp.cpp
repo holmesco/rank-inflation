@@ -22,7 +22,8 @@ LovaszThetaProblem::LovaszThetaProblem(const Graph &graph_in,
   }
   // Determine whether to use the sparse formulation based on number of
   // constraints that will appear in the problem
-  if ((size + edges.size() < nonedges.size()) && cuhallar_params.enable_sparse) {
+  if ((size + edges.size() < nonedges.size()) &&
+      cuhallar_params.enable_sparse) {
     use_sparse = true;
   } else {
     use_sparse = false;
@@ -211,16 +212,20 @@ LovaszThetaSolution LovaszThetaProblem::optimize_cuhallar(
 
   // Set up initial clique file if provided
   build_initialization_file(init_file, init_clique);
-  // Launch the child process and capture stdout/stderr
-  bp::ipstream os;
+  // output file stream
+  bp::ipstream out_strm;
+  // Rescale constraints by size of graph squared, so that feasibility is
+  // ensured even when clique is large
+  std::string scale_A = std::to_string(graph.size());
+  // Launch the child process
   bp::child c(bp::search_path("cuHallar"), "-i", input_file, "-p", primal_out,
-              "-d", dual_out, "-w", init_file, "-c", options, bp::std_out > os,
-              bp::std_err > bp::null);
+              "-d", dual_out, "-w", init_file, "-c", options, "--scale_A",
+              scale_A, bp::std_out > out_strm);
 
   std::vector<std::string> log;
   std::string line;
   while (c.running()) {
-    while (std::getline(os, line) && !line.empty()) {
+    while (std::getline(out_strm, line) && !line.empty()) {
       log.push_back(line);
       std::cout << line << std::endl;
     }

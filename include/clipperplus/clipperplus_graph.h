@@ -3,6 +3,7 @@
 #include <Eigen/Dense>
 #include <memory.h>
 #include <vector>
+#include <iostream>
 
 
 namespace clipperplus
@@ -46,6 +47,7 @@ public:
     Graph induced(const std::vector<Node> &nodes) const;
 
     int max_core_number() const;
+    int min_core_number() const;
     const std::vector<int> &get_core_numbers() const;
     const std::vector<Node> &get_core_ordering() const;
     

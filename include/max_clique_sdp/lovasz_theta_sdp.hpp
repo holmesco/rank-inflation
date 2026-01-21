@@ -22,9 +22,10 @@ struct CuhallarParams {
   std::string primal_out = "/workspace/tmp/primal_out.txt";
   std::string dual_out = "/workspace/tmp/dual_out.txt";
   std::string options = "/workspace/parameters/cuhallar_params.cfg";
-  std::string options_sparse = "/workspace/parameters/cuhallar_params_sparse.cfg";
-  std::string log_file = "/workspace/tmp/log.txt";
-  
+  std::string options_sparse =
+      "/workspace/parameters/cuhallar_params_sparse.cfg";
+  // flag enabling sparse implementation
+  bool enable_sparse = false;
 };
 
 struct CuhallarStats {

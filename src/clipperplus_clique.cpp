@@ -20,12 +20,11 @@ std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph,
   auto k_core_bound = graph.max_core_number() + 1;
   // Get the max clique from the heuristic algorithm
   auto heuristic_clique = find_heuristic_clique(graph);
-  if (heuristic_clique.size() == std::min({k_core_bound, chromatic_welsh})) {
+  if (heuristic_clique.size() >= std::min({k_core_bound, chromatic_welsh})) {
     return {heuristic_clique, CERTIFICATE::HEURISTIC};
   }
   // prune the graph based on core numbers
   auto [keep, keep_pos] = graph.get_pruned_vertices(heuristic_clique.size());
-
   // get the pruned adjacency matrix and augment with identity
   Eigen::MatrixXd M_pruned = graph.get_adj_matrix()(keep, keep);
   M_pruned.diagonal().setOnes();
@@ -62,6 +61,9 @@ std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph,
   // Lovasz-Theta SDP Optimization
   if (certificate == CERTIFICATE::NONE && params.check_lovasz_theta) {
     std::cout << "Running Lovasz-Theta SDP optimization..." << std::endl;
+    std::cout << "Min K-Core: " << graph.min_core_number() << std::endl;
+    std::cout << "Local Max Clique Size: " << optimal_clique.size() << std::endl;
+    
     // Reprune based on current largest clique
     auto [keep_lt, keep_pos_lt] =
         graph.get_pruned_vertices(optimal_clique.size());

@@ -22,17 +22,19 @@ namespace clipperplus
 
     bool Graph::is_clique(std::vector<Node> clique) const
     {
+        bool result = true;
         for (int i = 0; i < clique.size(); i++)
         {
             for (int j = i + 1; j < clique.size(); j++)
             {
                 if (!is_edge(clique[i], clique[j]))
-                {
-                    return false;
+                {   
+                    std::cout << "Edge (" << i << ", " << j << ") in clique but not valid for graph." << std::endl;
+                    result = false;
                 }
             }
         }
-        return true;
+        return result;
     }
 
     const std::vector<Node> &Graph::neighbors(Node v) const
@@ -119,6 +121,15 @@ namespace clipperplus
             calculate_kcores();
         }
         return kcore[kcore_ordering.back()];
+    }
+
+    int Graph::min_core_number() const
+    {
+        if (kcore.empty())
+        {
+            calculate_kcores();
+        }
+        return kcore[kcore_ordering.front()];
     }
 
     const std::vector<int> &Graph::get_core_numbers() const

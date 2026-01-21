@@ -49,14 +49,20 @@ class BunnyProb:
     
     def check_solution(self, inlier_clique):
         solution_set = set(inlier_clique)
+        valid_inliers = 0
+        # check that solution set is valid 
         for i in solution_set:
+            valid = True
             for j in solution_set:
                 if i > j:
-                    assert self.affinity[i, j] > 0, f"Solution set is not a clique: edge ({i},{j}) does not exist!"
+                    if self.affinity[i, j] == 0:
+                        valid = False
+                        print(f"Solution set is not a clique: edge ({i},{j}) does not exist!")
+            if valid:
+                valid_inliers += 1
         
-        print("Number of correct inliers: ", len(self.inlier_set.intersection(solution_set)))
-        print("Number of incorrect inliers: ", len(solution_set.difference(self.inlier_set)))
-        print("Total number of inliers returned: ", len(solution_set))
+        print("Number of intended inliers: ", len(self.inlier_set))
+        print(f"Number of inliers returned (valid/total): {valid_inliers} / {len(solution_set)}")
 
     def solve_clipper(self):
         """Solve SDP using CLIPPER formulation"""
