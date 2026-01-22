@@ -64,6 +64,10 @@ namespace clipperplus
             }
         }
 
+        // ensure uniqueness
+        auto unique_clique = std::unordered_set(max_clique.begin(), max_clique.end());
+        max_clique.assign(unique_clique.begin(), unique_clique.end());
+
         return max_clique;
     }
 

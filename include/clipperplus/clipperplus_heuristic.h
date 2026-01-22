@@ -5,6 +5,7 @@
 #include <numeric>
 #include <chrono>
 #include <Eigen/Dense>
+#include <unordered_set>
 
 #include "clipperplus/clipperplus_graph.h"
 

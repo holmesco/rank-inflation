@@ -84,6 +84,7 @@ class BunnyProb:
         # run 
         csize, clique, cert = find_clique(self.affinity.todense(),params)
         print(f"Clipper+ returned certificate {cert}")
+        print(clique)
         return clique
             
 if __name__ == "__main__":

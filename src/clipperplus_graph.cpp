@@ -228,7 +228,7 @@ namespace clipperplus
                 auto pos_w = bin[degree[u]];
                 auto w = kcore_ordering[pos_w];
 
-                // swap their pose and order
+                // swap their pose and order so that u is at the beginning of the bin
                 if (w != u)
                 {
                     kcore_ordering[pos[u]] = w;
