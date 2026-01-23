@@ -3,6 +3,7 @@
 #include <Eigen/Dense>
 #include <chrono>
 #include <iostream>
+#include <memory>
 
 #include "clipperplus/clipperplus_graph.h"
 #include "clipperplus/clipperplus_heuristic.h"
@@ -49,7 +50,23 @@ inline std::string to_string(CERTIFICATE cert) {
   }
 }
 
+struct SolutionInfo {
+  // min k-core number of the original graph
+  int min_kcore = -1;
+  // Lovasz-Theta SDP solution information
+  float primal_opt = -1;
+  float dual_opt = -1;
+  float lt_opt_time = -1;
+  // SDP Size
+  int lt_problem_size = -1;
+  // number of constraints in the SDP
+  int lt_num_constraints = -1;
+  // size of the local optimum found before SDP
+  int local_opt_size = -1;
+};
+
 std::pair<std::vector<Node>, CERTIFICATE>
-find_clique(const Graph &graph, ClipperParams params = ClipperParams());
+find_clique(const Graph &graph, ClipperParams params = ClipperParams(),
+            std::shared_ptr<SolutionInfo> sol_info = nullptr);
 
 } // namespace clipperplus

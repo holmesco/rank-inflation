@@ -11,8 +11,8 @@ Author: kaveh fathian (kavehfathian@gmail.com)
 
 namespace clipperplus {
 
-std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph,
-                                                      ClipperParams params) {
+std::pair<std::vector<Node>, CERTIFICATE>
+find_clique(const Graph &graph, ClipperParams params, std::shared_ptr<SolutionInfo> info) {
   int n = graph.size();
   // generate the chromatic number upper bound
   auto chromatic_welsh = estimate_chromatic_number_welsh_powell(graph);
@@ -20,50 +20,56 @@ std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph,
   auto k_core_bound = graph.max_core_number() + 1;
   // Get the max clique from the heuristic algorithm
   auto heuristic_clique = find_heuristic_clique(graph);
-  if (heuristic_clique.size() >= std::min({k_core_bound, chromatic_welsh})) {
-    return {heuristic_clique, CERTIFICATE::HEURISTIC};
-  }
-  // prune the graph based on core numbers
-  auto [keep, keep_pos] = graph.get_pruned_vertices(heuristic_clique.size());
-  // get the pruned adjacency matrix and augment with identity
-  Eigen::MatrixXd M_pruned = graph.get_adj_matrix()(keep, keep);
-  M_pruned.diagonal().setOnes();
-
-  // initialize using a vector orthogonal to the heuristic clique
-  Eigen::VectorXd u0 = Eigen::VectorXd::Ones(keep.size());
-  for (auto v : heuristic_clique) {
-    assert(keep_pos[v] >= 0);
-    u0(keep_pos[v]) = 0;
-  }
-  u0.normalize();
-  // Run optimization
-  auto clique_optim_pruned =
-      clipperplus::clique_optimization(M_pruned, u0, params.optim_params);
+  // initialize clique and certificate
+  auto certificate = CERTIFICATE::NONE;
   std::vector<Node> optimal_clique;
-  if (clique_optim_pruned.size() < heuristic_clique.size()) {
-    // if heuristic clique is larger, return it
+  if (heuristic_clique.size() >= std::min({k_core_bound, chromatic_welsh})) {
     optimal_clique = heuristic_clique;
-  } else {
-    // map back to original graph nodes
-    for (auto v : clique_optim_pruned) {
-      assert(v >= 0 && v < keep.size());
-      optimal_clique.push_back(keep[v]);
+    certificate = CERTIFICATE::HEURISTIC;
+  }else{
+    // prune the graph based on core numbers
+    auto [keep, keep_pos] = graph.get_pruned_vertices(heuristic_clique.size());
+    // get the pruned adjacency matrix and augment with identity
+    Eigen::MatrixXd M_pruned = graph.get_adj_matrix()(keep, keep);
+    M_pruned.diagonal().setOnes();
+
+    // initialize using a vector orthogonal to the heuristic clique
+    Eigen::VectorXd u0 = Eigen::VectorXd::Ones(keep.size());
+    for (auto v : heuristic_clique) {
+      assert(keep_pos[v] >= 0);
+      u0(keep_pos[v]) = 0;
+    }
+    u0.normalize();
+    // Run optimization
+    auto clique_optim_pruned =
+        clipperplus::clique_optimization(M_pruned, u0, params.optim_params);
+    
+    if (clique_optim_pruned.size() < heuristic_clique.size()) {
+      // if heuristic clique is larger, return it
+      optimal_clique = heuristic_clique;
+    } else {
+      // map back to original graph nodes
+      for (auto v : clique_optim_pruned) {
+        assert(v >= 0 && v < keep.size());
+        optimal_clique.push_back(keep[v]);
+      }
+    }
+    // Check if we have a certificate
+    if (optimal_clique.size() == k_core_bound) {
+      certificate = CERTIFICATE::CORE_BOUND;
+    } else if (optimal_clique.size() == chromatic_welsh) {
+      certificate = CERTIFICATE::CHROMATIC_BOUND;
     }
   }
-
-  auto certificate = CERTIFICATE::NONE;
-  if (optimal_clique.size() == k_core_bound) {
-    certificate = CERTIFICATE::CORE_BOUND;
-  } else if (optimal_clique.size() == chromatic_welsh) {
-    certificate = CERTIFICATE::CHROMATIC_BOUND;
-  }
-
   // Lovasz-Theta SDP Optimization
+  LovaszThetaSolution soln;
+  int local_opt_size = optimal_clique.size();
   if (certificate == CERTIFICATE::NONE && params.check_lovasz_theta) {
     std::cout << "Running Lovasz-Theta SDP optimization..." << std::endl;
     std::cout << "Min K-Core: " << graph.min_core_number() << std::endl;
-    std::cout << "Local Max Clique Size: " << optimal_clique.size() << std::endl;
-    
+    std::cout << "Local Max Clique Size: " << optimal_clique.size()
+              << std::endl;
+
     // Reprune based on current largest clique
     auto [keep_lt, keep_pos_lt] =
         graph.get_pruned_vertices(optimal_clique.size());
@@ -72,7 +78,7 @@ std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph,
     // run optimization
     auto lovasz_sdp = LovaszThetaProblem(graph_sdp, params.cuhallar_params);
     std::cout << "Preprocessing complete..." << std::endl;
-    auto soln = lovasz_sdp.optimize_cuhallar(optimal_clique);
+    soln = lovasz_sdp.optimize_cuhallar(optimal_clique);
     // Check if LT bound is satisfied
     // NOTE: Hardcoded 1 because the LT bound is continuous, but still upper
     // bounding we obtain a valid certificate as long as this inequality holds.
@@ -95,13 +101,26 @@ std::pair<std::vector<Node>, CERTIFICATE> find_clique(const Graph &graph,
         // map back to original graph nodes
         optimal_clique.clear();
         for (auto v : clique_sdp) {
-          optimal_clique.push_back(keep[v]);
+          optimal_clique.push_back(keep_lt[v]);
         }
         // re-check for certificate
         if (soln.primal_opt < optimal_clique.size() + 1.0) {
           certificate = CERTIFICATE::LOVASZ_THETA_SOLN_BOUND;
         }
       }
+    }
+
+    // add solution info if requested
+    if (info != nullptr) {
+      info->primal_opt = soln.stats.primal_obj;
+      info->dual_opt = soln.stats.dual_obj;
+      info->lt_opt_time = soln.stats.run_time_seconds;
+      info->lt_problem_size = lovasz_sdp.size;
+      info->lt_num_constraints = lovasz_sdp.use_sparse
+                                  ? lovasz_sdp.edges.size() + lovasz_sdp.size
+                                  : lovasz_sdp.nonedges.size();
+      info->min_kcore = graph.min_core_number();
+      info->local_opt_size = local_opt_size;
     }
   }
 

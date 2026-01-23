@@ -1,184 +1,131 @@
-import os
 import numpy as np
-import scipy.sparse as sp
-from scipy.spatial.transform import Rotation
-import networkx as nx
-import matplotlib.pyplot as plt
-from time import time
+from matplotlib import pyplot as plt
+
+from .bunny_test import BunnyProb 
 import pandas as pd
-import seaborn as sns
+from datetime import datetime
 
-from src.cgraph.cgraph import ConsistencyGraphProb, generate_bunny_dataset, get_affinity_from_points, prune_affinity, PARAMS_SCS_DFLT
-from src.cgraph.rank_reduction import get_low_rank_factor
-from src.cgraph.utils import generate_affinity
+def run_outlier_trials(outlier_rates=(0.95, 0.97, 0.99), n_trials=5, m=200, n1=200, n2o=0, sigma=0.01, check_lovasz_theta=True):
+    rows = []
+    for outr in outlier_rates:
+        for seed in range(n_trials):
+            prob = BunnyProb(m=m, n1=n1, n2o=n2o, outrat=outr, sigma=sigma, seed=seed)
+            clique, info, cert = prob.solve_clipperplus(check_lovasz_theta=check_lovasz_theta)
+            
+            clique_size = len(clique)
 
+            if hasattr(info, "__dict__"):
+                info_dict = dict(info.__dict__)
+            else:
+                info_dict = {k: getattr(info, k) for k in dir(info) if not k.startswith("_") and not callable(getattr(info, k))}
+            valid = prob.check_solution(clique)
+            
+            row = {"outlier_rate": outr, "seed": seed, "clique_size": clique_size, "cert": cert, "valid": valid}
+            row.update(info_dict)
+            rows.append(row)
 
+    return pd.DataFrame(rows)
 
+def plot_lt_opt_time(csv_file, save_path=None, show=False):
+    """
+    Load a CSV produced by run_outlier_trials and plot a box plot of lp_opt_time vs outlier_rate.
+    csv_file: path to CSV
+    save_path: optional path to save the figure (PNG/PDF)
+    show: whether to call plt.show()
+    Returns the matplotlib Figure.
+    """
+    df = pd.read_csv(csv_file)
+    if "lt_opt_time" not in df.columns or "outlier_rate" not in df.columns:
+        raise ValueError("CSV must contain 'lt_opt_time' and 'outlier_rate' columns")
 
-def solve_prob(affinity):
-    # Generate problem
-    prob = ConsistencyGraphProb(affinity=affinity)
-    # Set up SCS options
-    scs_params = PARAMS_SCS_DFLT
-    scs_params['verbose'] = False
-    # Solve
-    homog = True
-    return prob.solve_scs_sparse(setup_kwargs=scs_params, homog=homog)
+    # Ensure outlier_rate is treated as a categorical variable for plotting order
+    df["outlier_rate_cat"] = pd.Categorical(df["outlier_rate"], categories=sorted(df["outlier_rate"].unique()))
 
+    fig, ax = plt.subplots(figsize=(8, 6))
+    # Use pandas boxplot grouped by the categorical values
+    df.boxplot(column="lt_opt_time", by="outlier_rate_cat", ax=ax, grid=False)
+    ax.set_xlabel("Outlier rate")
+    ax.set_ylabel("LT optimization time (seconds)")
+    ax.set_title("LT optimization time by outlier rate")
+    plt.suptitle("")  # remove the automatic suptitle from pandas
+    plt.tight_layout()
 
-def run_analysis(analysis=1):
-
-    outputs = []
-    if analysis == 1:
-        n = 1000
-        overlap = 5
-        csizes = np.logspace(np.log10(10), np.log10(200), 10, dtype=int)
-        for csize in csizes:
-            print(f"Running with clique size {csize}")
-            X, info = solve_prob(generate_affinity(
-                n=n, csize=csize, overlap=overlap))
-            # sort output data
-            output = info['info']
-            output['csize'] = csize
-            output['n'] = n
-            output['overlap'] = overlap
-            outputs.append(output)
-
-    df = pd.DataFrame(outputs)
-    df.to_csv(f"examples/results/analysis_{analysis}.csv")
-
-
-def run_analysis_pp(analysis=1):
-    df = pd.read_csv(f"examples/results/analysis_{analysis}.csv")
-    df['cone_time_avg'] = df['cone_time'] / (df['n'] / df['csize'])
-    if analysis == 1:
-        df.plot(x='csize', y=['solve_time', 'cone_time',
-                'cone_time_avg', 'lin_sys_time'], loglog=True)
-        plt.title('Analysis 1 - Graph size = 1000')
-        plt.ylabel('Time (ms)')
-        plt.xlabel('Clique Size')
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    if show:
         plt.show()
 
+    return fig
 
-def run_prune_analysis():
-    """Analyze how pruning via k-core changes the properties of the problem"""
+def plot_time_vs_constraints(csv_file, save_path=None, show=False):
+    """
+    Load a CSV produced by run_outlier_trials and plot a box plot of lp_opt_time vs outlier_rate.
+    csv_file: path to CSV
+    save_path: optional path to save the figure (PNG/PDF)
+    show: whether to call plt.show()
+    Returns the matplotlib Figure.
+    """
+    df = pd.read_csv(csv_file)
+    
+    fig, ax = plt.subplots(figsize=(8, 6))
+    # Use pandas boxplot grouped by the categorical values
+    df.plot.scatter(x="lt_num_constraints", y="lt_opt_time",ax=ax, grid=True)
+    ax.set_xlabel("number of constraints")
+    ax.set_ylabel("LT optimization time (seconds)")
+    ax.set_title("LT optimization time by number of constraints")
+    plt.suptitle("")  # remove the automatic suptitle from pandas
+    plt.tight_layout()
 
-    # outrates = np.linspace(0.1, 0.95, 30)
-    outrates = 1-np.logspace(np.log10(0.1), np.log10(0.95), 30)
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    if show:
+        plt.show()
 
-    data = []
-    clq_size_data = []
-    for outrate in outrates:
-        affinity, clipper = get_affinity(outrate, mult=5, threshold=0.5)
-        for pruned in [False, True]:
-            if pruned:
-                # run clipper to get lower bound on max clique size
-                clipper.solve()
-                soln = clipper.get_solution()
-                max_clq_sz = len(soln.nodes)
-                # prune the matrix
-                affinity_pr, _ = prune_affinity(affinity, max_clq_sz)
-            else:
-                affinity_pr = affinity
-                max_clq_sz = 0
+    return fig
 
-            # Create graph problems to run symbolic factorization
-            prob = ConsistencyGraphProb(affinity=affinity_pr)
-            # Get clique sizes
-            clq_sizes = [len(c) for c in prob.cliques]
-            num_vars_p = np.sum([n*(n+1)/2 for n in clq_sizes])
-            # Get the number of constraints in the original problem.
-            num_cons = (affinity_pr.shape[0]**2 - affinity_pr.nnz)/2 + 1
+def plot_time_vs_clique_size(csv_file, save_path=None, show=False):
+    """
+    Load a CSV produced by run_outlier_trials and plot a box plot of lp_opt_time vs outlier_rate.
+    csv_file: path to CSV
+    save_path: optional path to save the figure (PNG/PDF)
+    show: whether to call plt.show()
+    Returns the matplotlib Figure.
+    """
+    df = pd.read_csv(csv_file)
+    df = df[df["lt_problem_size"]>0]
+    df["clq_ratio"] = df["clique_size"]/df["lt_problem_size"]
+    
+    fig, ax = plt.subplots(figsize=(8, 6))
+    # Use pandas boxplot grouped by the categorical values
+    df.plot.scatter(x="clq_ratio", y="lt_opt_time",ax=ax, grid=True)
+    ax.set_xlabel("Max Clique Size / LT Problem Size")
+    ax.set_ylabel("LT optimization time (seconds)")
+    ax.set_yscale("log")
+    ax.set_xscale("log")
+    ax.set_title("LT optimization time by clique size")
+    plt.suptitle("")  # remove the automatic suptitle from pandas
+    plt.tight_layout()
 
-            data.append(dict(n1=affinity.shape[0],
-                             n2=affinity_pr.shape[0],
-                             max_clq=np.max(clq_sizes),
-                             mean_clq=np.mean(clq_sizes),
-                             min_clq=np.min(clq_sizes),
-                             num_clqs=len(clq_sizes),
-                             num_vars_p=num_vars_p,
-                             num_cons=num_cons,
-                             pruned=pruned,
-                             outrate=outrate,
-                             soln_clq_sz=max_clq_sz,
-                             )
-                        )
-            for sz in clq_sizes:
-                clq_size_data.append(dict(outrate=outrate,
-                                          clq_size=sz,
-                                          pruned=pruned))
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches="tight")
+    if show:
+        plt.show()
 
-    df = pd.DataFrame(data)
-    df.to_csv(f"examples/results/pruning_analysis_summary.csv")
-    df = pd.DataFrame(clq_size_data)
-    df.to_csv(f"examples/results/pruning_analysis_raw.csv")
-
-
-def prune_analysis_pp(filename="examples/results/pruning_analysis_summary.csv", rawfile="examples/results/pruning_analysis_raw.csv"):
-    """Generate plots for pruning analysis"""
-    df = pd.read_csv(filename)
-
-    fig, axs = plt.subplots(4, 1)
-    sns.lineplot(df, x="outrate", y="num_clqs",
-                 hue="pruned", markers=True, ax=axs[0])
-    axs[0].set_xlabel('outlier rate')
-    axs[0].set_ylabel('num cliques')
-    sns.lineplot(df, x="outrate", y="max_clq",
-                 hue="pruned", markers=True, ax=axs[1])
-    axs[1].set_xlabel('outlier rate')
-    axs[1].set_ylabel('max SDP var')
-    # sns.lineplot(df, x="outrate", y="mean_clq",
-    #              hue="pruned", markers=True, ax=axs[2])
-    # axs[2].set_xlabel('outlier rate')
-    # axs[2].set_ylabel('avg clique size')
-    sns.lineplot(df, x="outrate", y="n2",
-                 hue="pruned", markers=True, ax=axs[2])
-    axs[2].set_xlabel('outlier rate')
-    axs[2].set_ylabel('problem size')
-    sns.lineplot(df, x="outrate", y="num_cons",
-                 hue="pruned", markers=True, ax=axs[3])
-    axs[3].set_xlabel('outlier rate')
-    axs[3].set_ylabel('num constraints')
-    axs[3].set_yscale('log')
-
-    # # Make violin plots
-    # df_raw = pd.read_csv(rawfile)
-    # plt.figure()
-    # sns.violinplot(df_raw, x='outrate', y='clq_size', hue="pruned")
-    # plt.xlabel('Clique Size Dist')
-    # plt.ylabel('Outlier Rate')
-
-    plt.show()
+    return fig
 
 
-def get_affinity(outrat, mult=2, threshold=False):
-    # Set up common variables for tests
-    m = 100*mult
-    n1 = 100*mult
-    n2o = 10*mult
-    sigma = 0.01
-    pcfile = 'examples/data/bun10k.ply'
-    T_21 = np.eye(4)
-    T_21[0:3, 0:3] = Rotation.random().as_matrix()
-    T_21[0:3, 3] = np.random.uniform(low=-5, high=5, size=(3,))
-    # Generate dataset
-    D1, D2, Agt, A = generate_bunny_dataset(
-        pcfile, m, n1, n2o, outrat, sigma, T_21
-    )
-    # Generate affinity
-    affinity, clipper = get_affinity_from_points(
-        D1, D2, A, threshold=threshold)
-
-    return affinity, clipper
+def generate_data():
+    outlier_rates = (0.5,0.6, 0.7, 0.8, 0.9)
+    df = run_outlier_trials(outlier_rates=outlier_rates)
+    print(df)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    outname = f"bunny_outlier_trials_lower_{ts}.csv"
+    df.to_csv(outname, index=False)
+    print(f"Saved timestamped CSV: {outname}")
 
 
 if __name__ == "__main__":
-
-    # Analysis on clique runtime
-    # run_analysis()
-    # run_analysis_pp()
-
-    # Analysis on the effect of pruning
-    run_prune_analysis()
-    prune_analysis_pp()
-
+    # plot_lt_opt_time("bunny_outlier_trials_20260123_032904.csv", save_path="lt_opt_time_boxplot.png")
+    plot_time_vs_constraints("combined.csv", save_path="time_vs_constraints.png")
+    # plot_time_vs_clique_size("combined.csv", save_path="time_vs_clq_size.png")
+    

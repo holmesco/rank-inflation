@@ -4,8 +4,9 @@ from time import time
 from matplotlib import pyplot as plt
 
 from .utils import generate_bunny_dataset, get_affinity_from_points 
-from clipperpluspy import ClipperParams, find_clique
+from clipperpluspy import ClipperParams, find_clique, SolutionInfo
 import argparse
+import pandas as pd
 
 class BunnyProb:
     def __init__(
@@ -63,6 +64,8 @@ class BunnyProb:
         
         print("Number of intended inliers: ", len(self.inlier_set))
         print(f"Number of inliers returned (valid/total): {valid_inliers} / {len(solution_set)}")
+        
+        return valid_inliers == len(solution_set)
 
     def solve_clipper(self):
         """Solve SDP using CLIPPER formulation"""
@@ -82,10 +85,13 @@ class BunnyProb:
         params.check_lovasz_theta=check_lovasz_theta
         params.cuhallar_params.options="/workspace/parameters/cuhallar_params_inexact.cfg"
         # run 
-        csize, clique, cert = find_clique(self.affinity.todense(),params)
+        info = SolutionInfo()
+        csize, clique, cert = find_clique(self.affinity.todense(),params,info)
         print(f"Clipper+ returned certificate {cert}")
         print(clique)
-        return clique
+        return clique, info, cert
+
+
             
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Bunny test parameters")

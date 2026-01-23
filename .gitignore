@@ -11,3 +11,4 @@ venv/
 *.asv
 *.pyc
 *.png
+*.csv

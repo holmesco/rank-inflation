@@ -72,8 +72,23 @@ PYBIND11_MODULE(clipperpluspy, m) {
       .def_readwrite("rank_red_params",
                      &clipperplus::ClipperParams::rank_red_params);
 
+  // SolutionInfo
+  py::class_<clipperplus::SolutionInfo,
+             std::shared_ptr<clipperplus::SolutionInfo>>(m, "SolutionInfo")
+      .def(py::init<>())
+      .def_readwrite("min_kcore", &clipperplus::SolutionInfo::min_kcore)
+      .def_readwrite("primal_opt", &clipperplus::SolutionInfo::primal_opt)
+      .def_readwrite("dual_opt", &clipperplus::SolutionInfo::dual_opt)
+      .def_readwrite("lt_opt_time", &clipperplus::SolutionInfo::lt_opt_time)
+      .def_readwrite("lt_problem_size",
+                     &clipperplus::SolutionInfo::lt_problem_size)
+      .def_readwrite("lt_num_constraints",
+                     &clipperplus::SolutionInfo::lt_num_constraints)
+      .def_readwrite("local_opt_size",
+                     &clipperplus::SolutionInfo::local_opt_size);
+
   m.def("find_clique", &Wrapper::find_clique_wrapper, "adj"_a,
-        "params"_a = clipperplus::ClipperParams(),
+        "params"_a = clipperplus::ClipperParams(), "info"_a = nullptr,
         "Find the densest subgraph of a weighted adjacency matrix.");
   m.def("find_heuristic_clique", &Wrapper::find_heuristic_clique_wrapper,
         "adj"_a, "clique"_a, "Find a heuristic maximum clique in a graph.");
