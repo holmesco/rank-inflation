@@ -20,7 +20,7 @@ std::pair<std::vector<Edge>, std::vector<Edge>> get_edges(const Matrix& adj) {
   std::vector<Edge> edges;
   std::vector<Edge> nonedges;
   for (int i = 0; i < adj.rows(); i++) {
-    for (int j = i+1; j < adj.rows(); j++) {
+    for (int j = i + 1; j < adj.rows(); j++) {
       if (adj(i, j) > 0.0) {
         edges.push_back({i, j});
       } else {
@@ -32,7 +32,8 @@ std::pair<std::vector<Edge>, std::vector<Edge>> get_edges(const Matrix& adj) {
 }
 
 // Convert adjancency to rank inflation problem
-std::vector<Eigen::SparseMatrix<double>> get_lovasz_constraints(int dim, std::vector<Edge> nonedges) {
+std::vector<Eigen::SparseMatrix<double>> get_lovasz_constraints(
+    int dim, std::vector<Edge> nonedges) {
   // generate constraints
   std::vector<Eigen::SparseMatrix<double>> A;
   std::vector<float> b;
@@ -44,7 +45,7 @@ std::vector<Eigen::SparseMatrix<double>> get_lovasz_constraints(int dim, std::ve
     A.back().setFromTriplets(tripletList.begin(), tripletList.end());
   }
   // Trace constraint
-  A.emplace_back(dim,dim);
+  A.emplace_back(dim, dim);
   A.back().setIdentity();
   return A;
 }
@@ -84,26 +85,41 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   std::vector<int> clique = test_params.expected_clique;
   float clq_num = clique.size();
   for (int i : clique) {
-    Y(i, 0) = std::sqrt(1/clq_num);
+    Y(i, 0) = std::sqrt(1 / clq_num);
   }
   auto grad = Matrix(problem.m, problem.params_.target_rank * dim);
   // Call evaluation function
   auto output = problem.eval_constraints(Y, grad);
   // evaluation and gradient should be near zero
-  std::cout << "Evaluation: " << std::endl << output << std::endl;
+  // std::cout << "Evaluation: " << std::endl << output << std::endl;
   const double tol = 1e-6;
   ASSERT_EQ(output.size(), problem.m);
   for (int i = 0; i < output.size(); ++i) {
     EXPECT_NEAR(output(i), 0.0, tol) << "constraint " << i;
   }
+
   ASSERT_EQ(grad.rows(), problem.m);
   ASSERT_EQ(grad.cols(), problem.params_.target_rank * dim);
-  // for (int i = 0; i < grad.rows(); ++i) {
-  //   for (int j = 0; j < grad.cols(); ++j) {
-  //     EXPECT_NEAR(grad(i, j), 0.0, tol) << "grad(" << i << "," << j << ")";
-  //   }
-  // }
-  std::cout << "Grad: " << std::endl << grad << std::endl;
+  // std::cout << "Grad: " << std::endl << grad << std::endl;
+  // Numerical directional derivative check
+  const double eps = 1e-6;
+  int r = problem.params_.target_rank;
+  int vec_size = r * dim;
+  Eigen::VectorXd delta_vec = Eigen::VectorXd::Random(vec_size);
+  delta_vec.normalize();
+  delta_vec *= eps;
+  // Map delta into a dim x r matrix (Eigen is column-major by default)
+  Eigen::Map<Matrix> deltaY(delta_vec.data(), dim, r);
+  Matrix Y2 = Y + deltaY;
+  Matrix grad2(problem.m, vec_size);
+  auto output2 = problem.eval_constraints(Y2, grad2);
+  Eigen::VectorXd num_deriv = (output2 - output) / eps;
+  Eigen::VectorXd anal_dir = grad * delta_vec / eps;
+  const double deriv_tol = 1e-5;
+  for (int i = 0; i < problem.m; ++i) {
+    EXPECT_NEAR(num_deriv(i), anal_dir(i), deriv_tol)
+        << "directional derivative mismatch at constraint " << i;
+  }
 }
 
 // 4. The Parameter Suite
