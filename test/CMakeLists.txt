@@ -8,3 +8,7 @@ set_tests_properties(${all_clipper_tests} PROPERTIES TIMEOUT 10)
 add_executable(max_clique_tests main.cpp max_clique_sdp_test.cpp)
 target_link_libraries(max_clique_tests clipperplus gtest pthread Eigen3::Eigen)
 gtest_add_tests(TARGET max_clique_tests)
+
+add_executable(rank_inflation main.cpp rank_inflation_test.cpp)
+target_link_libraries(rank_inflation clipperplus gtest pthread Eigen3::Eigen)
+gtest_add_tests(TARGET rank_inflation)

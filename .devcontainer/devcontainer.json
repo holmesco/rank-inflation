@@ -1,7 +1,7 @@
 {
   "name": "clipperp-cert-dev",
   "build": {
-    "context": "..",
+    "context": "../extern",
     "dockerfile": "Dockerfile"
   },
   "runArgs": [

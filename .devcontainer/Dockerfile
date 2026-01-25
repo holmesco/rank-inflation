@@ -44,7 +44,7 @@ RUN apt-get update && apt-get install -y \
 RUN apt-get update && apt-get install -y tmux
 
 # Install cuHALLaR and add to path
-ADD tmp/cuHALLaR.tar.xz /opt
+ADD cuHALLaR.tar.xz /opt
 RUN chmod +x /opt/cuHALLaR/bin/cuHallar
 ENV PATH="/opt/cuHALLaR/bin:${PATH}"
 
@@ -59,7 +59,26 @@ ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US:en
 ENV LC_ALL en_US.UTF-8
 
-# Install original clippe
+# Install original clipper
+RUN mkdir extern/clipper/build \
+    && cd extern/clipper/build \
+    && cmake .. \
+    && make \
+    && make pip-install 
+
+# Install libraries for SuiteSparse
+RUN apt-get update && apt-get install -y \
+    libblas-dev \
+    liblapack-dev \
+    && rm -rf /var/lib/apt/lists/*
+# Install SuiteSparse from scratch (assumed already cloned to extern/SuiteSparse)
+RUN cd extern/SuiteSparse \
+    && mkdir -p build && cd build \
+    && cmake .. \
+    && cmake --build . \
+    && cmake --install .
+
+
 
 # Set up user inside container to avoid issues with permissions.
 ARG USERNAME=cho
