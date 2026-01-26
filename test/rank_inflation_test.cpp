@@ -36,7 +36,7 @@ std::vector<Eigen::SparseMatrix<double>> get_lovasz_constraints(
     int dim, std::vector<Edge> nonedges) {
   // generate constraints
   std::vector<Eigen::SparseMatrix<double>> A;
-  std::vector<float> b;
+  std::vector<double> b;
   for (auto edge : nonedges) {
     // define sparse matrix
     A.emplace_back(dim, dim);
@@ -61,6 +61,7 @@ struct LovascThetaTestCase {
 class LovascThetaParamTest
     : public ::testing::TestWithParam<LovascThetaTestCase> {};
 
+//Test constraint evaluation and gradient function
 TEST_P(LovascThetaParamTest, EvalConstraints) {
   const auto& test_params = GetParam();
   // get info from adjacency
@@ -68,11 +69,11 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   int dim = test_params.adj.rows();
   // Generate constraints
   auto A = get_lovasz_constraints(dim, nonedges);
-  auto b = std::vector<float>(A.size(), 0.0);
+  auto b = std::vector<double>(A.size(), 0.0);
   b.back() = 1.0;
   // generate cost
   Matrix C = Matrix::Ones(dim, dim);
-  float rho = test_params.expected_clique.size();
+  double rho = test_params.expected_clique.size();
   // parameters
   RankInflateParams params;
   params.use_cost_constraint = true;
@@ -83,11 +84,11 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   // Test vector at actual solution
   Matrix Y = Matrix::Zero(dim, 2);
   std::vector<int> clique = test_params.expected_clique;
-  float clq_num = clique.size();
+  double clq_num = clique.size();
   for (int i : clique) {
     Y(i, 0) = std::sqrt(1 / clq_num);
   }
-  auto grad = Matrix(problem.m, problem.params_.target_rank * dim);
+  auto grad = std::make_shared<Matrix>(problem.m, problem.params_.target_rank * dim);
   // Call evaluation function
   auto output = problem.eval_constraints(Y, grad);
   // evaluation and gradient should be near zero
@@ -98,8 +99,6 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
     EXPECT_NEAR(output(i), 0.0, tol) << "constraint " << i;
   }
 
-  ASSERT_EQ(grad.rows(), problem.m);
-  ASSERT_EQ(grad.cols(), problem.params_.target_rank * dim);
   // std::cout << "Grad: " << std::endl << grad << std::endl;
   // Numerical directional derivative check
   const double eps = 1e-6;
@@ -111,14 +110,80 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   // Map delta into a dim x r matrix (Eigen is column-major by default)
   Eigen::Map<Matrix> deltaY(delta_vec.data(), dim, r);
   Matrix Y2 = Y + deltaY;
-  Matrix grad2(problem.m, vec_size);
-  auto output2 = problem.eval_constraints(Y2, grad2);
+  auto output2 = problem.eval_constraints(Y2);
   Eigen::VectorXd num_deriv = (output2 - output) / eps;
-  Eigen::VectorXd anal_dir = grad * delta_vec / eps;
+  Eigen::VectorXd anal_dir = *grad * delta_vec / eps;
   const double deriv_tol = 1e-5;
   for (int i = 0; i < problem.m; ++i) {
     EXPECT_NEAR(num_deriv(i), anal_dir(i), deriv_tol)
         << "directional derivative mismatch at constraint " << i;
+  }
+}
+
+// Test RRQR Solve
+TEST_P(LovascThetaParamTest, RRQRSolve) {
+  const auto& test_params = GetParam();
+  // get info from adjacency
+  auto [edges, nonedges] = get_edges(test_params.adj);
+  int dim = test_params.adj.rows();
+  // Generate constraints
+  auto A = get_lovasz_constraints(dim, nonedges);
+  auto b = std::vector<double>(A.size(), 0.0);
+  b.back() = 1.0;
+  // generate cost
+  Matrix C = Matrix::Ones(dim, dim);
+  double rho = test_params.expected_clique.size();
+  // parameters
+  RankInflateParams params;
+  params.use_cost_constraint = true;
+  params.verbose = true;
+  params.target_rank = 2;
+  // generate problem
+  auto problem = RankInflation(C, rho, A, b, params);
+  // Test vector at actual solution
+  Matrix Y = Matrix::Zero(dim, 2);
+  std::vector<int> clique = test_params.expected_clique;
+  double clq_num = clique.size();
+  for (int i : clique) {
+    Y(i, 0) = std::sqrt(1 / clq_num);
+  }
+  auto grad = std::make_shared<Matrix>(problem.m, problem.params_.target_rank * dim);
+  // Call evaluation function
+  auto output = problem.eval_constraints(Y, grad);
+  // Apply QR decomposition
+  QRResult soln = get_soln_qr_dense(*grad, -output);
+  // solution should be zero
+  const double tol = 1e-6;
+  ASSERT_EQ(soln.solution_particular.size(), problem.params_.target_rank * dim);
+  for (int i = 0; i < soln.solution_particular.size(); ++i) {
+    EXPECT_NEAR(soln.solution_particular(i), 0.0, tol) << "row " << i;
+  }
+  // Check for nullspace, if exists add to solution and verify small change in output
+  int nulldim = soln.nullspace_basis.cols();
+  if (nulldim > 0){
+    std::cout << "Nullspace dimension: " << nulldim << ". Testing nullspace... " << std::endl;
+    // Construct delta in the nullspace
+    Eigen::VectorXd alpha = Eigen::VectorXd::Random(nulldim); // values in [-1,1]
+    double alpha_norm = alpha.norm();
+    if (alpha_norm > 0) alpha /= alpha_norm;
+    Matrix dY = (soln.nullspace_basis * alpha).reshaped(dim, problem.params_.target_rank);
+    // Add delta to solution
+    Matrix Y_plus = Y + dY;
+    // Evaluate constraints at new solution
+    Vector output_Y_plus = problem.eval_constraints(Y_plus);
+    Vector output_dY = problem.eval_constraints(dY);
+    // Constraint value
+    std::vector<double> vals(b.begin(), b.end());
+    vals.push_back(rho);
+    Vector constraint_val = Vector::Map(vals.data(), vals.size());
+    // linear component of the new output
+    Vector output_linear = output_Y_plus - output - (output_dY + constraint_val);
+    // Should evaluate to zero
+    for (int i = 0; i < output_linear.size(); ++i) {
+      EXPECT_NEAR(output_linear(i), 0.0, tol) << "row " << i;
+    }
+
+    
   }
 }
 

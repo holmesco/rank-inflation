@@ -11,13 +11,17 @@ using Matrix = Eigen::MatrixXd;
 using Vector = Eigen::VectorXd;
 using Triplet = Eigen::Triplet<double>;
 
-// ---- Symmetric matrix vectorization helper functions ----
+// Result of solving a linear system using rank-revealing QR decomposition.
+// Contains both the least-squares particular solution and the nullspace basis.
+struct QRResult {
+    Vector solution_particular;
+    Matrix nullspace_basis;
+    int rank;
+};
 
-// Converts a symmetric matrix to a vectorized form (unique elements)
-Vector vec_symm(const Matrix& A);
-
-// Converts a vectorized form back to a symmetric matrix
-Matrix unvec_symm(const Vector& v, int dim);
+// Get the particular solution and null space of a system of linear equations using rank revealing QR decomposition
+// This formulation is designed for dens matrices
+QRResult get_soln_qr_dense(const Matrix& A, const Vector& b);
 
 struct RankInflateParams {
   // Verbosity
@@ -38,20 +42,20 @@ class RankInflation {
   // cost matrix
   const Matrix C_;
   // optimal cost value
-  const float rho_;
+  const double rho_;
   // constraint matrices
   const std::vector<Eigen::SparseMatrix<double>>& A_;
   // constraint values
-  const std::vector<float>& b_;
+  const std::vector<double>& b_;
   // parameters
   RankInflateParams params_;
 
   // Constructor
-  RankInflation(const Matrix& C, float rho, const std::vector<Eigen::SparseMatrix<double>>& A,
-                const std::vector<float>& b, RankInflateParams params);
+  RankInflation(const Matrix& C, double rho, const std::vector<Eigen::SparseMatrix<double>>& A,
+                const std::vector<double>& b, RankInflateParams params);
 
   // Evaluate constraints (and cost if enabled) and compute the gradients
-  Vector eval_constraints(const Matrix& Y, Matrix& grad) const;
+  Vector eval_constraints(const Matrix& Y, std::shared_ptr<Matrix> grad=nullptr) const;
 
   // Inflate the solution to a desired rank
   // Matrix inflate_solution(const Matrix& y_0) const;
