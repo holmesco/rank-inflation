@@ -1,10 +1,10 @@
 #pragma once
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
-#include <vector>
-#include <memory>
 #include <cassert>
 #include <iostream>
+#include <memory>
+#include <vector>
 
 namespace SDPTools {
 using Matrix = Eigen::MatrixXd;
@@ -14,22 +14,40 @@ using Triplet = Eigen::Triplet<double>;
 // Result of solving a linear system using rank-revealing QR decomposition.
 // Contains both the least-squares particular solution and the nullspace basis.
 struct QRResult {
-    Vector solution_particular;
-    Matrix nullspace_basis;
-    int rank;
+  Vector solution;
+  Matrix nullspace_basis;
+  int rank;
 };
 
-// Get the particular solution and null space of a system of linear equations using rank revealing QR decomposition
-// This formulation is designed for dens matrices
-QRResult get_soln_qr_dense(const Matrix& A, const Vector& b);
+// Get the particular solution and null space of a system of linear equations
+// using rank revealing QR decomposition This formulation is designed for dens
+// matrices
+QRResult get_soln_qr_dense(const Matrix& A, const Vector& b, const double threshold);
+
+// Compute the rank of a dense matrix with rank-revealing QR
+int get_rank(const Matrix& Y, const double threshold);
 
 struct RankInflateParams {
   // Verbosity
-    bool verbose = true;
+  bool verbose = true;
   // Include cost value in the constraint list
   bool use_cost_constraint = true;
   // Desired rank
-  int target_rank=1;
+  int target_rank = 1;
+  // Max number of iterations
+  int max_iter = 50;
+  // Correcting step multiplier (wrt Frobenius norm)
+  double step_corr = 0.5;
+  // Nullspace step size (wrt Frobenius norm)
+  double step_frac_null = 1E-4;
+  // tolerance for constraint norm satisfaction.
+  double tol_violation = 1.0E-5;
+  // threshold for checking rank of the solution
+  // NOTE: pivot added to rank if R_ii > thresh * R_max
+  double rank_thresh_sol = 1.0E-5;
+  // threshold for computing rank of solution null space
+  double rank_thresh_null = 1.0E-8;
+  
 };
 
 class RankInflation {
@@ -51,17 +69,16 @@ class RankInflation {
   RankInflateParams params_;
 
   // Constructor
-  RankInflation(const Matrix& C, double rho, const std::vector<Eigen::SparseMatrix<double>>& A,
+  RankInflation(const Matrix& C, double rho,
+                const std::vector<Eigen::SparseMatrix<double>>& A,
                 const std::vector<double>& b, RankInflateParams params);
 
   // Evaluate constraints (and cost if enabled) and compute the gradients
-  Vector eval_constraints(const Matrix& Y, std::shared_ptr<Matrix> grad=nullptr) const;
+  Vector eval_constraints(const Matrix& Y,
+                          std::shared_ptr<Matrix> grad = nullptr) const;
 
   // Inflate the solution to a desired rank
-  // Matrix inflate_solution(const Matrix& y_0) const;
-
+  Matrix inflate_solution(const Matrix& Y_0) const;
 };
-
-
 
 }  // namespace SDPTools

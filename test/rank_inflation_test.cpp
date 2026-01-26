@@ -61,7 +61,7 @@ struct LovascThetaTestCase {
 class LovascThetaParamTest
     : public ::testing::TestWithParam<LovascThetaTestCase> {};
 
-//Test constraint evaluation and gradient function
+// Test constraint evaluation and gradient function
 TEST_P(LovascThetaParamTest, EvalConstraints) {
   const auto& test_params = GetParam();
   // get info from adjacency
@@ -88,7 +88,8 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   for (int i : clique) {
     Y(i, 0) = std::sqrt(1 / clq_num);
   }
-  auto grad = std::make_shared<Matrix>(problem.m, problem.params_.target_rank * dim);
+  auto grad =
+      std::make_shared<Matrix>(problem.m, problem.params_.target_rank * dim);
   // Call evaluation function
   auto output = problem.eval_constraints(Y, grad);
   // evaluation and gradient should be near zero
@@ -147,26 +148,31 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
   for (int i : clique) {
     Y(i, 0) = std::sqrt(1 / clq_num);
   }
-  auto grad = std::make_shared<Matrix>(problem.m, problem.params_.target_rank * dim);
+  auto grad =
+      std::make_shared<Matrix>(problem.m, problem.params_.target_rank * dim);
   // Call evaluation function
   auto output = problem.eval_constraints(Y, grad);
   // Apply QR decomposition
-  QRResult soln = get_soln_qr_dense(*grad, -output);
+  QRResult soln = get_soln_qr_dense(*grad, -output, problem.params_.rank_thresh_null);
   // solution should be zero
   const double tol = 1e-6;
-  ASSERT_EQ(soln.solution_particular.size(), problem.params_.target_rank * dim);
-  for (int i = 0; i < soln.solution_particular.size(); ++i) {
-    EXPECT_NEAR(soln.solution_particular(i), 0.0, tol) << "row " << i;
+  ASSERT_EQ(soln.solution.size(), problem.params_.target_rank * dim);
+  for (int i = 0; i < soln.solution.size(); ++i) {
+    EXPECT_NEAR(soln.solution(i), 0.0, tol) << "row " << i;
   }
-  // Check for nullspace, if exists add to solution and verify small change in output
+  // Check for nullspace, if exists add to solution and verify small change in
+  // output
   int nulldim = soln.nullspace_basis.cols();
-  if (nulldim > 0){
-    std::cout << "Nullspace dimension: " << nulldim << ". Testing nullspace... " << std::endl;
+  if (nulldim > 0) {
+    std::cout << "Nullspace dimension: " << nulldim << ". Testing nullspace... "
+              << std::endl;
     // Construct delta in the nullspace
-    Eigen::VectorXd alpha = Eigen::VectorXd::Random(nulldim); // values in [-1,1]
+    Eigen::VectorXd alpha =
+        Eigen::VectorXd::Random(nulldim);  // values in [-1,1]
     double alpha_norm = alpha.norm();
     if (alpha_norm > 0) alpha /= alpha_norm;
-    Matrix dY = (soln.nullspace_basis * alpha).reshaped(dim, problem.params_.target_rank);
+    Matrix dY = (soln.nullspace_basis * alpha)
+                    .reshaped(dim, problem.params_.target_rank);
     // Add delta to solution
     Matrix Y_plus = Y + dY;
     // Evaluate constraints at new solution
@@ -177,14 +183,50 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
     vals.push_back(rho);
     Vector constraint_val = Vector::Map(vals.data(), vals.size());
     // linear component of the new output
-    Vector output_linear = output_Y_plus - output - (output_dY + constraint_val);
+    Vector output_linear =
+        output_Y_plus - output - (output_dY + constraint_val);
     // Should evaluate to zero
     for (int i = 0; i < output_linear.size(); ++i) {
       EXPECT_NEAR(output_linear(i), 0.0, tol) << "row " << i;
     }
-
-    
   }
+}
+// Test Rank Inflation
+TEST_P(LovascThetaParamTest, RankInflation) {
+  const auto& test_params = GetParam();
+  // get info from adjacency
+  auto [edges, nonedges] = get_edges(test_params.adj);
+  int dim = test_params.adj.rows();
+  // Generate constraints
+  auto A = get_lovasz_constraints(dim, nonedges);
+  auto b = std::vector<double>(A.size(), 0.0);
+  b.back() = 1.0;
+  // generate cost
+  Matrix C = Matrix::Ones(dim, dim);
+  double rho = test_params.expected_clique.size();
+  // parameters
+  RankInflateParams params;
+  params.use_cost_constraint = true;
+  params.verbose = true;
+  params.target_rank = dim;
+  // generate problem
+  auto problem = RankInflation(C, rho, A, b, params);
+  // get current soluition
+  Matrix Y_0 = Matrix::Zero(dim, 1);
+  std::vector<int> clique = test_params.expected_clique;
+  double clq_num = clique.size();
+  for (int i : clique) {
+    Y_0(i, 0) = std::sqrt(1 / clq_num);
+  }
+  // Run rank inflation, without inflation (target rank is 1)
+  auto Y = problem.inflate_solution(Y_0);
+  // Check solution rank
+  int r = get_rank(Y, 1.0E-5);
+  EXPECT_TRUE(r>=params.target_rank) << "Did not acheive target rank";
+  // Check constraint tolerance
+  auto viol = problem.eval_constraints(Y);
+  EXPECT_TRUE(viol.norm()<=params.tol_violation) << "Did not acheive target constraint violation";
+  
 }
 
 // 4. The Parameter Suite
