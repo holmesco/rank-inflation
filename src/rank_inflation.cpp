@@ -14,14 +14,14 @@ RankInflation::RankInflation(const Matrix& C, double rho,
 }
 
 Vector RankInflation::eval_constraints(const Matrix& Y,
-                                       std::shared_ptr<Matrix> grad) const {
+                                       std::unique_ptr<Matrix>* Jac) const {
   // dimension assertions
   int r = params_.target_rank;
   assert(Y.rows() == dim);
   assert(Y.cols() == r);
-  if (grad != nullptr) {
-    assert(grad->rows() == m);
-    assert(grad->cols() == dim * r);
+  if (Jac != nullptr) {
+    assert((*Jac)->rows() == m);
+    assert((*Jac)->cols() == dim * r);
   }
   // Create vectorized version of Y
   const Vector Y_vec = Y.reshaped();
@@ -43,8 +43,8 @@ Vector RankInflation::eval_constraints(const Matrix& Y,
       constraint_value = rho_;
     }
     // Store gradient
-    if (grad != nullptr) {
-      grad->row(i) = 2.0 * grad_vec;
+    if (Jac != nullptr) {
+      (*Jac)->row(i) = 2.0 * grad_vec;
     }
     // evaluate product
     result(i) = grad_vec.dot(Y_vec) - constraint_value;
@@ -52,7 +52,8 @@ Vector RankInflation::eval_constraints(const Matrix& Y,
   return result;
 }
 
-Matrix RankInflation::inflate_solution(const Matrix& Y_0) const {
+Matrix RankInflation::inflate_solution(
+    const Matrix& Y_0, std::unique_ptr<Matrix>* Jac_final) const {
   // convenience definitions
   int r_targ = params_.target_rank;
   // Create initial solution by padding with zeros
@@ -67,29 +68,28 @@ Matrix RankInflation::inflate_solution(const Matrix& Y_0) const {
   // Initialize
   int n_iter = 0;
   bool converged = false;
-  auto grad = std::make_shared<Matrix>(m, dim * r_targ);
+  auto Jac = std::make_unique<Matrix>(m, dim * r_targ);
   int r = get_rank(Y, params_.rank_thresh_sol);
-  auto violation = eval_constraints(Y, grad);
+  auto violation = eval_constraints(Y, &Jac);
   bool rank_increase = false;
   // Loop
   while (n_iter < params_.max_iter && !converged) {
     // Solve linear system to get update
-    auto result =
-    get_soln_qr_dense(*grad, -violation, params_.rank_thresh_null);
+    auto result = get_soln_qr_dense(*Jac, -violation, params_.rank_thresh_null);
     // dimension of the solution space
     int nulldim = result.nullspace_basis.cols();
     // Print outputs
     if (params_.verbose) {
       if (n_iter == 0) {
-      std::printf("%6s %6s %18s %10s %6s\n", "Iter", "Rank", "ViolationNorm",
-            "NullDim", "RankUp");
+        std::printf("%6s %6s %18s %10s %6s\n", "Iter", "Rank", "ViolationNorm",
+                    "NullDim", "RankUp");
       }
       char rank_up = rank_increase ? 'T' : 'F';
       std::printf("%6d %6d %18.6e %10d %6c\n", n_iter, r, violation.norm(),
-            nulldim, rank_up);
-      rank_increase = false; // reset
+                  nulldim, rank_up);
+      rank_increase = false;  // reset
     }
-    
+
     // Add solution to matrix (Newton step)
     Matrix Y_corrected =
         Y + params_.step_corr * result.solution.reshaped(dim, r_targ);
@@ -111,7 +111,7 @@ Matrix RankInflation::inflate_solution(const Matrix& Y_0) const {
     // Update solution
     Y = Y_corrected;
     // Evaluate the constraints
-    violation = eval_constraints(Y, grad);
+    violation = eval_constraints(Y, &Jac);
     // Get new rank of Y
     r = get_rank(Y, params_.rank_thresh_sol);
     // Check convergence
@@ -119,8 +119,68 @@ Matrix RankInflation::inflate_solution(const Matrix& Y_0) const {
     // update
     n_iter++;
   }
+  if (Jac_final != nullptr) {
+    // transfer ownership of the unique pointer to the outer scope
+    *Jac_final = std::move(Jac);
+  }
 
   return Y;
+}
+
+Matrix RankInflation::build_certificate(const Matrix& Jac,
+                                        const Matrix& Y) const {
+  // Get components of stationarity condition
+  Vector vecCY;
+  Matrix vecAY;
+  if (params_.use_cost_constraint) {
+    // vec(C*Y) is last row of jacobian, split it off
+    vecCY = Jac.bottomRows(1).transpose();
+    vecAY = Jac.topRows(Jac.rows() - 1);
+  } else {
+    vecCY = (C_ * Y).reshaped();
+    vecAY = Jac;
+  }
+  // Solve for Lagrange multipliers
+  auto result =
+      get_soln_qr_dense(vecAY.transpose(), -vecCY, params_.rank_thresh_null);
+  Vector lagrange = result.solution;
+  // Build the certificate matrix
+  // Note: this is done efficiently using triplets for the sparse part
+  std::vector<Eigen::Triplet<double>> tripletList;
+  for (int i = 0; i < A_.size(); i++) {
+    // Multiply and store result as a sparse matrix to get its elements
+    Eigen::SparseMatrix<double> temp = A_[i] * lagrange(i);
+    for (int k = 0; k < temp.outerSize(); ++k) {
+      for (typename Eigen::SparseMatrix<double>::InnerIterator it(temp, k); it;
+           ++it) {
+        tripletList.push_back(
+            Eigen::Triplet<double>(it.row(), it.col(), it.value()));
+        if (it.row() != it.col()) {
+          // off-diagonal entry, add symmetric part
+          tripletList.push_back(Eigen::Triplet<double>(
+              it.col(), it.row(), it.value()));
+        }
+      }
+    }
+  }
+  Eigen::SparseMatrix<double> H_sp(dim, dim);
+  H_sp.setFromTriplets(tripletList.begin(), tripletList.end());
+  // Add cost matrix and store as dense
+  Matrix H = C_ + H_sp;
+
+  return H;
+}
+
+std::pair<double, double> RankInflation::check_certificate(
+    const Matrix& H, const Matrix& Y) const {
+  // Evaluate the stationarity condition
+  double first_order_norm = (H * Y).norm();
+  // Check Eigenvalues
+  // Use SelfAdjointEigenSolver for symmetric matrices
+  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(H);
+  double min_eig = es.eigenvalues().minCoeff();
+
+  return {min_eig, first_order_norm};
 }
 
 int get_rank(const Matrix& Y, const double threshold) {

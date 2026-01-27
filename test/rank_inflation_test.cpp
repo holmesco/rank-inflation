@@ -72,8 +72,8 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   auto b = std::vector<double>(A.size(), 0.0);
   b.back() = 1.0;
   // generate cost
-  Matrix C = Matrix::Ones(dim, dim);
-  double rho = test_params.expected_clique.size();
+  Matrix C = -Matrix::Ones(dim, dim);
+  double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
   params.use_cost_constraint = true;
@@ -88,10 +88,10 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   for (int i : clique) {
     Y(i, 0) = std::sqrt(1 / clq_num);
   }
-  auto grad =
-      std::make_shared<Matrix>(problem.m, problem.params_.target_rank * dim);
+  auto Jac =
+      std::make_unique<Matrix>(problem.m, problem.params_.target_rank * dim);
   // Call evaluation function
-  auto output = problem.eval_constraints(Y, grad);
+  auto output = problem.eval_constraints(Y, &Jac);
   // evaluation and gradient should be near zero
   // std::cout << "Evaluation: " << std::endl << output << std::endl;
   const double tol = 1e-6;
@@ -100,7 +100,7 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
     EXPECT_NEAR(output(i), 0.0, tol) << "constraint " << i;
   }
 
-  // std::cout << "Grad: " << std::endl << grad << std::endl;
+  // std::cout << "Jac: " << std::endl << Jac << std::endl;
   // Numerical directional derivative check
   const double eps = 1e-6;
   int r = problem.params_.target_rank;
@@ -113,7 +113,7 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   Matrix Y2 = Y + deltaY;
   auto output2 = problem.eval_constraints(Y2);
   Eigen::VectorXd num_deriv = (output2 - output) / eps;
-  Eigen::VectorXd anal_dir = *grad * delta_vec / eps;
+  Eigen::VectorXd anal_dir = *Jac * delta_vec / eps;
   const double deriv_tol = 1e-5;
   for (int i = 0; i < problem.m; ++i) {
     EXPECT_NEAR(num_deriv(i), anal_dir(i), deriv_tol)
@@ -132,8 +132,8 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
   auto b = std::vector<double>(A.size(), 0.0);
   b.back() = 1.0;
   // generate cost
-  Matrix C = Matrix::Ones(dim, dim);
-  double rho = test_params.expected_clique.size();
+  Matrix C = -Matrix::Ones(dim, dim);
+  double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
   params.use_cost_constraint = true;
@@ -148,12 +148,11 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
   for (int i : clique) {
     Y(i, 0) = std::sqrt(1 / clq_num);
   }
-  auto grad =
-      std::make_shared<Matrix>(problem.m, problem.params_.target_rank * dim);
+  auto Jac = std::make_unique<Matrix>(problem.m, problem.params_.target_rank * dim);
   // Call evaluation function
-  auto output = problem.eval_constraints(Y, grad);
+  auto output = problem.eval_constraints(Y, &Jac);
   // Apply QR decomposition
-  QRResult soln = get_soln_qr_dense(*grad, -output, problem.params_.rank_thresh_null);
+  QRResult soln = get_soln_qr_dense(*Jac, -output, problem.params_.rank_thresh_null);
   // solution should be zero
   const double tol = 1e-6;
   ASSERT_EQ(soln.solution.size(), problem.params_.target_rank * dim);
@@ -202,8 +201,8 @@ TEST_P(LovascThetaParamTest, RankInflation) {
   auto b = std::vector<double>(A.size(), 0.0);
   b.back() = 1.0;
   // generate cost
-  Matrix C = Matrix::Ones(dim, dim);
-  double rho = test_params.expected_clique.size();
+  Matrix C = -Matrix::Ones(dim, dim);
+  double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
   params.use_cost_constraint = true;
@@ -227,6 +226,51 @@ TEST_P(LovascThetaParamTest, RankInflation) {
   auto viol = problem.eval_constraints(Y);
   EXPECT_TRUE(viol.norm()<=params.tol_violation) << "Did not acheive target constraint violation";
   
+}
+
+// Test Certificate
+TEST_P(LovascThetaParamTest, Certificate) {
+  const auto& test_params = GetParam();
+  // get info from adjacency
+  auto [edges, nonedges] = get_edges(test_params.adj);
+  int dim = test_params.adj.rows();
+  // Generate constraints
+  auto A = get_lovasz_constraints(dim, nonedges);
+  auto b = std::vector<double>(A.size(), 0.0);
+  b.back() = 1.0;
+  // generate cost
+  Matrix C = -Matrix::Ones(dim, dim);
+  double rho = -static_cast<double>(test_params.expected_clique.size());
+  // parameters
+  RankInflateParams params;
+  params.use_cost_constraint = true;
+  params.verbose = true;
+  params.target_rank = dim;
+  // generate problem
+  auto problem = RankInflation(C, rho, A, b, params);
+  // get current solution
+  std::vector<int> clique = test_params.expected_clique;
+  double clq_num = clique.size();
+  auto Y_0 = Vector::Zero(dim).eval();
+  for (int i : clique) {
+    Y_0(i) = std::sqrt(1 / clq_num);
+  }
+  // Run rank inflation, without inflation (target rank is 1)
+  auto Jac = std::make_unique<Matrix>(problem.m, dim*params.target_rank);
+  auto Y = problem.inflate_solution(Y_0, &Jac);
+  std::cout << "dot product of Y_0 and Y: " << (Y_0.transpose() * Y).norm()/Y.norm()/Y_0.norm() << std::endl;
+  std::cout << "Initial solution: " << std::endl << Y_0 << std::endl;
+  std::cout << "Inflated solution: " << std::endl << Y << std::endl;
+  // std::cout << "Jacobian: " << std::endl << *Jac << std::endl;
+  // Build certificate
+  auto H = problem.build_certificate(*Jac, Y);
+  // std::cout << "Certificate Matrix: " << std::endl << H << std::endl;
+  // check certificate
+  auto [min_eig, first_ord_cond] = problem.check_certificate(H, Y_0);
+  // print values
+  std::cout << "Minimum Eigenvalue of Certificate: " << min_eig << std::endl;
+  std::cout << "First Order Condition Norm: " << first_ord_cond << std::endl; 
+
 }
 
 // 4. The Parameter Suite

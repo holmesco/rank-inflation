@@ -22,7 +22,8 @@ struct QRResult {
 // Get the particular solution and null space of a system of linear equations
 // using rank revealing QR decomposition This formulation is designed for dens
 // matrices
-QRResult get_soln_qr_dense(const Matrix& A, const Vector& b, const double threshold);
+QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
+                           const double threshold);
 
 // Compute the rank of a dense matrix with rank-revealing QR
 int get_rank(const Matrix& Y, const double threshold);
@@ -39,15 +40,14 @@ struct RankInflateParams {
   // Correcting step multiplier (wrt Frobenius norm)
   double step_corr = 0.5;
   // Nullspace step size (wrt Frobenius norm)
-  double step_frac_null = 1E-4;
+  double step_frac_null = 1E-2;
   // tolerance for constraint norm satisfaction.
   double tol_violation = 1.0E-5;
   // threshold for checking rank of the solution
   // NOTE: pivot added to rank if R_ii > thresh * R_max
   double rank_thresh_sol = 1.0E-5;
   // threshold for computing rank of solution null space
-  double rank_thresh_null = 1.0E-8;
-  
+  double rank_thresh_null = 1.0E-5;
 };
 
 class RankInflation {
@@ -75,10 +75,21 @@ class RankInflation {
 
   // Evaluate constraints (and cost if enabled) and compute the gradients
   Vector eval_constraints(const Matrix& Y,
-                          std::shared_ptr<Matrix> grad = nullptr) const;
+                          std::unique_ptr<Matrix>* Jac = nullptr) const;
 
   // Inflate the solution to a desired rank
-  Matrix inflate_solution(const Matrix& Y_0) const;
+  Matrix inflate_solution(const Matrix& Y_0,
+                          std::unique_ptr<Matrix>* Jac_final = nullptr) const;
+
+  // Build the optimality certificate for the problem using the KKT Jacobian and
+  // the (high rank) solution
+  Matrix build_certificate(const Matrix& Jac, const Matrix& Y) const;
+
+  // Check global optimality of a solution
+  // Returns the minimum eigenvalue of the certificate matrix and the evaluation
+  // of the certificate matrix at the solution (first order condition)
+  std::pair<double, double> check_certificate(const Matrix& H,
+                                              const Matrix& Y) const;
 };
 
 }  // namespace SDPTools
