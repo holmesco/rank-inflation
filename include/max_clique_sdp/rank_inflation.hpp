@@ -32,7 +32,7 @@ struct RankInflateParams {
   // Verbosity
   bool verbose = true;
   // Include cost value in the constraint list
-  bool use_cost_constraint = true;
+  bool enable_cost_constraint = true;
   // Desired rank
   int target_rank = 1;
   // Enable for increasing rank (for debugging)
@@ -50,12 +50,12 @@ struct RankInflateParams {
   // Line search lower bound 
   double alpha_min = 1e-4;
   // Nullspace step size (wrt Frobenius norm)
-  double step_frac_null = 1E-3;
+  double step_frac_null = 1E-2;
   // tolerance for constraint norm satisfaction.
   double tol_violation = 1.0E-6;
   // threshold for checking rank of the solution
   // NOTE: pivot added to rank if R_ii > thresh * R_max
-  double rank_thresh_sol = 1.0E-4;
+  double rank_thresh_sol = 1.0E-3;
   // threshold for computing rank of solution null space
   double rank_thresh_null = 1.0E-12;
 };

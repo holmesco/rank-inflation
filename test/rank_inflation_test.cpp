@@ -76,7 +76,7 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
-  params.use_cost_constraint = true;
+  params.enable_cost_constraint = true;
   params.verbose = true;
   params.target_rank = 2;
   // generate problem
@@ -136,7 +136,7 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
   double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
-  params.use_cost_constraint = true;
+  params.enable_cost_constraint = true;
   params.verbose = true;
   params.target_rank = 2;
   // generate problem
@@ -148,11 +148,13 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
   for (int i : clique) {
     Y(i, 0) = std::sqrt(1 / clq_num);
   }
-  auto Jac = std::make_unique<Matrix>(problem.m, problem.params_.target_rank * dim);
+  auto Jac =
+      std::make_unique<Matrix>(problem.m, problem.params_.target_rank * dim);
   // Call evaluation function
   auto output = problem.eval_constraints(Y, &Jac);
   // Apply QR decomposition
-  QRResult soln = get_soln_qr_dense(*Jac, -output, problem.params_.rank_thresh_null);
+  QRResult soln =
+      get_soln_qr_dense(*Jac, -output, problem.params_.rank_thresh_null);
   // solution should be zero
   const double tol = 1e-6;
   ASSERT_EQ(soln.solution.size(), problem.params_.target_rank * dim);
@@ -205,7 +207,7 @@ TEST_P(LovascThetaParamTest, RankInflation) {
   double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
-  params.use_cost_constraint = true;
+  params.enable_cost_constraint = true;
   params.verbose = true;
   params.target_rank = dim;
   // generate problem
@@ -221,11 +223,11 @@ TEST_P(LovascThetaParamTest, RankInflation) {
   auto Y = problem.inflate_solution(Y_0);
   // Check solution rank
   int r = get_rank(Y, 1.0E-5);
-  EXPECT_TRUE(r>=params.target_rank) << "Did not acheive target rank";
+  EXPECT_TRUE(r >= params.target_rank) << "Did not acheive target rank";
   // Check constraint tolerance
   auto viol = problem.eval_constraints(Y);
-  EXPECT_TRUE(viol.norm()<=params.tol_violation) << "Did not acheive target constraint violation";
-  
+  EXPECT_TRUE(viol.norm() <= params.tol_violation)
+      << "Did not acheive target constraint violation";
 }
 
 // Test Certificate
@@ -243,7 +245,7 @@ TEST_P(LovascThetaParamTest, Certificate) {
   double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
-  params.use_cost_constraint = true;
+  params.enable_cost_constraint = true;
   params.verbose = true;
   params.target_rank = dim;  //DEBUGGINGGG
   // generate problem
@@ -251,26 +253,34 @@ TEST_P(LovascThetaParamTest, Certificate) {
   // get current solution
   std::vector<int> clique = test_params.expected_clique;
   double clq_num = clique.size();
-  auto Y_0 = Matrix::Zero(dim,1).eval();
+  auto Y_0 = Matrix::Zero(dim, 1).eval();
   for (int i : clique) {
-    Y_0(i,0) = std::sqrt(1 / clq_num);
+    Y_0(i, 0) = std::sqrt(1 / clq_num);
   }
   // Run rank inflation, without inflation (target rank is 1)
-  auto Jac = std::make_unique<Matrix>(problem.m, dim*params.target_rank);
+  auto Jac = std::make_unique<Matrix>(problem.m, dim * params.target_rank);
   auto Y = problem.inflate_solution(Y_0, &Jac);
-  std::cout << "dot product of Y_0 and Y: " << (Y_0.transpose() * Y).norm()/Y.norm()/Y_0.norm() << std::endl;
+  std::cout << "dot product of Y_0 and Y: "
+            << (Y_0.transpose() * Y).norm() / Y.norm() / Y_0.norm()
+            << std::endl;
   std::cout << "Initial solution: " << std::endl << Y_0 << std::endl;
   std::cout << "Inflated solution: " << std::endl << Y << std::endl;
   // std::cout << "Jacobian: " << std::endl << *Jac << std::endl;
   // Build certificate
   auto H = problem.build_certificate(*Jac, Y);
   // std::cout << "Certificate Matrix: " << std::endl << H << std::endl;
-  // check certificate
+  // check certificate on high rank solution
+  auto [min_eig_hr, first_ord_cond_hr] = problem.check_certificate(H, Y);
+  std::cout << "Certificate on High Rank Solution: " << std::endl;
+  std::cout << "Minimum Eigenvalue of Certificate: " << min_eig_hr << std::endl;
+  std::cout << "First Order Condition Norm: " << first_ord_cond_hr << std::endl;
+  std::cout << "Cost at High Rank Solution: " << std::endl
+            << (Y.transpose() * C * Y).trace() << std::endl;
+  // check certificate on initial solution
   auto [min_eig, first_ord_cond] = problem.check_certificate(H, Y_0);
-  // print values
+  std::cout << "Certificate on Initial Solution: " << std::endl;
   std::cout << "Minimum Eigenvalue of Certificate: " << min_eig << std::endl;
-  std::cout << "First Order Condition Norm: " << first_ord_cond << std::endl; 
-
+  std::cout << "First Order Condition Norm: " << first_ord_cond << std::endl;
 }
 
 // 4. The Parameter Suite

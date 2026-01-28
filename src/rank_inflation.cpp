@@ -10,7 +10,7 @@ RankInflation::RankInflation(const Matrix& C, double rho,
   // dimension of the SDP
   dim = C.rows();
   // number of constraints to enforce during inflation
-  m = params.use_cost_constraint ? A.size() + 1 : A.size();
+  m = params.enable_cost_constraint ? A.size() + 1 : A.size();
 }
 
 Vector RankInflation::eval_constraints(const Matrix& Y,
@@ -38,7 +38,7 @@ Vector RankInflation::eval_constraints(const Matrix& Y,
       constraint_value = b_[i];
     } else {
       // Cost "constraint"
-      assert(params_.use_cost_constraint);
+      assert(params_.enable_cost_constraint);
       grad_vec = (C_ * Y).reshaped();
       constraint_value = rho_;
     }
@@ -97,12 +97,13 @@ Matrix RankInflation::inflate_solution(
     Matrix Y_corrected = Y + alpha * dY;
 
     // // DEBUG
-    // Vector viol_quad = eval_constraints(result.solution.reshaped(dim, r_targ)) +
+    // Vector viol_quad = eval_constraints(result.solution.reshaped(dim,
+    // r_targ)) +
     //                    constraint_val;
     // std::cout << "Viol_quad (debug): " << std::endl
     //           << viol_quad.transpose() << std::endl;
-    // std::cout << "Norm squared of dY: " << std::pow(dY.norm(), 2) << std::endl;
-    
+    // std::cout << "Norm squared of dY: " << std::pow(dY.norm(), 2) <<
+    // std::endl;
 
     // if rank not high enough, try to increase
     if (r < r_targ && params_.enable_inc_rank) {
@@ -121,9 +122,8 @@ Matrix RankInflation::inflate_solution(
     }
     // Update solution
     Y = Y_corrected;
-    // Evaluate the constraints
+    // Evaluate the current solution (violation and rank)
     violation = eval_constraints(Y, &Jac);
-    // Get new rank of Y
     r = get_rank(Y, params_.rank_thresh_sol);
     // Check convergence
     converged = r >= r_targ && violation.norm() < params_.tol_violation;
@@ -140,12 +140,10 @@ Matrix RankInflation::inflate_solution(
                   violation.norm(), nulldim, alpha, rank_up);
       rank_increase = false;  // reset
       
-      //DEBUGGING
-      // std::cout << "Violation: " << violation.transpose() << std::endl;
-      // std::cout << "Step Norm: " << dY.norm() << std::endl;
-      
+      // DEBUGGING
+      //  std::cout << "Violation: " << violation.transpose() << std::endl;
+      //  std::cout << "Step Norm: " << dY.norm() << std::endl;
     }
-
   }
   if (Jac_final != nullptr) {
     // transfer ownership of the unique pointer to the outer scope
@@ -194,7 +192,7 @@ Matrix RankInflation::build_certificate(const Matrix& Jac,
   // Get components of stationarity condition
   Vector vecCY;
   Matrix vecAY;
-  if (params_.use_cost_constraint) {
+  if (params_.enable_cost_constraint) {
     // vec(C*Y) is last row of jacobian, split it off
     vecCY = Jac.bottomRows(1).transpose();
     vecAY = Jac.topRows(Jac.rows() - 1);
