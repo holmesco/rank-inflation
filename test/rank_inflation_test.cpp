@@ -221,8 +221,9 @@ TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
     Y(i, 0) = std::sqrt(1 / clq_num);
   }
   // Add perturbation to solution
-  Eigen::MatrixXd perturb = Eigen::MatrixXd::Random(dim, 2) * 0.1;
-  Y += perturb;
+  // Eigen::MatrixXd perturb = Eigen::MatrixXd::Random(dim, 2) * 0.1;
+  // Y += perturb;
+  Y *=1.1;
   // Call evaluation function
   auto Jac =
       std::make_unique<Matrix>(problem.m, problem.params_.target_rank * dim);
@@ -231,19 +232,26 @@ TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
   QRResult result =
       get_soln_qr_dense(*Jac, -output, problem.params_.rank_thresh_null);
   // Gauss Newton part of the step
-  delta_gn = result.solution;
+  auto delta_gn = result.solution;
   // Get system of equations for second order correction
-  auto [hess, grad] = problem.build_proj_corr_grad_hess(output, result.nullspace_basis, delta_gn);
+  auto [hess, grad] = problem.build_proj_corr_grad_hess(
+      output, result.nullspace_basis, delta_gn);
   // Solve new system
-  QRResult corr_result = get_soln_qr_dense(hess, -grad, problem.params_.tol_null_corr);
+  QRResult corr_result =
+      get_soln_qr_dense(hess, -grad, problem.params_.tol_null_corr);
   // reconstruct solution
-  delta_corr = result.nullspace_basis * corr_result.solution;
-  delta = delta_gn + delta_corr;
+  auto delta_corr = result.nullspace_basis * corr_result.solution;
+  auto delta = delta_gn + delta_corr;
   // Evaluate
-  viol_gn = problem.eval_constraints(Y + delta_gn.reshaped(dim, params.target_rank));
-  viol = problem.eval_constraints(Y + delta.reshaped(dim, params.target_rank));
-  
-
+  auto viol_gn =
+      problem.eval_constraints(Y + delta_gn.reshaped(dim, params.target_rank));
+  auto viol =
+      problem.eval_constraints(Y + delta.reshaped(dim, params.target_rank));
+  // print norm of violations
+  std::cout << "Norm of violation after GN step: " << viol_gn.norm()
+            << ", after SOC step: " << viol.norm() << std::endl;
+  EXPECT_TRUE(viol.norm() <= viol_gn.norm())
+      << "Second order correction did not reduce constraint violation";
 }
 
 // Test Rank Inflation
@@ -314,11 +322,11 @@ TEST_P(LovascThetaParamTest, Certificate) {
   // Run rank inflation, without inflation (target rank is 1)
   auto Jac = std::make_unique<Matrix>(problem.m, dim * params.target_rank);
   auto Y = problem.inflate_solution(Y_0, &Jac);
-  std::cout << "dot product of Y_0 and Y: "
-            << (Y_0.transpose() * Y).norm() / Y.norm() / Y_0.norm()
-            << std::endl;
-  std::cout << "Initial solution: " << std::endl << Y_0 << std::endl;
-  std::cout << "Inflated solution: " << std::endl << Y << std::endl;
+  // std::cout << "dot product of Y_0 and Y: "
+  //           << (Y_0.transpose() * Y).norm() / Y.norm() / Y_0.norm()
+  //           << std::endl;
+  // std::cout << "Initial solution: " << std::endl << Y_0 << std::endl;
+  // std::cout << "Inflated solution: " << std::endl << Y << std::endl;
   // std::cout << "Jacobian: " << std::endl << *Jac << std::endl;
   // Build certificate
   auto H = problem.build_certificate(*Jac, Y);

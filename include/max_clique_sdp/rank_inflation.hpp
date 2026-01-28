@@ -66,9 +66,10 @@ struct RankInflateParams {
   double step_frac_null = 1E-2;
   // tolerance for constraint norm satisfaction.
   double tol_violation = 1.0E-6;
-  // threshold for checking rank of the solution
   // NOTE: pivot added to rank if R_ii > thresh * R_max
-  double rank_thresh_sol = 1.0E-3;
+  // threshold for checking rank of the solution
+  // NOTE: Should be lower than tol_violation (empirically observed.)
+  double rank_thresh_sol = 1.0E-8;
   // threshold for computing rank of solution null space
   double rank_thresh_null = 1.0E-12;
 };

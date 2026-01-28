@@ -80,12 +80,30 @@ Matrix RankInflation::inflate_solution(
   // Loop
   while (n_iter < params_.max_iter && !converged) {
     // Solve linear system to get update
-    auto result = get_soln_qr_dense(*Jac, -violation, params_.rank_thresh_null);
+    auto result_gn =
+        get_soln_qr_dense(*Jac, -violation, params_.rank_thresh_null);
     // dimension of the solution space
-    int nulldim = result.nullspace_basis.cols();
-
-    // Get the Gauss-Newton step
-    Matrix dY = result.solution.reshaped(dim, r_targ);
+    int nulldim = result_gn.nullspace_basis.cols();
+    // get GN solution
+    Vector& delta_gn = result_gn.solution;
+    // Second order correction
+    Vector delta;
+    if (params_.enable_sec_ord_corr) {
+      // Get system of equations for second order correction
+      auto [hess, grad] = build_proj_corr_grad_hess(
+          violation, result_gn.nullspace_basis, delta_gn);
+      // Solve new system
+      QRResult result_corr =
+          get_soln_qr_dense(hess, -grad, params_.tol_null_corr);
+      // reconstruct tangent-space solution
+      auto delta_corr = result_gn.nullspace_basis * result_corr.solution;
+      // combine normal and tangent componenets
+      delta = delta_gn + delta_corr;
+    } else {
+      delta = delta_gn;
+    }
+    // Reshape delta
+    Matrix dY = delta.reshaped(dim, r_targ);
     // Line search
     double alpha;
     if (params_.enable_line_search) {
@@ -97,7 +115,7 @@ Matrix RankInflation::inflate_solution(
     Matrix Y_corrected = Y + alpha * dY;
 
     // // DEBUG
-    // Vector viol_quad = eval_constraints(result.solution.reshaped(dim,
+    // Vector viol_quad = eval_constraints(result_gn.solution.reshaped(dim,
     // r_targ)) +
     //                    constraint_val;
     // std::cout << "Viol_quad (debug): " << std::endl
@@ -111,7 +129,7 @@ Matrix RankInflation::inflate_solution(
       // Get random (normalized) matrix from nullspace
       Eigen::VectorXd alpha =
           Eigen::VectorXd::Random(nulldim);  // values in [-1,1]
-      Matrix N = (result.nullspace_basis * alpha).reshaped(dim, r_targ);
+      Matrix N = (result_gn.nullspace_basis * alpha).reshaped(dim, r_targ);
       double norm_N = N.norm();
       if (norm_N > 0) {
         N /= norm_N;
@@ -209,7 +227,9 @@ SpMatrix RankInflation::build_wt_sum_constraints(const Vector& coeffs,
 Matrix RankInflation::build_sec_ord_corr_hessian(
     const Vector& violation) const {
   // build weighted sum of constraint matrices with violation values
-  auto f_A = build_wt_sum_constraints(violation, params_.tol_viol_hess);
+  // multiply violation by 2 according to account for the factor of 2 in the
+  // hessian
+  auto f_A = build_wt_sum_constraints(2 * violation, params_.tol_viol_hess);
   // add cost term if required
   Matrix hess_corr;
   if (params_.enable_cost_constraint) {
