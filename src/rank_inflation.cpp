@@ -64,6 +64,11 @@ Matrix RankInflation::inflate_solution(
   Matrix Y(dim, r_targ);
   Y << Y_0, zpad;
 
+  // DEBUG
+  std::vector<double> vals(b_.begin(), b_.end());
+  vals.push_back(rho_);
+  Vector constraint_val = Vector::Map(vals.data(), vals.size());
+
   // *** Main Loop ***
   // Initialize
   int n_iter = 0;
@@ -78,23 +83,29 @@ Matrix RankInflation::inflate_solution(
     auto result = get_soln_qr_dense(*Jac, -violation, params_.rank_thresh_null);
     // dimension of the solution space
     int nulldim = result.nullspace_basis.cols();
-    // Print outputs
-    if (params_.verbose) {
-      if (n_iter == 0) {
-        std::printf("%6s %6s %18s %10s %6s\n", "Iter", "Rank", "ViolationNorm",
-                    "NullDim", "RankUp");
-      }
-      char rank_up = rank_increase ? 'T' : 'F';
-      std::printf("%6d %6d %18.6e %10d %6c\n", n_iter, r, violation.norm(),
-                  nulldim, rank_up);
-      rank_increase = false;  // reset
-    }
 
-    // Add solution to matrix (Newton step)
-    Matrix Y_corrected =
-        Y + params_.step_corr * result.solution.reshaped(dim, r_targ);
+    // Get the Gauss-Newton step
+    Matrix dY = result.solution.reshaped(dim, r_targ);
+    // Line search
+    double alpha;
+    if (params_.enable_line_search) {
+      alpha = RankInflation::backtrack_line_search(Y, dY, *Jac);
+    } else {
+      alpha = 1.0;
+    }
+    // Apply update
+    Matrix Y_corrected = Y + alpha * dY;
+
+    // // DEBUG
+    // Vector viol_quad = eval_constraints(result.solution.reshaped(dim, r_targ)) +
+    //                    constraint_val;
+    // std::cout << "Viol_quad (debug): " << std::endl
+    //           << viol_quad.transpose() << std::endl;
+    // std::cout << "Norm squared of dY: " << std::pow(dY.norm(), 2) << std::endl;
+    
+
     // if rank not high enough, try to increase
-    if (r < r_targ) {
+    if (r < r_targ && params_.enable_inc_rank) {
       rank_increase = true;
       // Get random (normalized) matrix from nullspace
       Eigen::VectorXd alpha =
@@ -118,6 +129,23 @@ Matrix RankInflation::inflate_solution(
     converged = r >= r_targ && violation.norm() < params_.tol_violation;
     // update
     n_iter++;
+    // Print outputs
+    if (params_.verbose) {
+      if (n_iter % 10 == 1) {
+        std::printf("%6s %6s %18s %10s %10s %6s\n", "Iter", "Rank",
+                    "ViolationNorm", "NullDim", "Alpha", "RankUp");
+      }
+      char rank_up = rank_increase ? 'T' : 'F';
+      std::printf("%6d %6d %18.6e %10d %10.3e %6c\n", n_iter, r,
+                  violation.norm(), nulldim, alpha, rank_up);
+      rank_increase = false;  // reset
+      
+      //DEBUGGING
+      // std::cout << "Violation: " << violation.transpose() << std::endl;
+      // std::cout << "Step Norm: " << dY.norm() << std::endl;
+      
+    }
+
   }
   if (Jac_final != nullptr) {
     // transfer ownership of the unique pointer to the outer scope
@@ -125,6 +153,40 @@ Matrix RankInflation::inflate_solution(
   }
 
   return Y;
+}
+
+double RankInflation::backtrack_line_search(const Matrix& Y, const Matrix& dY,
+                                            const Matrix& Jac) const {
+  // Initial step size
+  double alpha = params_.alpha_init;
+  // Current violation
+  Vector violation = eval_constraints(Y);
+  double norm_viol = violation.norm();
+  // Parameters for backtracking
+  const double beta =
+      params_.ln_search_red_factor;             // step size reduction factor
+  const double c = params_.ln_search_suff_dec;  // sufficient decrease parameter
+
+  // Backtracking loop
+  while (true) {
+    // Compute new candidate solution
+    Matrix Y_new = Y + alpha * dY;
+    // Evaluate constraints at new solution
+    Vector violation_new = eval_constraints(Y_new);
+    double norm_viol_new = violation_new.norm();
+    // Check Armijo condition
+    if (norm_viol_new <= norm_viol + c * alpha * (Jac * dY.reshaped()).norm()) {
+      break;  // Sufficient decrease achieved
+    }
+    // Reduce step size
+    alpha *= beta;
+    // Prevent too small step sizes
+    if (alpha < params_.alpha_min) {
+      alpha = params_.alpha_min;
+      break;  // Stop if step size is too small
+    }
+  }
+  return alpha;
 }
 
 Matrix RankInflation::build_certificate(const Matrix& Jac,
@@ -157,8 +219,8 @@ Matrix RankInflation::build_certificate(const Matrix& Jac,
             Eigen::Triplet<double>(it.row(), it.col(), it.value()));
         if (it.row() != it.col()) {
           // off-diagonal entry, add symmetric part
-          tripletList.push_back(Eigen::Triplet<double>(
-              it.col(), it.row(), it.value()));
+          tripletList.push_back(
+              Eigen::Triplet<double>(it.col(), it.row(), it.value()));
         }
       }
     }
@@ -233,6 +295,9 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
 
     // Transform back to original space using the permutation matrix P
     result.nullspace_basis = P * basisPermuted;
+
+    // print residual of the solution basis
+    // std::cout << "QR Residual:" << (A*result.solution-b).norm() << std::endl;
   }
 
   return result;

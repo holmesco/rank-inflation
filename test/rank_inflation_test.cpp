@@ -245,15 +245,15 @@ TEST_P(LovascThetaParamTest, Certificate) {
   RankInflateParams params;
   params.use_cost_constraint = true;
   params.verbose = true;
-  params.target_rank = dim;
+  params.target_rank = dim;  //DEBUGGINGGG
   // generate problem
   auto problem = RankInflation(C, rho, A, b, params);
   // get current solution
   std::vector<int> clique = test_params.expected_clique;
   double clq_num = clique.size();
-  auto Y_0 = Vector::Zero(dim).eval();
+  auto Y_0 = Matrix::Zero(dim,1).eval();
   for (int i : clique) {
-    Y_0(i) = std::sqrt(1 / clq_num);
+    Y_0(i,0) = std::sqrt(1 / clq_num);
   }
   // Run rank inflation, without inflation (target rank is 1)
   auto Jac = std::make_unique<Matrix>(problem.m, dim*params.target_rank);

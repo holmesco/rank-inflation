@@ -35,19 +35,29 @@ struct RankInflateParams {
   bool use_cost_constraint = true;
   // Desired rank
   int target_rank = 1;
+  // Enable for increasing rank (for debugging)
+  bool enable_inc_rank = true;
   // Max number of iterations
   int max_iter = 50;
-  // Correcting step multiplier (wrt Frobenius norm)
-  double step_corr = 0.5;
+  // Line search enable
+  bool enable_line_search = true;
+  // Line search sufficient decrease parameter (should be between zero and one)
+  double ln_search_suff_dec = 1e-4;
+  // Line search reduction factor (should be between zero and one)
+  double ln_search_red_factor = 0.5;
+  // Line search initialization
+  double alpha_init = 1.0;
+  // Line search lower bound 
+  double alpha_min = 1e-4;
   // Nullspace step size (wrt Frobenius norm)
-  double step_frac_null = 1E-2;
+  double step_frac_null = 1E-3;
   // tolerance for constraint norm satisfaction.
-  double tol_violation = 1.0E-5;
+  double tol_violation = 1.0E-6;
   // threshold for checking rank of the solution
   // NOTE: pivot added to rank if R_ii > thresh * R_max
-  double rank_thresh_sol = 1.0E-5;
+  double rank_thresh_sol = 1.0E-4;
   // threshold for computing rank of solution null space
-  double rank_thresh_null = 1.0E-5;
+  double rank_thresh_null = 1.0E-12;
 };
 
 class RankInflation {
@@ -90,6 +100,9 @@ class RankInflation {
   // of the certificate matrix at the solution (first order condition)
   std::pair<double, double> check_certificate(const Matrix& H,
                                               const Matrix& Y) const;
+  
+  // Implement backtracking line search to find step size
+  double backtrack_line_search(const Matrix& Y, const Matrix& dY, const Matrix& Jac) const;
 };
 
 }  // namespace SDPTools
