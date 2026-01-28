@@ -192,6 +192,60 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
     }
   }
 }
+
+// Test Second Order Correction
+TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
+  const auto& test_params = GetParam();
+  // get info from adjacency
+  auto [edges, nonedges] = get_edges(test_params.adj);
+  int dim = test_params.adj.rows();
+  // Generate constraints
+  auto A = get_lovasz_constraints(dim, nonedges);
+  auto b = std::vector<double>(A.size(), 0.0);
+  b.back() = 1.0;
+  // generate cost
+  Matrix C = -Matrix::Ones(dim, dim);
+  double rho = -static_cast<double>(test_params.expected_clique.size());
+  // parameters
+  RankInflateParams params;
+  params.enable_cost_constraint = true;
+  params.verbose = true;
+  params.target_rank = 2;
+  // generate problem
+  auto problem = RankInflation(C, rho, A, b, params);
+  // Test vector at actual solution
+  Matrix Y = Matrix::Zero(dim, 2);
+  std::vector<int> clique = test_params.expected_clique;
+  double clq_num = clique.size();
+  for (int i : clique) {
+    Y(i, 0) = std::sqrt(1 / clq_num);
+  }
+  // Add perturbation to solution
+  Eigen::MatrixXd perturb = Eigen::MatrixXd::Random(dim, 2) * 0.1;
+  Y += perturb;
+  // Call evaluation function
+  auto Jac =
+      std::make_unique<Matrix>(problem.m, problem.params_.target_rank * dim);
+  auto output = problem.eval_constraints(Y, &Jac);
+  // Apply QR decomposition
+  QRResult result =
+      get_soln_qr_dense(*Jac, -output, problem.params_.rank_thresh_null);
+  // Gauss Newton part of the step
+  delta_gn = result.solution;
+  // Get system of equations for second order correction
+  auto [hess, grad] = problem.build_proj_corr_grad_hess(output, result.nullspace_basis, delta_gn);
+  // Solve new system
+  QRResult corr_result = get_soln_qr_dense(hess, -grad, problem.params_.tol_null_corr);
+  // reconstruct solution
+  delta_corr = result.nullspace_basis * corr_result.solution;
+  delta = delta_gn + delta_corr;
+  // Evaluate
+  viol_gn = problem.eval_constraints(Y + delta_gn.reshaped(dim, params.target_rank));
+  viol = problem.eval_constraints(Y + delta.reshaped(dim, params.target_rank));
+  
+
+}
+
 // Test Rank Inflation
 TEST_P(LovascThetaParamTest, RankInflation) {
   const auto& test_params = GetParam();
@@ -247,7 +301,7 @@ TEST_P(LovascThetaParamTest, Certificate) {
   RankInflateParams params;
   params.enable_cost_constraint = true;
   params.verbose = true;
-  params.target_rank = dim;  //DEBUGGINGGG
+  params.target_rank = dim;  // DEBUGGINGGG
   // generate problem
   auto problem = RankInflation(C, rho, A, b, params);
   // get current solution

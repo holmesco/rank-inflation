@@ -139,7 +139,7 @@ Matrix RankInflation::inflate_solution(
       std::printf("%6d %6d %18.6e %10d %10.3e %6c\n", n_iter, r,
                   violation.norm(), nulldim, alpha, rank_up);
       rank_increase = false;  // reset
-      
+
       // DEBUGGING
       //  std::cout << "Violation: " << violation.transpose() << std::endl;
       //  std::cout << "Step Norm: " << dY.norm() << std::endl;
@@ -187,6 +187,61 @@ double RankInflation::backtrack_line_search(const Matrix& Y, const Matrix& dY,
   return alpha;
 }
 
+SpMatrix RankInflation::build_wt_sum_constraints(const Vector& coeffs,
+                                                 double tol) const {
+  // 1. Calculate the weighted sum of the upper-triangular parts
+  SpMatrix upperSum = coeffs[0] * A_[0];
+  for (size_t i = 1; i < A_.size(); ++i) {
+    if (std::abs(coeffs(i)) > tol) {
+      upperSum += coeffs[i] * A_[i];
+    }
+  }
+
+  // 2. Reflect the upper triangle into the lower triangle to get the full
+  // matrix .selfadjointView<Eigen::Upper>() treats the matrix as symmetric and
+  // the assignment to a SparseMatrix fills in the missing entries.
+  SpMatrix fullMatrix = upperSum.selfadjointView<Eigen::Upper>();
+
+  fullMatrix.makeCompressed();
+  return fullMatrix;
+}
+
+Matrix RankInflation::build_sec_ord_corr_hessian(
+    const Vector& violation) const {
+  // build weighted sum of constraint matrices with violation values
+  auto f_A = build_wt_sum_constraints(violation, params_.tol_viol_hess);
+  // add cost term if required
+  Matrix hess_corr;
+  if (params_.enable_cost_constraint) {
+    hess_corr = C_ * violation(violation.size() - 1) + f_A;
+  } else {
+    hess_corr = f_A;
+  }
+  return hess_corr;
+}
+
+std::pair<Matrix, Vector> RankInflation::build_proj_corr_grad_hess(
+    const Vector& violation, const Matrix& basis, const Vector& delta_n) const {
+  // Get rank of current solution
+  int r = basis.rows() / dim;
+  // Get reduced hessian
+  Matrix H_r = build_sec_ord_corr_hessian(violation);
+  // Produce B^T * (I_r \otimes H_r) * B and B^T *
+  int p = basis.cols();
+  Matrix hess = Matrix::Zero(p, p);
+  Vector grad = Vector::Zero(p);
+  // Instead of I \otimes H, iterate through block diagonal structure
+  for (int i = 0; i < r; ++i) {
+    // Extract block row "i" from basis and compute hessian
+    auto B_i = basis.block(i * dim, 0, dim, p);
+    hess += B_i.transpose() * H_r * B_i;
+    // extract block row "i" from input vector and compute grad
+    auto delta_n_i = delta_n.segment(i * dim, dim);
+    grad += B_i.transpose() * H_r * delta_n_i;
+  }
+  return {hess, grad};
+}
+
 Matrix RankInflation::build_certificate(const Matrix& Jac,
                                         const Matrix& Y) const {
   // Get components of stationarity condition
@@ -205,26 +260,7 @@ Matrix RankInflation::build_certificate(const Matrix& Jac,
       get_soln_qr_dense(vecAY.transpose(), -vecCY, params_.rank_thresh_null);
   Vector lagrange = result.solution;
   // Build the certificate matrix
-  // Note: this is done efficiently using triplets for the sparse part
-  std::vector<Eigen::Triplet<double>> tripletList;
-  for (int i = 0; i < A_.size(); i++) {
-    // Multiply and store result as a sparse matrix to get its elements
-    Eigen::SparseMatrix<double> temp = A_[i] * lagrange(i);
-    for (int k = 0; k < temp.outerSize(); ++k) {
-      for (typename Eigen::SparseMatrix<double>::InnerIterator it(temp, k); it;
-           ++it) {
-        tripletList.push_back(
-            Eigen::Triplet<double>(it.row(), it.col(), it.value()));
-        if (it.row() != it.col()) {
-          // off-diagonal entry, add symmetric part
-          tripletList.push_back(
-              Eigen::Triplet<double>(it.col(), it.row(), it.value()));
-        }
-      }
-    }
-  }
-  Eigen::SparseMatrix<double> H_sp(dim, dim);
-  H_sp.setFromTriplets(tripletList.begin(), tripletList.end());
+  auto H_sp = build_wt_sum_constraints(lagrange);
   // Add cost matrix and store as dense
   Matrix H = C_ + H_sp;
 
