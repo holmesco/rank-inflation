@@ -35,7 +35,7 @@ struct RankInflateParams {
   // Include cost value in the constraint list
   bool enable_cost_constraint = true;
   // Desired rank
-  int target_rank = 1;
+  int max_sol_rank = 1;
   // Enable for increasing rank (for debugging)
   bool enable_inc_rank = true;
   // Max number of iterations
@@ -63,7 +63,7 @@ struct RankInflateParams {
   // Line search lower bound
   double alpha_min = 1e-4;
   // Nullspace step size (wrt Frobenius norm)
-  double step_frac_null = 1E-2;
+  double step_frac_null = 1E-1;
   // tolerance for constraint norm satisfaction.
   double tol_violation = 1.0E-6;
   // NOTE: pivot added to rank if R_ii > thresh * R_max
@@ -71,7 +71,7 @@ struct RankInflateParams {
   // NOTE: Should be lower than tol_violation (empirically observed.)
   double rank_thresh_sol = 1.0E-8;
   // threshold for computing rank of solution null space
-  double rank_thresh_null = 1.0E-12;
+  double rank_thresh_null = 1.0E-8;
 };
 
 class RankInflation {
@@ -128,7 +128,8 @@ class RankInflation {
   // Build weighted sum of constraint matrices: sum_i A_i * lambda_i
   // If the coefficient falls below `tol` then the corresponding constraint is
   // not added to the sum
-  SpMatrix build_wt_sum_constraints(const Vector& coeffs, double tol=0.0) const;
+  SpMatrix build_wt_sum_constraints(const Vector& coeffs,
+                                    double tol = 0.0) const;
 
   // Compute the second order correction Hessian projected into a given basis
   std::pair<Matrix, Vector> build_proj_corr_grad_hess(

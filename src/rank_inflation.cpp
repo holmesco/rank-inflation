@@ -16,7 +16,7 @@ RankInflation::RankInflation(const Matrix& C, double rho,
 Vector RankInflation::eval_constraints(const Matrix& Y,
                                        std::unique_ptr<Matrix>* Jac) const {
   // dimension assertions
-  int r = params_.target_rank;
+  int r = params_.max_sol_rank;
   assert(Y.rows() == dim);
   assert(Y.cols() == r);
   if (Jac != nullptr) {
@@ -55,7 +55,7 @@ Vector RankInflation::eval_constraints(const Matrix& Y,
 Matrix RankInflation::inflate_solution(
     const Matrix& Y_0, std::unique_ptr<Matrix>* Jac_final) const {
   // convenience definitions
-  int r_targ = params_.target_rank;
+  int r_targ = params_.max_sol_rank;
   // Create initial solution by padding with zeros
   assert(Y_0.rows() == dim && "Initial solution has the wrong number of rows");
   assert(Y_0.cols() <= r_targ &&
@@ -82,19 +82,17 @@ Matrix RankInflation::inflate_solution(
     // Solve linear system to get update
     auto result_gn =
         get_soln_qr_dense(*Jac, -violation, params_.rank_thresh_null);
-    // dimension of the solution space
-    int nulldim = result_gn.nullspace_basis.cols();
     // get GN solution
     Vector& delta_gn = result_gn.solution;
     // Second order correction
     Vector delta;
+    QRResult result_corr;
     if (params_.enable_sec_ord_corr) {
       // Get system of equations for second order correction
       auto [hess, grad] = build_proj_corr_grad_hess(
           violation, result_gn.nullspace_basis, delta_gn);
       // Solve new system
-      QRResult result_corr =
-          get_soln_qr_dense(hess, -grad, params_.tol_null_corr);
+      result_corr = get_soln_qr_dense(hess, -grad, params_.tol_null_corr);
       // reconstruct tangent-space solution
       auto delta_corr = result_gn.nullspace_basis * result_corr.solution;
       // combine normal and tangent componenets
@@ -123,13 +121,30 @@ Matrix RankInflation::inflate_solution(
     // std::cout << "Norm squared of dY: " << std::pow(dY.norm(), 2) <<
     // std::endl;
 
-    // if rank not high enough, try to increase
-    if (r < r_targ && params_.enable_inc_rank) {
+    // Check if the Jacobian has full row rank, if not add perturbation to
+    // solution
+    if (result_gn.rank < m && params_.enable_inc_rank) {
       rank_increase = true;
-      // Get random (normalized) matrix from nullspace
-      Eigen::VectorXd alpha =
-          Eigen::VectorXd::Random(nulldim);  // values in [-1,1]
-      Matrix N = (result_gn.nullspace_basis * alpha).reshaped(dim, r_targ);
+      Matrix N;
+      if (params_.enable_sec_ord_corr &&
+          result_corr.nullspace_basis.cols() > 0) {
+        // Add perturbation from the inner nullspace
+        int nulldim = result_corr.nullspace_basis.cols();
+        // Get random matrix from nullspace
+        Vector phi = Vector::Random(nulldim);  // values in [-1,1]
+        N = (result_gn.nullspace_basis * result_corr.nullspace_basis * phi)
+                .reshaped(dim, r_targ);
+      } else if (result_gn.nullspace_basis.cols() > 0) {
+        // Add perturbation from the outer nullspace
+        int nulldim = result_gn.nullspace_basis.cols();
+        // Get random matrix from nullspace
+        Vector phi = Vector::Random(nulldim);  // values in [-1,1]
+        N = (result_gn.nullspace_basis * phi).reshaped(dim, r_targ);
+      } else {
+        // Add random perturbation
+        N = Matrix::Random(dim, r_targ);
+      }
+      // Normalize
       double norm_N = N.norm();
       if (norm_N > 0) {
         N /= norm_N;
@@ -144,18 +159,18 @@ Matrix RankInflation::inflate_solution(
     violation = eval_constraints(Y, &Jac);
     r = get_rank(Y, params_.rank_thresh_sol);
     // Check convergence
-    converged = r >= r_targ && violation.norm() < params_.tol_violation;
+    converged = result_gn.rank >= m && violation.norm() < params_.tol_violation;
     // update
     n_iter++;
     // Print outputs
     if (params_.verbose) {
       if (n_iter % 10 == 1) {
-        std::printf("%6s %6s %18s %10s %10s %6s\n", "Iter", "Rank",
-                    "ViolationNorm", "NullDim", "Alpha", "RankUp");
+        std::printf("%6s %6s %18s %10s %10s %6s\n", "Iter", "JacRank",
+                    "ViolationNorm", "SolRank", "Alpha", "RankUp");
       }
       char rank_up = rank_increase ? 'T' : 'F';
-      std::printf("%6d %6d %18.6e %10d %10.3e %6c\n", n_iter, r,
-                  violation.norm(), nulldim, alpha, rank_up);
+      std::printf("%6d %6d %18.6e %10d %10.3e %6c\n", n_iter, result_gn.rank,
+                  violation.norm(), r, alpha, rank_up);
       rank_increase = false;  // reset
 
       // DEBUGGING

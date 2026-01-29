@@ -78,7 +78,7 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   RankInflateParams params;
   params.enable_cost_constraint = true;
   params.verbose = true;
-  params.target_rank = 2;
+  params.max_sol_rank = 2;
   // generate problem
   auto problem = RankInflation(C, rho, A, b, params);
   // Test vector at actual solution
@@ -89,7 +89,7 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
     Y(i, 0) = std::sqrt(1 / clq_num);
   }
   auto Jac =
-      std::make_unique<Matrix>(problem.m, problem.params_.target_rank * dim);
+      std::make_unique<Matrix>(problem.m, problem.params_.max_sol_rank * dim);
   // Call evaluation function
   auto output = problem.eval_constraints(Y, &Jac);
   // evaluation and gradient should be near zero
@@ -103,7 +103,7 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   // std::cout << "Jac: " << std::endl << Jac << std::endl;
   // Numerical directional derivative check
   const double eps = 1e-6;
-  int r = problem.params_.target_rank;
+  int r = problem.params_.max_sol_rank;
   int vec_size = r * dim;
   Eigen::VectorXd delta_vec = Eigen::VectorXd::Random(vec_size);
   delta_vec.normalize();
@@ -138,7 +138,7 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
   RankInflateParams params;
   params.enable_cost_constraint = true;
   params.verbose = true;
-  params.target_rank = 2;
+  params.max_sol_rank = 2;
   // generate problem
   auto problem = RankInflation(C, rho, A, b, params);
   // Test vector at actual solution
@@ -149,7 +149,7 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
     Y(i, 0) = std::sqrt(1 / clq_num);
   }
   auto Jac =
-      std::make_unique<Matrix>(problem.m, problem.params_.target_rank * dim);
+      std::make_unique<Matrix>(problem.m, problem.params_.max_sol_rank * dim);
   // Call evaluation function
   auto output = problem.eval_constraints(Y, &Jac);
   // Apply QR decomposition
@@ -157,7 +157,7 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
       get_soln_qr_dense(*Jac, -output, problem.params_.rank_thresh_null);
   // solution should be zero
   const double tol = 1e-6;
-  ASSERT_EQ(soln.solution.size(), problem.params_.target_rank * dim);
+  ASSERT_EQ(soln.solution.size(), problem.params_.max_sol_rank * dim);
   for (int i = 0; i < soln.solution.size(); ++i) {
     EXPECT_NEAR(soln.solution(i), 0.0, tol) << "row " << i;
   }
@@ -173,7 +173,7 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
     double alpha_norm = alpha.norm();
     if (alpha_norm > 0) alpha /= alpha_norm;
     Matrix dY = (soln.nullspace_basis * alpha)
-                    .reshaped(dim, problem.params_.target_rank);
+                    .reshaped(dim, problem.params_.max_sol_rank);
     // Add delta to solution
     Matrix Y_plus = Y + dY;
     // Evaluate constraints at new solution
@@ -210,7 +210,7 @@ TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
   RankInflateParams params;
   params.enable_cost_constraint = true;
   params.verbose = true;
-  params.target_rank = 2;
+  params.max_sol_rank = 2;
   // generate problem
   auto problem = RankInflation(C, rho, A, b, params);
   // Test vector at actual solution
@@ -223,10 +223,10 @@ TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
   // Add perturbation to solution
   // Eigen::MatrixXd perturb = Eigen::MatrixXd::Random(dim, 2) * 0.1;
   // Y += perturb;
-  Y *=1.1;
+  Y *= 1.1;
   // Call evaluation function
   auto Jac =
-      std::make_unique<Matrix>(problem.m, problem.params_.target_rank * dim);
+      std::make_unique<Matrix>(problem.m, problem.params_.max_sol_rank * dim);
   auto output = problem.eval_constraints(Y, &Jac);
   // Apply QR decomposition
   QRResult result =
@@ -244,9 +244,9 @@ TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
   auto delta = delta_gn + delta_corr;
   // Evaluate
   auto viol_gn =
-      problem.eval_constraints(Y + delta_gn.reshaped(dim, params.target_rank));
+      problem.eval_constraints(Y + delta_gn.reshaped(dim, params.max_sol_rank));
   auto viol =
-      problem.eval_constraints(Y + delta.reshaped(dim, params.target_rank));
+      problem.eval_constraints(Y + delta.reshaped(dim, params.max_sol_rank));
   // print norm of violations
   std::cout << "Norm of violation after GN step: " << viol_gn.norm()
             << ", after SOC step: " << viol.norm() << std::endl;
@@ -271,7 +271,7 @@ TEST_P(LovascThetaParamTest, RankInflation) {
   RankInflateParams params;
   params.enable_cost_constraint = true;
   params.verbose = true;
-  params.target_rank = dim;
+  params.max_sol_rank = dim;
   // generate problem
   auto problem = RankInflation(C, rho, A, b, params);
   // get current soluition
@@ -285,7 +285,7 @@ TEST_P(LovascThetaParamTest, RankInflation) {
   auto Y = problem.inflate_solution(Y_0);
   // Check solution rank
   int r = get_rank(Y, 1.0E-5);
-  EXPECT_TRUE(r >= params.target_rank) << "Did not acheive target rank";
+  EXPECT_TRUE(r >= params.max_sol_rank) << "Did not acheive target rank";
   // Check constraint tolerance
   auto viol = problem.eval_constraints(Y);
   EXPECT_TRUE(viol.norm() <= params.tol_violation)
@@ -304,12 +304,12 @@ TEST_P(LovascThetaParamTest, Certificate) {
   b.back() = 1.0;
   // generate cost
   Matrix C = -Matrix::Ones(dim, dim);
-  double rho = -static_cast<double>(test_params.expected_clique.size());
+  double rho = -static_cast<double>(test_params.expected_clique.size())*0.5;
   // parameters
   RankInflateParams params;
   params.enable_cost_constraint = true;
   params.verbose = true;
-  params.target_rank = dim;  // DEBUGGINGGG
+  params.max_sol_rank = dim;
   // generate problem
   auto problem = RankInflation(C, rho, A, b, params);
   // get current solution
@@ -320,7 +320,7 @@ TEST_P(LovascThetaParamTest, Certificate) {
     Y_0(i, 0) = std::sqrt(1 / clq_num);
   }
   // Run rank inflation, without inflation (target rank is 1)
-  auto Jac = std::make_unique<Matrix>(problem.m, dim * params.target_rank);
+  auto Jac = std::make_unique<Matrix>(problem.m, dim * params.max_sol_rank);
   auto Y = problem.inflate_solution(Y_0, &Jac);
   // std::cout << "dot product of Y_0 and Y: "
   //           << (Y_0.transpose() * Y).norm() / Y.norm() / Y_0.norm()
