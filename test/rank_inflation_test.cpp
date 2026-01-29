@@ -154,7 +154,7 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
   auto output = problem.eval_constraints(Y, &Jac);
   // Apply QR decomposition
   QRResult soln =
-      get_soln_qr_dense(*Jac, -output, problem.params_.rank_thresh_null);
+      get_soln_qr_dense(*Jac, -output, problem.params_.rank_def_thresh);
   // solution should be zero
   const double tol = 1e-6;
   ASSERT_EQ(soln.solution.size(), problem.params_.max_sol_rank * dim);
@@ -230,7 +230,7 @@ TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
   auto output = problem.eval_constraints(Y, &Jac);
   // Apply QR decomposition
   QRResult result =
-      get_soln_qr_dense(*Jac, -output, problem.params_.rank_thresh_null);
+      get_soln_qr_dense(*Jac, -output, problem.params_.rank_def_thresh);
   // Gauss Newton part of the step
   auto delta_gn = result.solution;
   // Get system of equations for second order correction
@@ -304,7 +304,7 @@ TEST_P(LovascThetaParamTest, Certificate) {
   b.back() = 1.0;
   // generate cost
   Matrix C = -Matrix::Ones(dim, dim);
-  double rho = -static_cast<double>(test_params.expected_clique.size())*0.5;
+  double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
   params.enable_cost_constraint = true;

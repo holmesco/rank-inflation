@@ -18,6 +18,8 @@ struct QRResult {
   Vector solution;
   Matrix nullspace_basis;
   int rank;
+  Vector R_diagonal;
+  double residual_norm;
 };
 
 // Get the particular solution and null space of a system of linear equations
@@ -30,6 +32,8 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
 int get_rank(const Matrix& Y, const double threshold);
 
 struct RankInflateParams {
+  // NOTE: for tolerances on rank and nullspace: pivot added to rank if R_ii > tol * R_max
+
   // Verbosity
   bool verbose = true;
   // Include cost value in the constraint list
@@ -39,16 +43,25 @@ struct RankInflateParams {
   // Enable for increasing rank (for debugging)
   bool enable_inc_rank = true;
   // Max number of iterations
-  int max_iter = 50;
+  int max_iter = 100;
+
+  // Gauss-Newton solve parameters
+  // -----------------------
+  // Null space threshold for GN solve
+  // NOTE: Controls accuracy of GN solve. Should be small to get accurate
+  // solutions.
+  double tol_null_gn = 1.0E-14;
+  // tolerance for constraint norm satisfaction.
+  double tol_violation = 1.0E-6;
 
   // Second order correction
   // -----------------------
   // Enable second-order correction term
   bool enable_sec_ord_corr = true;
-  // tolerance on violation to include constraint in hessian
+  // tolerance on violation to include constraint in hessian construction
   double tol_viol_hess = 1e-12;
   // tolerance on null space for linear solve
-  double tol_null_corr = 1e-8;
+  double tol_null_corr = 1e-14;
 
   // Line search
   // ----------------
@@ -62,16 +75,18 @@ struct RankInflateParams {
   double alpha_init = 1.0;
   // Line search lower bound
   double alpha_min = 1e-4;
+
+  // Rank inflation parameters
+  // ----------------
   // Nullspace step size (wrt Frobenius norm)
-  double step_frac_null = 1E-1;
-  // tolerance for constraint norm satisfaction.
-  double tol_violation = 1.0E-6;
-  // NOTE: pivot added to rank if R_ii > thresh * R_max
+  double eps_null = 1E-1;
   // threshold for checking rank of the solution
-  // NOTE: Should be lower than tol_violation (empirically observed.)
-  double rank_thresh_sol = 1.0E-8;
-  // threshold for computing rank of solution null space
-  double rank_thresh_null = 1.0E-8;
+  // (does not affect convergence, just for display)
+  double tol_rank_sol = 1.0E-4;
+  // Threshold for rank deficiency check of the Jacobian. Value is used to
+  // compare the two smallest diagonal elements of the R matrix from the QR
+  // decomposition. Note: we expect the Jacobian to be rank-deficient by one.
+  double rank_def_thresh = 1.0E-6;
 };
 
 class RankInflation {
@@ -135,6 +150,11 @@ class RankInflation {
   std::pair<Matrix, Vector> build_proj_corr_grad_hess(
       const Vector& violation, const Matrix& basis,
       const Vector& delta_n) const;
+
+  // Returns true if the Jacobian is rank-deficient by exactly one
+  // Input is the diagonal of R from the QR decomposition of the Jacobian
+  bool check_jac_rank(const Vector& R_diag, double thresh_rank_def,
+                      double thresh_rank) const;
 };
 
 }  // namespace SDPTools

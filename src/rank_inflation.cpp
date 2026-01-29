@@ -55,13 +55,12 @@ Vector RankInflation::eval_constraints(const Matrix& Y,
 Matrix RankInflation::inflate_solution(
     const Matrix& Y_0, std::unique_ptr<Matrix>* Jac_final) const {
   // convenience definitions
-  int r_targ = params_.max_sol_rank;
+  int r_max = params_.max_sol_rank;
   // Create initial solution by padding with zeros
   assert(Y_0.rows() == dim && "Initial solution has the wrong number of rows");
-  assert(Y_0.cols() <= r_targ &&
-         "Initial solution has rank higher than target");
-  Matrix zpad = Matrix::Zero(dim, r_targ - Y_0.cols());
-  Matrix Y(dim, r_targ);
+  assert(Y_0.cols() <= r_max && "Initial solution has rank higher than target");
+  Matrix zpad = Matrix::Zero(dim, r_max - Y_0.cols());
+  Matrix Y(dim, r_max);
   Y << Y_0, zpad;
 
   // DEBUG
@@ -73,15 +72,14 @@ Matrix RankInflation::inflate_solution(
   // Initialize
   int n_iter = 0;
   bool converged = false;
-  auto Jac = std::make_unique<Matrix>(m, dim * r_targ);
-  int r = get_rank(Y, params_.rank_thresh_sol);
+  auto Jac = std::make_unique<Matrix>(m, dim * r_max);
+  int r = get_rank(Y, params_.tol_rank_sol);
   auto violation = eval_constraints(Y, &Jac);
   bool rank_increase = false;
   // Loop
   while (n_iter < params_.max_iter && !converged) {
     // Solve linear system to get update
-    auto result_gn =
-        get_soln_qr_dense(*Jac, -violation, params_.rank_thresh_null);
+    auto result_gn = get_soln_qr_dense(*Jac, -violation, params_.tol_null_gn);
     // get GN solution
     Vector& delta_gn = result_gn.solution;
     // Second order correction
@@ -101,7 +99,7 @@ Matrix RankInflation::inflate_solution(
       delta = delta_gn;
     }
     // Reshape delta
-    Matrix dY = delta.reshaped(dim, r_targ);
+    Matrix dY = delta.reshaped(dim, r_max);
     // Line search
     double alpha;
     if (params_.enable_line_search) {
@@ -112,18 +110,13 @@ Matrix RankInflation::inflate_solution(
     // Apply update
     Matrix Y_corrected = Y + alpha * dY;
 
-    // // DEBUG
-    // Vector viol_quad = eval_constraints(result_gn.solution.reshaped(dim,
-    // r_targ)) +
-    //                    constraint_val;
-    // std::cout << "Viol_quad (debug): " << std::endl
-    //           << viol_quad.transpose() << std::endl;
-    // std::cout << "Norm squared of dY: " << std::pow(dY.norm(), 2) <<
-    // std::endl;
-
+    // Check if the Jabobian is exactly rank deficient by one.
+    bool jac_rank_check = check_jac_rank(
+        result_gn.R_diagonal, params_.rank_def_thresh, params_.tol_null_gn);
     // Check if the Jacobian has full row rank, if not add perturbation to
     // solution
-    if (result_gn.rank < m && params_.enable_inc_rank) {
+    if (!jac_rank_check && violation.norm() < params_.tol_violation &&
+        params_.enable_inc_rank) {
       rank_increase = true;
       Matrix N;
       if (params_.enable_sec_ord_corr &&
@@ -133,16 +126,16 @@ Matrix RankInflation::inflate_solution(
         // Get random matrix from nullspace
         Vector phi = Vector::Random(nulldim);  // values in [-1,1]
         N = (result_gn.nullspace_basis * result_corr.nullspace_basis * phi)
-                .reshaped(dim, r_targ);
+                .reshaped(dim, r_max);
       } else if (result_gn.nullspace_basis.cols() > 0) {
         // Add perturbation from the outer nullspace
         int nulldim = result_gn.nullspace_basis.cols();
         // Get random matrix from nullspace
         Vector phi = Vector::Random(nulldim);  // values in [-1,1]
-        N = (result_gn.nullspace_basis * phi).reshaped(dim, r_targ);
+        N = (result_gn.nullspace_basis * phi).reshaped(dim, r_max);
       } else {
         // Add random perturbation
-        N = Matrix::Random(dim, r_targ);
+        N = Matrix::Random(dim, r_max);
       }
       // Normalize
       double norm_N = N.norm();
@@ -150,14 +143,14 @@ Matrix RankInflation::inflate_solution(
         N /= norm_N;
       }
       // Add to solution
-      Y_corrected.noalias() = (1 - params_.step_frac_null) * Y_corrected +
-                              params_.step_frac_null * N;
+      Y_corrected.noalias() =
+          (1 - params_.eps_null) * Y_corrected + params_.eps_null * N;
     }
     // Update solution
     Y = Y_corrected;
     // Evaluate the current solution (violation and rank)
     violation = eval_constraints(Y, &Jac);
-    r = get_rank(Y, params_.rank_thresh_sol);
+    r = get_rank(Y, params_.tol_rank_sol);
     // Check convergence
     converged = result_gn.rank >= m && violation.norm() < params_.tol_violation;
     // update
@@ -292,7 +285,12 @@ Matrix RankInflation::build_certificate(const Matrix& Jac,
   }
   // Solve for Lagrange multipliers
   auto result =
-      get_soln_qr_dense(vecAY.transpose(), -vecCY, params_.rank_thresh_null);
+      get_soln_qr_dense(vecAY.transpose(), -vecCY, params_.tol_null_gn);
+  // print diagonal and residual
+  std::cout << "Lagrange solve residual norm: " << result.residual_norm
+            << std::endl;
+  std::cout << "R diagonal: " << result.R_diagonal.transpose() << std::endl;
+
   Vector lagrange = result.solution;
   // Build the certificate matrix
   auto H_sp = build_wt_sum_constraints(lagrange);
@@ -364,12 +362,35 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
 
     // Transform back to original space using the permutation matrix P
     result.nullspace_basis = P * basisPermuted;
-
-    // print residual of the solution basis
-    // std::cout << "QR Residual:" << (A*result.solution-b).norm() << std::endl;
   }
-
+  // Store additional information
+  result.R_diagonal = qr.matrixQR().diagonal();
+  result.residual_norm = (A * result.solution - b).norm();
   return result;
+}
+
+bool RankInflation::check_jac_rank(const Vector& R_diag, double thresh_rank_def,
+                                   double thresh_rank) const {
+  // Find the two smallest values in R_diag
+  // Note: QR decomposition is not guaranteed to return sorted diagonal
+  double smallest = std::numeric_limits<double>::max();
+  double secondSmallest = std::numeric_limits<double>::max();
+  int rank = 0;
+  for (int i = 0; i < R_diag.size(); ++i) {
+    if (std::abs(R_diag(i)) > thresh_rank) {
+      rank++;
+    }
+    if (std::abs(R_diag(i)) < smallest) {
+      secondSmallest = smallest;
+      smallest = std::abs(R_diag(i));
+    } else if (std::abs(R_diag(i)) < secondSmallest) {
+      secondSmallest = std::abs(R_diag(i));
+    }
+  }
+  // Get the ratio of the two smallest values
+  double ratio = smallest / secondSmallest;
+  // Return true if ratio is below threshold and rank is correct
+  return ratio < thresh_rank_def && rank >= A_.size() - 1;
 }
 
 }  // namespace SDPTools
