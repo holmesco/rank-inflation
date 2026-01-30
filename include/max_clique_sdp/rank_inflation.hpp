@@ -50,9 +50,11 @@ struct RankInflateParams {
   // Null space threshold for GN solve
   // NOTE: Controls accuracy of GN solve. Should be small to get accurate
   // solutions.
-  double tol_null_gn = 1.0E-14;
+  double tol_null_gn = 1.0E-8;
   // tolerance for constraint norm satisfaction.
   double tol_violation = 1.0E-6;
+  // Enable for using the exact hessian (vs approximate)
+  bool enable_exact_hessian = false;
 
   // Second order correction
   // -----------------------
@@ -61,7 +63,8 @@ struct RankInflateParams {
   // tolerance on violation to include constraint in hessian construction
   double tol_viol_hess = 1e-12;
   // tolerance on null space for linear solve
-  double tol_null_corr = 1e-14;
+  // If set too small then null space direction can't be found for perturbation
+  double tol_null_corr = 1e-8;
 
   // Line search
   // ----------------
@@ -79,14 +82,17 @@ struct RankInflateParams {
   // Rank inflation parameters
   // ----------------
   // Nullspace step size (wrt Frobenius norm)
-  double eps_null = 1E-1;
+  double eps_null = 1.0E1;
+  // Nullspace step size on first iteration
+  // On the first iteration, our knowledge of the true null space is poor, so take a smaller step
+  double eps_null_init = 1e1; 
   // threshold for checking rank of the solution
   // (does not affect convergence, just for display)
   double tol_rank_sol = 1.0E-4;
   // Threshold for rank deficiency check of the Jacobian. Value is used to
   // compare the two smallest diagonal elements of the R matrix from the QR
   // decomposition. Note: we expect the Jacobian to be rank-deficient by one.
-  double rank_def_thresh = 1.0E-6;
+  double rank_def_thresh = 1.0E-4;
 };
 
 class RankInflation {

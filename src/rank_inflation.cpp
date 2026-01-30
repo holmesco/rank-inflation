@@ -79,7 +79,26 @@ Matrix RankInflation::inflate_solution(
   // Loop
   while (n_iter < params_.max_iter && !converged) {
     // Solve linear system to get update
-    auto result_gn = get_soln_qr_dense(*Jac, -violation, params_.tol_null_gn);
+    QRResult result_gn;
+    if (params_.enable_exact_hessian) {
+      // Build exact Hessian
+      Matrix Hess = (*Jac).transpose() * (*Jac);
+      // Add correction term along diagonal blocks
+      Matrix H_corr = build_sec_ord_corr_hessian(violation);
+      for (int i = 0; i < r_max; i++) {
+        Hess.block(i * dim, i * dim, dim, dim).noalias() += H_corr;
+      }
+      // build gradient
+      Vector grad = -(*Jac).transpose() * violation;
+      // Solve system
+      result_gn = get_soln_qr_dense(Hess, grad, params_.tol_null_gn);
+      // Debug: compute minimum eigenvalue of Hessian
+      // Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(Hess);
+      // double min_eig = es.eigenvalues().minCoeff();
+      // std::cout << "Minimum Eigenvalue of Hessian: " << min_eig << std::endl;
+    } else {
+      result_gn = get_soln_qr_dense(*Jac, -violation, params_.tol_null_gn);
+    }
     // get GN solution
     Vector& delta_gn = result_gn.solution;
     // Second order correction
@@ -142,9 +161,9 @@ Matrix RankInflation::inflate_solution(
       if (norm_N > 0) {
         N /= norm_N;
       }
+      double stepsize = n_iter > 0 ? params_.eps_null : params_.eps_null_init;
       // Add to solution
-      Y_corrected.noalias() =
-          (1 - params_.eps_null) * Y_corrected + params_.eps_null * N;
+      Y_corrected.noalias() = Y_corrected + stepsize * N;
     }
     // Update solution
     Y = Y_corrected;
@@ -152,7 +171,7 @@ Matrix RankInflation::inflate_solution(
     violation = eval_constraints(Y, &Jac);
     r = get_rank(Y, params_.tol_rank_sol);
     // Check convergence
-    converged = result_gn.rank >= m && violation.norm() < params_.tol_violation;
+    converged = jac_rank_check && violation.norm() < params_.tol_violation;
     // update
     n_iter++;
     // Print outputs
@@ -235,9 +254,7 @@ SpMatrix RankInflation::build_wt_sum_constraints(const Vector& coeffs,
 Matrix RankInflation::build_sec_ord_corr_hessian(
     const Vector& violation) const {
   // build weighted sum of constraint matrices with violation values
-  // multiply violation by 2 according to account for the factor of 2 in the
-  // hessian
-  auto f_A = build_wt_sum_constraints(2 * violation, params_.tol_viol_hess);
+  auto f_A = build_wt_sum_constraints(violation, params_.tol_viol_hess);
   // add cost term if required
   Matrix hess_corr;
   if (params_.enable_cost_constraint) {
@@ -371,26 +388,17 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
 
 bool RankInflation::check_jac_rank(const Vector& R_diag, double thresh_rank_def,
                                    double thresh_rank) const {
-  // Find the two smallest values in R_diag
-  // Note: QR decomposition is not guaranteed to return sorted diagonal
-  double smallest = std::numeric_limits<double>::max();
-  double secondSmallest = std::numeric_limits<double>::max();
-  int rank = 0;
+  // Sort the elements along the diagonal of the R matrix
+  std::vector<double> vals(R_diag.size());
   for (int i = 0; i < R_diag.size(); ++i) {
-    if (std::abs(R_diag(i)) > thresh_rank) {
-      rank++;
-    }
-    if (std::abs(R_diag(i)) < smallest) {
-      secondSmallest = smallest;
-      smallest = std::abs(R_diag(i));
-    } else if (std::abs(R_diag(i)) < secondSmallest) {
-      secondSmallest = std::abs(R_diag(i));
-    }
+    vals[i] = std::abs(R_diag(i));
   }
-  // Get the ratio of the two smallest values
-  double ratio = smallest / secondSmallest;
-  // Return true if ratio is below threshold and rank is correct
-  return ratio < thresh_rank_def && rank >= A_.size() - 1;
+  std::sort(vals.begin(), vals.end());
+  // This ratio should be small to satisfy rank deficiency
+  double ratio = vals[A_.size()] / vals[A_.size() - 1];
+  // Return true if ratio is below threshold and the other values are above the
+  // general threshold
+  return ratio < thresh_rank_def && vals[A_.size() - 1] >= thresh_rank;
 }
 
 }  // namespace SDPTools
