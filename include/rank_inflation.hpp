@@ -31,28 +31,33 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
 // Compute the rank of a dense matrix with rank-revealing QR
 int get_rank(const Matrix& Y, const double threshold);
 
-
+enum class RetractionMethod {
+  GradientDescent,
+  GaussNewton,
+  ExactNewton,
+};
 
 struct RankInflateParams {
-  // NOTE: for tolerances on rank and nullspace: pivot added to rank if R_ii > tol * R_max
+  // NOTE: for tolerances on rank and nullspace: pivot added to rank if R_ii >
+  // tol * R_max
 
   // Verbosity
   bool verbose = true;
-  // Include cost value in the constraint list
-  bool enable_cost_constraint = true;
   // Desired rank
   int max_sol_rank = 1;
   // Enable for increasing rank (for debugging)
   bool enable_inc_rank = true;
   // Max number of iterations
   int max_iter = 100;
+  // Retraction Method
+  RetractionMethod retraction_method = RetractionMethod::GaussNewton;
 
-  // Gauss-Newton solve parameters
+  // Retraction solve parameters
   // -----------------------
   // Null space threshold for GN solve
   // NOTE: Controls accuracy of GN solve. Should be small to get accurate
   // solutions.
-  double tol_null_gn = 1.0E-14;
+  double tol_null_qr = 1.0E-14;
   // tolerance for constraint norm satisfaction.
   double tol_violation = 1.0E-8;
   // Enable for using the exact hessian (vs approximate)
@@ -86,8 +91,9 @@ struct RankInflateParams {
   // Nullspace step size (wrt Frobenius norm)
   double eps_null = 1.0E-2;
   // Nullspace step size on first iteration
-  // On the first iteration, our knowledge of the true null space is poor, so take a smaller step
-  double eps_null_init = 1.0e-2; 
+  // On the first iteration, our knowledge of the true null space is poor, so
+  // take a smaller step
+  double eps_null_init = 1.0e-2;
   // threshold for checking rank of the solution
   // (does not affect convergence, just for display)
   double tol_rank_sol = 1.0E-4;

@@ -10,7 +10,7 @@ RankInflation::RankInflation(const Matrix& C, double rho,
   // dimension of the SDP
   dim = C.rows();
   // number of constraints to enforce during inflation
-  m = params.enable_cost_constraint ? A.size() + 1 : A.size();
+  m = A.size() + 1;
 }
 
 Vector RankInflation::eval_constraints(const Matrix& Y,
@@ -38,7 +38,6 @@ Vector RankInflation::eval_constraints(const Matrix& Y,
       constraint_value = b_[i];
     } else {
       // Cost "constraint"
-      assert(params_.enable_cost_constraint);
       grad_vec = (C_ * Y).reshaped();
       constraint_value = rho_;
     }
@@ -78,48 +77,62 @@ Matrix RankInflation::inflate_solution(
   bool rank_increase = false;
   // Loop
   while (n_iter < params_.max_iter && !converged) {
-    // Solve linear system to get update
-    QRResult result_gn;
-    if (params_.enable_exact_hessian) {
-      // Build exact Hessian
-      Matrix Hess = (*Jac).transpose() * (*Jac);
-      // Add correction term along diagonal blocks
-      Matrix H_corr = build_sec_ord_corr_hessian(violation);
-      for (int i = 0; i < r_max; i++) {
-        Hess.block(i * dim, i * dim, dim, dim).noalias() += H_corr;
-      }
-      // build gradient
-      Vector grad = -(*Jac).transpose() * violation;
-      // Solve system
-      result_gn = get_soln_qr_dense(Hess, grad, params_.tol_null_gn);
-      // Debug: compute minimum eigenvalue of Hessian
-      // Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(Hess);
-      // double min_eig = es.eigenvalues().minCoeff();
-      // std::cout << "Minimum Eigenvalue of Hessian: " << min_eig << std::endl;
-    } else {
-      result_gn = get_soln_qr_dense(*Jac, -violation, params_.tol_null_gn);
-    }
-    // get GN solution
-    Vector& delta_gn = result_gn.solution;
-    // Second order correction
+    // ---------- RETRACTION -----------
+    // QR decomposition of Jacobian (and GN solve)
+    QRResult qr_jacobian =
+        get_soln_qr_dense(*Jac, -violation, params_.tol_null_qr);
+    QRResult qr_hessian;
     Vector delta;
-    QRResult result_corr;
-    if (params_.enable_sec_ord_corr) {
-      // Get system of equations for second order correction
-      auto [hess, grad] = build_proj_corr_grad_hess(
-          violation, result_gn.nullspace_basis, delta_gn);
-      // Solve new system
-      result_corr = get_soln_qr_dense(hess, -grad, params_.tol_null_corr);
-      // reconstruct tangent-space solution
-      auto delta_corr = result_gn.nullspace_basis * result_corr.solution;
-      // combine normal and tangent componenets
-      delta = delta_gn + delta_corr;
-    } else {
-      delta = delta_gn;
+    switch (params_.retraction_method) {
+      case RetractionMethod::ExactNewton: {
+        // Build exact Hessian
+        Matrix Hess = (*Jac).transpose() * (*Jac);
+        // Add correction term along diagonal blocks
+        Matrix H_corr = build_sec_ord_corr_hessian(violation);
+        for (int i = 0; i < r_max; i++) {
+          Hess.block(i * dim, i * dim, dim, dim).noalias() += H_corr;
+        }
+        // build gradient
+        Vector grad = -(*Jac).transpose() * violation;
+        // Solve system
+        qr_hessian = get_soln_qr_dense(Hess, grad, params_.tol_null_qr);
+        // define step
+        // Debug: compute minimum eigenvalue of Hessian
+        // Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(Hess);
+        // double min_eig = es.eigenvalues().minCoeff();
+        // std::cout << "Minimum Eigenvalue of Hessian: " << min_eig <<
+        // std::endl;
+        break;
+      }
+      case RetractionMethod::GaussNewton: {
+        // get GN solution
+        Vector& delta_gn = qr_jacobian.solution;
+        // Second order correction
+        if (params_.enable_sec_ord_corr) {
+          // Get system of equations for second order correction
+          auto [hess, grad] = build_proj_corr_grad_hess(
+              violation, qr_jacobian.nullspace_basis, delta_gn);
+          // Solve new system
+          qr_hessian = get_soln_qr_dense(hess, -grad, params_.tol_null_corr);
+          // reconstruct tangent-space solution
+          auto delta_corr = qr_jacobian.nullspace_basis * qr_hessian.solution;
+          // combine normal and tangent componenets
+          delta = delta_gn + delta_corr;
+        } else {
+          delta = delta_gn;
+        }
+        break;
+      }
+      case RetractionMethod::GradientDescent: {
+        // Get QR Decomposition of Jac
+        qr_jacobian = get_soln_qr_dense(*Jac, -violation, params_.tol_null_qr);
+        delta = -(*Jac) * violation;
+        break;
+      }
     }
-    // Reshape delta
+
+    // ----- LINE SEARCH -----
     Matrix dY = delta.reshaped(dim, r_max);
-    // Line search
     double alpha;
     if (params_.enable_line_search) {
       alpha = RankInflation::backtrack_line_search(Y, dY, *Jac);
@@ -129,9 +142,10 @@ Matrix RankInflation::inflate_solution(
     // Apply update
     Matrix Y_corrected = Y + alpha * dY;
 
+    // ------------ TANGENT STEP -----------------
     // Check if the Jabobian is exactly rank deficient by one.
     bool jac_rank_check = check_jac_rank(
-        result_gn.R_diagonal, params_.rank_def_thresh, params_.tol_null_gn);
+        qr_jacobian.R_diagonal, params_.rank_def_thresh, params_.tol_null_qr);
     // Check if the Jacobian has full row rank, if not add perturbation to
     // solution
     if (!jac_rank_check && violation.norm() < params_.tol_violation &&
@@ -139,19 +153,19 @@ Matrix RankInflation::inflate_solution(
       rank_increase = true;
       Matrix N;
       if (params_.enable_sec_ord_corr &&
-          result_corr.nullspace_basis.cols() > 0) {
+          qr_hessian.nullspace_basis.cols() > 0) {
         // Add perturbation from the inner nullspace
-        int nulldim = result_corr.nullspace_basis.cols();
+        int nulldim = qr_hessian.nullspace_basis.cols();
         // Get random matrix from nullspace
         Vector phi = Vector::Random(nulldim);  // values in [-1,1]
-        N = (result_gn.nullspace_basis * result_corr.nullspace_basis * phi)
+        N = (qr_jacobian.nullspace_basis * qr_hessian.nullspace_basis * phi)
                 .reshaped(dim, r_max);
-      } else if (result_gn.nullspace_basis.cols() > 0) {
+      } else if (qr_jacobian.nullspace_basis.cols() > 0) {
         // Add perturbation from the outer nullspace
-        int nulldim = result_gn.nullspace_basis.cols();
+        int nulldim = qr_jacobian.nullspace_basis.cols();
         // Get random matrix from nullspace
         Vector phi = Vector::Random(nulldim);  // values in [-1,1]
-        N = (result_gn.nullspace_basis * phi).reshaped(dim, r_max);
+        N = (qr_jacobian.nullspace_basis * phi).reshaped(dim, r_max);
       } else {
         // Add random perturbation
         N = Matrix::Random(dim, r_max);
@@ -187,8 +201,8 @@ Matrix RankInflation::inflate_solution(
       }
       char rank_up = rank_increase ? 'T' : 'F';
       std::printf("%6d %6d %18.6e %10.3e %10.6e %10.6e %6c\n", n_iter,
-                  result_gn.rank, violation.norm(), alpha, step_norm, grad_norm,
-                  rank_up);
+                  qr_jacobian.rank, violation.norm(), alpha, step_norm,
+                  grad_norm, rank_up);
       rank_increase = false;  // reset
     }
   }
@@ -206,7 +220,7 @@ double RankInflation::backtrack_line_search(const Matrix& Y, const Matrix& dY,
   double alpha = params_.alpha_init;
   // Current violation
   Vector violation = eval_constraints(Y);
-  double norm_viol = violation.norm();
+  double viol_cost = violation.dot(violation);
   // Parameters for backtracking
   const double beta =
       params_.ln_search_red_factor;             // step size reduction factor
@@ -218,9 +232,9 @@ double RankInflation::backtrack_line_search(const Matrix& Y, const Matrix& dY,
     Matrix Y_new = Y + alpha * dY;
     // Evaluate constraints at new solution
     Vector violation_new = eval_constraints(Y_new);
-    double norm_viol_new = violation_new.norm();
-    // Check Armijo condition
-    if (norm_viol_new <= norm_viol + c * alpha * (Jac * dY.reshaped()).norm()) {
+    double viol_cost_new = violation_new.dot(violation_new);
+    // Check Armijo condition (applies to our actual cost )
+    if (viol_cost_new <= viol_cost + c * alpha * (Jac * dY.reshaped()).norm()) {
       break;  // Sufficient decrease achieved
     }
     // Reduce step size
@@ -259,11 +273,8 @@ Matrix RankInflation::build_sec_ord_corr_hessian(
   auto f_A = build_wt_sum_constraints(violation, params_.tol_viol_hess);
   // add cost term if required
   Matrix hess_corr;
-  if (params_.enable_cost_constraint) {
-    hess_corr = C_ * violation(violation.size() - 1) + f_A;
-  } else {
-    hess_corr = f_A;
-  }
+  hess_corr = C_ * violation(violation.size() - 1) + f_A;
+
   return hess_corr * 2;
 }
 
@@ -292,19 +303,13 @@ std::pair<Matrix, Vector> RankInflation::build_proj_corr_grad_hess(
 Matrix RankInflation::build_certificate(const Matrix& Jac,
                                         const Matrix& Y) const {
   // Get components of stationarity condition
-  Vector vecCY;
-  Matrix vecAY;
-  if (params_.enable_cost_constraint) {
-    // vec(C*Y) is last row of jacobian, split it off
-    vecCY = Jac.bottomRows(1).transpose();
-    vecAY = Jac.topRows(Jac.rows() - 1);
-  } else {
-    vecCY = (C_ * Y).reshaped();
-    vecAY = Jac;
-  }
+  // vec(C*Y) is last row of jacobian, split it off
+  Vector vecCY = Jac.bottomRows(1).transpose();
+  Matrix vecAY = Jac.topRows(Jac.rows() - 1);
+
   // Solve for Lagrange multipliers
   auto result =
-      get_soln_qr_dense(vecAY.transpose(), -vecCY, params_.tol_null_gn);
+      get_soln_qr_dense(vecAY.transpose(), -vecCY, params_.tol_null_qr);
   // print diagonal and residual
   std::cout << "Lagrange solve residual norm: " << result.residual_norm
             << std::endl;

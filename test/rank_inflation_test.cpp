@@ -77,7 +77,6 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
-  params.enable_cost_constraint = true;
   params.verbose = true;
   params.max_sol_rank = 2;
   // generate problem
@@ -137,7 +136,6 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
   double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
-  params.enable_cost_constraint = true;
   params.verbose = true;
   params.max_sol_rank = 2;
   // generate problem
@@ -194,6 +192,42 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
   }
 }
 
+TEST_P(LovascThetaParamTest, GradDescentRetraction) {
+  const auto& test_params = GetParam();
+  // get info from adjacency
+  auto [edges, nonedges] = get_edges(test_params.adj);
+  int dim = test_params.adj.rows();
+  // Generate constraints
+  auto A = get_lovasz_constraints(dim, nonedges);
+  auto b = std::vector<double>(A.size(), 0.0);
+  b.back() = 1.0;
+  // generate cost
+  Matrix C = -Matrix::Ones(dim, dim);
+  double rho = -static_cast<double>(test_params.expected_clique.size());
+  // parameters
+  RankInflateParams params;
+  params.verbose = true;
+  params.max_sol_rank = 1;
+  params.retraction_method = RetractionMethod::GradientDescent;
+  params.max_iter = 10000;
+  params.alpha_min = 1e-12;
+  // generate problem
+  auto problem = RankInflation(C, rho, A, b, params);
+  // Get actual solution
+  Matrix Y = Matrix::Zero(dim, params.max_sol_rank);
+  std::vector<int> clique = test_params.expected_clique;
+  double clq_num = clique.size();
+  for (int i : clique) {
+    Y(i, 0) = std::sqrt(1 / clq_num);
+  }
+  // Add perturbation to solution
+  Eigen::MatrixXd perturb = Eigen::MatrixXd::Random(dim, params.max_sol_rank) * 1.0E-4;
+  Y += perturb;
+  // Call inflation
+  auto Y_ = problem.inflate_solution(Y);
+
+}
+
 // Test Second Order Correction
 TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
   const auto& test_params = GetParam();
@@ -209,7 +243,6 @@ TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
   double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
-  params.enable_cost_constraint = true;
   params.verbose = true;
   params.max_sol_rank = 2;
   // generate problem
@@ -270,7 +303,6 @@ TEST_P(LovascThetaParamTest, RankInflation) {
   double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
-  params.enable_cost_constraint = true;
   params.verbose = true;
   params.max_sol_rank = dim;
   // generate problem
@@ -308,7 +340,6 @@ TEST_P(LovascThetaParamTest, Certificate) {
   double rho = -static_cast<double>(test_params.expected_clique.size());
   // parameters
   RankInflateParams params;
-  params.enable_cost_constraint = true;
   params.verbose = true;
   params.max_sol_rank = dim;
   // generate problem

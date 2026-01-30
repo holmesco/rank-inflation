@@ -10,6 +10,7 @@ namespace RankReduction
     using Node = int;
     using Edge = std::pair<Node, Node>;
 
+    
     struct RankRedParams
     {
         // Target rank, supercedes other conditionals (ignored if -1)
