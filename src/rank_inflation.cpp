@@ -176,18 +176,20 @@ Matrix RankInflation::inflate_solution(
     n_iter++;
     // Print outputs
     if (params_.verbose) {
+      // compute grad and step norms for printing
+      Vector grad = -(*Jac).transpose() * violation;
+      double step_norm = dY.norm();
+      double grad_norm = grad.norm();
+
       if (n_iter % 10 == 1) {
-        std::printf("%6s %6s %18s %10s %10s %6s\n", "Iter", "JacRank",
-                    "ViolationNorm", "SolRank", "Alpha", "RankUp");
+        std::printf("%6s %6s %18s %10s %10s %10s %6s\n", "Iter", "JacRank",
+                    "ViolationNorm", "Alpha", "StepNorm", "GradNorm", "RankUp");
       }
       char rank_up = rank_increase ? 'T' : 'F';
-      std::printf("%6d %6d %18.6e %10d %10.3e %6c\n", n_iter, result_gn.rank,
-                  violation.norm(), r, alpha, rank_up);
+      std::printf("%6d %6d %18.6e %10.3e %10.6e %10.6e %6c\n", n_iter,
+                  result_gn.rank, violation.norm(), alpha, step_norm, grad_norm,
+                  rank_up);
       rank_increase = false;  // reset
-
-      // DEBUGGING
-      //  std::cout << "Violation: " << violation.transpose() << std::endl;
-      //  std::cout << "Step Norm: " << dY.norm() << std::endl;
     }
   }
   if (Jac_final != nullptr) {
@@ -262,7 +264,7 @@ Matrix RankInflation::build_sec_ord_corr_hessian(
   } else {
     hess_corr = f_A;
   }
-  return hess_corr;
+  return hess_corr * 2;
 }
 
 std::pair<Matrix, Vector> RankInflation::build_proj_corr_grad_hess(
@@ -398,6 +400,8 @@ bool RankInflation::check_jac_rank(const Vector& R_diag, double thresh_rank_def,
   double ratio = vals[A_.size()] / vals[A_.size() - 1];
   // Return true if ratio is below threshold and the other values are above the
   // general threshold
+  // std::cout << "rank check diagonal:" << R_diag.transpose() << std::endl;
+
   return ratio < thresh_rank_def && vals[A_.size() - 1] >= thresh_rank;
 }
 
