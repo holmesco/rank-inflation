@@ -1,4 +1,4 @@
-#include "max_clique_sdp/rank_inflation.hpp"
+#include "rank_inflation.hpp"
 
 namespace SDPTools {
 

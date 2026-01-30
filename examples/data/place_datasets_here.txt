@@ -1,1 +1,0 @@
-Place the pointcloud datasets in the "data" folder. 

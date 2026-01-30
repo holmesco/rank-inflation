@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(clipperplus VERSION 1.0.0)
+project(rank_inflation VERSION 0.0.0)
 
 # set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD 17)
@@ -15,13 +15,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 # Options
 ###############################################################################
 
-option(DEBUG_FLAG "Enable debugging output" OFF)
-option(DEBUG_TIMING_FLAG "Enable timing report" OFF)
-option(DEBUG_OPTIM_FLAG "Enable debugging clipper optimization" OFF)
-
-option(BUILD_PMC_HEU "Build PMC heuristic" OFF)
-option(BUILD_BINDINGS_MATLAB "Build MATLAB bindings" OFF)
-option(BUILD_BINDINGS_PYTHON "Build Python bindings" OFF)
 option(BUILD_TESTS "Build testsuite" ON)
 
 
@@ -46,14 +39,6 @@ if(BUILD_TESTS)
   )
 endif()
 
-if(BUILD_BINDINGS_PYTHON)
-  FetchContent_Declare(pybind11
-    GIT_REPOSITORY https://github.com/pybind/pybind11
-    GIT_TAG        v2.9.2
-  )
-  FetchContent_MakeAvailable(pybind11)
-endif()
-
 # For Windows: Prevent overriding the parent project's compiler/linker settings
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)
@@ -65,55 +50,37 @@ FetchContent_MakeAvailable(googletest)
 
 
 # source files
-file(GLOB CLIPPER_PLUS_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
-add_library(clipperplus SHARED)
-target_sources(clipperplus PRIVATE ${CLIPPER_PLUS_SOURCE_FILES})
+file(GLOB RANK_INF_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+add_library(rank_inflation SHARED)
+target_sources(rank_inflation PRIVATE ${RANK_INF_SOURCE_FILES})
 
 # headers:
-target_include_directories(clipperplus PUBLIC
+target_include_directories(rank_inflation PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 
 # link external libraries:
-target_link_libraries(clipperplus PRIVATE
+target_link_libraries(rank_inflation PRIVATE
     Boost::filesystem 
     Boost::system)
-target_link_libraries(clipperplus PUBLIC Eigen3::Eigen)
-target_link_libraries(clipperplus PUBLIC OpenMP::OpenMP_CXX)
+target_link_libraries(rank_inflation PUBLIC Eigen3::Eigen)
+target_link_libraries(rank_inflation PUBLIC OpenMP::OpenMP_CXX)
 
 # debug flag  
 if(DEBUG_FLAG)
         message(STATUS "Enabling debug flag")
-        target_compile_definitions(clipperplus PRIVATE DEBUG)
-endif()
-if(DEBUG_OPTIM_FLAG)
-        message(STATUS "Enabling debug optimization flag")
-        target_compile_definitions(clipperplus PRIVATE DEBUG_OPTIM)
-endif()
-if(DEBUG_TIMING_FLAG)
-        message(STATUS "Enabling debug timing flag")
-        target_compile_definitions(clipperplus PRIVATE DEBUG_TIMING)
+        target_compile_definitions(rank_inflation PRIVATE DEBUG)
 endif()
 
 # version
-set_target_properties(clipperplus PROPERTIES
+set_target_properties(rank_inflation PROPERTIES
   VERSION ${PROJECT_VERSION})
-target_compile_definitions(clipperplus PUBLIC CLIPPERPLUS_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(rank_inflation PUBLIC RANK_INF_VERSION="${PROJECT_VERSION}")
 
 
 ###############################################################################
 # Extras
 ###############################################################################
-if(BUILD_BINDINGS_MATLAB)
-    message(STATUS "Attempting to build MATLAB bindings.")
-    add_subdirectory(bindings/matlab)
-endif()
-
-if(BUILD_BINDINGS_PYTHON)
-    message(STATUS "Building Python bindings.")
-    add_subdirectory(bindings/python)
-endif()
-
 
 if(BUILD_TESTS)
     enable_testing()

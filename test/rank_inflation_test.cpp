@@ -8,8 +8,9 @@ c++ tests for rank inflation
 #include <Eigen/Dense>
 #include <algorithm>
 #include <iostream>
-#include <max_clique_sdp/rank_inflation.hpp>
 #include <utility>
+
+#include "rank_inflation.hpp"
 
 using namespace SDPTools;
 using Edge = std::pair<int, int>;

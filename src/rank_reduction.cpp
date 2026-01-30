@@ -1,4 +1,4 @@
-#include "max_clique_sdp/rank_reduction.hpp"
+#include "rank_reduction.hpp"
 
 namespace RankReduction {
 
