@@ -20,6 +20,7 @@ struct QRResult {
   int rank;
   Vector R_diagonal;
   double residual_norm;
+  Eigen::ColPivHouseholderQR<Matrix> qr_decomp;
 };
 
 // Get the particular solution and null space of a system of linear equations
@@ -120,6 +121,9 @@ class RankInflation {
   const std::vector<double>& b_;
   // parameters
   RankInflateParams params_;
+  // Store QR decomposition results
+  mutable QRResult qr_jacobian;
+  mutable QRResult qr_hessian;
 
   // Constructor
   RankInflation(const Matrix& C, double rho,
@@ -164,6 +168,13 @@ class RankInflation {
   std::pair<Matrix, Vector> build_proj_corr_grad_hess(
       const Vector& violation, const Matrix& basis,
       const Vector& delta_n) const;
+
+  // Compute the tangent step for the current solution
+  // Internally, this uses the stored QR decomposition of the Jacobian
+  Matrix get_tangent_step() const;
+
+  // Compute a step that conforms to the second order geodesic
+  Matrix get_geodesic_step() const;
 
   // Returns true if the Jacobian is rank-deficient by exactly one
   // Input is the diagonal of R from the QR decomposition of the Jacobian

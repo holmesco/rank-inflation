@@ -79,9 +79,8 @@ Matrix RankInflation::inflate_solution(
   while (n_iter < params_.max_iter && !converged) {
     // ---------- RETRACTION -----------
     // QR decomposition of Jacobian (and GN solve)
-    QRResult qr_jacobian =
+    qr_jacobian =
         get_soln_qr_dense(*Jac, -violation, params_.tol_null_qr);
-    QRResult qr_hessian;
     Vector delta;
     switch (params_.retraction_method) {
       case RetractionMethod::ExactNewton: {
@@ -93,10 +92,11 @@ Matrix RankInflation::inflate_solution(
           Hess.block(i * dim, i * dim, dim, dim).noalias() += H_corr;
         }
         // build gradient
-        Vector grad = -(*Jac).transpose() * violation;
+        Vector grad = (*Jac).transpose() * violation;
         // Solve system
-        qr_hessian = get_soln_qr_dense(Hess, grad, params_.tol_null_qr);
-        // define step
+        qr_hessian = get_soln_qr_dense(Hess, -grad, params_.tol_null_qr);
+        // Define step
+        delta = qr_hessian.solution;
         // Debug: compute minimum eigenvalue of Hessian
         // Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(Hess);
         // double min_eig = es.eigenvalues().minCoeff();
@@ -119,14 +119,14 @@ Matrix RankInflation::inflate_solution(
           // combine normal and tangent componenets
           delta = delta_gn + delta_corr;
         } else {
-          delta = delta_gn;
+          delta = qr_jacobian.solution;
         }
         break;
       }
       case RetractionMethod::GradientDescent: {
         // Get QR Decomposition of Jac
         qr_jacobian = get_soln_qr_dense(*Jac, -violation, params_.tol_null_qr);
-        delta = -(*Jac) * violation;
+        delta = -(*Jac).transpose() * violation;
         break;
       }
     }
@@ -151,30 +151,7 @@ Matrix RankInflation::inflate_solution(
     if (!jac_rank_check && violation.norm() < params_.tol_violation &&
         params_.enable_inc_rank) {
       rank_increase = true;
-      Matrix N;
-      if (params_.enable_sec_ord_corr &&
-          qr_hessian.nullspace_basis.cols() > 0) {
-        // Add perturbation from the inner nullspace
-        int nulldim = qr_hessian.nullspace_basis.cols();
-        // Get random matrix from nullspace
-        Vector phi = Vector::Random(nulldim);  // values in [-1,1]
-        N = (qr_jacobian.nullspace_basis * qr_hessian.nullspace_basis * phi)
-                .reshaped(dim, r_max);
-      } else if (qr_jacobian.nullspace_basis.cols() > 0) {
-        // Add perturbation from the outer nullspace
-        int nulldim = qr_jacobian.nullspace_basis.cols();
-        // Get random matrix from nullspace
-        Vector phi = Vector::Random(nulldim);  // values in [-1,1]
-        N = (qr_jacobian.nullspace_basis * phi).reshaped(dim, r_max);
-      } else {
-        // Add random perturbation
-        N = Matrix::Random(dim, r_max);
-      }
-      // Normalize
-      double norm_N = N.norm();
-      if (norm_N > 0) {
-        N /= norm_N;
-      }
+      
       double stepsize = n_iter > 0 ? params_.eps_null : params_.eps_null_init;
       // Add to solution
       Y_plus.noalias() = Y_plus + stepsize * N;
@@ -204,8 +181,8 @@ Matrix RankInflation::inflate_solution(
                   qr_jacobian.rank, violation.norm(), alpha, step_norm,
                   grad_norm, rank_up);
       rank_increase = false;  // reset
-      std::cout << "Grad: " << grad.transpose() << std::endl;
-      std::cout << "sol : " << std::endl << Y.reshaped().transpose() << std::endl;
+      // std::cout << "Grad: " << grad.transpose() << std::endl;
+      // std::cout << "sol : " << std::endl << Y.reshaped().transpose() << std::endl;
     }
   }
   if (Jac_final != nullptr) {
@@ -227,7 +204,7 @@ double RankInflation::backtrack_line_search(const Matrix& Y, const Matrix& dY,
   const double beta =
       params_.ln_search_red_factor;             // step size reduction factor
   const double c = params_.ln_search_suff_dec;  // sufficient decrease parameter
-  const Vector grad = Jac * violation;
+  const Vector grad = Jac.transpose() * violation;
   const double expected_decrease = grad.transpose().dot(dY.reshaped());
   // Backtracking loop
   while (true) {
@@ -268,6 +245,46 @@ SpMatrix RankInflation::build_wt_sum_constraints(const Vector& coeffs,
 
   fullMatrix.makeCompressed();
   return fullMatrix;
+}
+
+Matrix RankInflation::get_tangent_step() const {
+  int r_max = params_.max_sol_rank;
+  Matrix N;
+  if (params_.enable_sec_ord_corr &&
+      qr_hessian.nullspace_basis.cols() > 0) {
+    // Add perturbation from the inner nullspace
+    int nulldim = qr_hessian.nullspace_basis.cols();
+    // Get random matrix from nullspace
+    Vector phi = Vector::Random(nulldim);  // values in [-1,1]
+    N = (qr_jacobian.nullspace_basis * qr_hessian.nullspace_basis * phi)
+            .reshaped(dim, r_max);
+  } else if (qr_jacobian.nullspace_basis.cols() > 0) {
+    // Add perturbation from the outer nullspace
+    int nulldim = qr_jacobian.nullspace_basis.cols();
+    // Get random matrix from nullspace
+    Vector phi = Vector::Random(nulldim);  // values in [-1,1]
+    N = (qr_jacobian.nullspace_basis * phi).reshaped(dim, r_max);
+  } else {
+    // Add random perturbation
+    N = Matrix::Random(dim, r_max);
+  }
+  // Normalize
+  double norm_N = N.norm();
+  if (norm_N > 0) {
+    N /= norm_N;
+  }
+  return N;
+}
+
+Matrix RankInflation::get_geodesic_step() const {
+  int r_max = params_.max_sol_rank;
+  // Get normalized direction in the tangent space
+  int nulldim = qr_jacobian.nullspace_basis.cols();
+  Vector phi = Vector::Random(nulldim);  // values in [-1,1]
+  Matrix V = (qr_jacobian.nullspace_basis * phi).reshaped(dim, r_max);
+  V /= V.norm();
+  
+
 }
 
 Matrix RankInflation::build_sec_ord_corr_hessian(
@@ -358,6 +375,7 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
   int r = qr.rank();
 
   QRResult result;
+  result.qr_decomp = qr;
   result.rank = r;
 
   // 2. Find the particular solution

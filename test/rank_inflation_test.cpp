@@ -210,8 +210,8 @@ TEST_P(LovascThetaParamTest, GradDescentRetraction) {
   // parameters
   RankInflateParams params;
   params.verbose = true;
-  params.max_sol_rank = 1;
-  params.retraction_method = RetractionMethod::GradientDescent;
+  params.max_sol_rank = 3;
+  params.retraction_method = RetractionMethod::GaussNewton;
   params.max_iter = 10000;
   params.alpha_min = 1e-12;
   // generate problem
