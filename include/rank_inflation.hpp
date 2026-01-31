@@ -50,18 +50,21 @@ struct RankInflateParams {
   bool enable_inc_rank = true;
   // Max number of iterations
   int max_iter = 100;
-  // Retraction Method
-  RetractionMethod retraction_method = RetractionMethod::ExactNewton;
+  
 
   // Retraction solve parameters
   // -----------------------
+
+  // Retraction Method
+  RetractionMethod retraction_method = RetractionMethod::ExactNewton;
+  // Max iterations for retraction
+  int max_iter_retract = 100;
   // Null space threshold for GN solve
   // NOTE: Controls accuracy of GN solve. Should be small to get accurate
   // solutions.
   double tol_null_qr = 1.0E-14;
   // tolerance for constraint norm satisfaction.
   double tol_violation = 1.0E-6;
-
 
   // Second order correction
   // -----------------------
@@ -94,7 +97,7 @@ struct RankInflateParams {
   double eps_geodesic = 1.0E-2;
   // threshold for checking rank of the solution
   // (does not affect convergence, just for display)
-  double tol_rank_sol = 1.0E-4;
+  double tol_rank_sol = 1.0E-6;
   // Threshold for rank deficiency check of the Jacobian. Value is used to
   // compare the two smallest diagonal elements of the R matrix from the QR
   // decomposition. Note: we expect the Jacobian to be rank-deficient by one.
@@ -166,11 +169,14 @@ class RankInflation {
       const Vector& violation, const Matrix& basis,
       const Vector& delta_n) const;
 
+  // Perform the retraction step onto the manifold
+  void retraction(Matrix& Y) const;
+
   // Compute the components of a the second order geodesic step
   // Returns a pair (V,W) such that the geodesic step is given by
   //   Y' = Y + alpha*V + alpha^2*W
   // If `second_order` is false then W is not a valid matrix and should not be used
-  std::pair<Matrix, Matrix> get_geodesic_step(bool second_order=true) const;
+  std::pair<Matrix, Matrix> get_geodesic_step(int rank, bool second_order=true) const;
 
   // Returns true if the Jacobian is rank-deficient by exactly one
   // Input is the diagonal of R from the QR decomposition of the Jacobian

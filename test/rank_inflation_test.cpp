@@ -211,8 +211,8 @@ TEST_P(LovascThetaParamTest, GradDescentRetraction) {
   RankInflateParams params;
   params.verbose = true;
   params.max_sol_rank = 3;
-  params.retraction_method = RetractionMethod::GaussNewton;
-  params.max_iter = 10000;
+  params.retraction_method = RetractionMethod::GradientDescent;
+  params.max_iter = 20;
   params.alpha_min = 1e-12;
   // generate problem
   auto problem = RankInflation(C, rho, A, b, params);
@@ -227,8 +227,97 @@ TEST_P(LovascThetaParamTest, GradDescentRetraction) {
   Eigen::MatrixXd perturb =
       Eigen::MatrixXd::Random(dim, params.max_sol_rank) * 1.0E-1;
   Y += perturb;
+  // Get initial violation
+  auto viol_init = problem.eval_constraints(Y);
   // Call inflation
-  auto Y_ = problem.inflate_solution(Y);
+  problem.retraction(Y);
+  // recompute violation
+  auto viol_retr = problem.eval_constraints(Y);
+  EXPECT_LT(viol_retr.norm(), viol_init.norm()) << "Retraction did not reduce cost";
+}
+
+TEST_P(LovascThetaParamTest, ExactNewtonRetraction) {
+  // Change this fuction so that we just call the retraction function.
+  const auto& test_params = GetParam();
+  // get info from adjacency
+  auto [edges, nonedges] = get_edges(test_params.adj);
+  int dim = test_params.adj.rows();
+  // Generate constraints
+  auto A = get_lovasz_constraints(dim, nonedges);
+  auto b = std::vector<double>(A.size(), 0.0);
+  b.back() = 1.0;
+  // generate cost
+  Matrix C = -Matrix::Ones(dim, dim);
+  double rho = -static_cast<double>(test_params.expected_clique.size());
+  // parameters
+  RankInflateParams params;
+  params.verbose = true;
+  params.max_sol_rank = 3;
+  params.retraction_method = RetractionMethod::ExactNewton;
+  params.max_iter = 20;
+  params.alpha_min = 1e-12;
+  // generate problem
+  auto problem = RankInflation(C, rho, A, b, params);
+  // Get actual solution
+  Matrix Y = Matrix::Zero(dim, params.max_sol_rank);
+  std::vector<int> clique = test_params.expected_clique;
+  double clq_num = clique.size();
+  for (int i : clique) {
+    Y(i, 0) = std::sqrt(1 / clq_num);
+  }
+  // Add perturbation to solution
+  Eigen::MatrixXd perturb =
+      Eigen::MatrixXd::Random(dim, params.max_sol_rank) * 1.0E-1;
+  Y += perturb;
+  // Get initial violation
+  auto viol_init = problem.eval_constraints(Y);
+  // Call inflation
+  problem.retraction(Y);
+  // recompute violation
+  auto viol_retr = problem.eval_constraints(Y);
+  EXPECT_LT(viol_retr.norm(), viol_init.norm()) << "Retraction did not reduce cost";
+}
+
+TEST_P(LovascThetaParamTest, GaussNewtonRetraction) {
+  // Change this fuction so that we just call the retraction function.
+  const auto& test_params = GetParam();
+  // get info from adjacency
+  auto [edges, nonedges] = get_edges(test_params.adj);
+  int dim = test_params.adj.rows();
+  // Generate constraints
+  auto A = get_lovasz_constraints(dim, nonedges);
+  auto b = std::vector<double>(A.size(), 0.0);
+  b.back() = 1.0;
+  // generate cost
+  Matrix C = -Matrix::Ones(dim, dim);
+  double rho = -static_cast<double>(test_params.expected_clique.size());
+  // parameters
+  RankInflateParams params;
+  params.verbose = true;
+  params.max_sol_rank = 3;
+  params.retraction_method = RetractionMethod::GaussNewton;
+  params.max_iter = 20;
+  params.alpha_min = 1e-12;
+  // generate problem
+  auto problem = RankInflation(C, rho, A, b, params);
+  // Get actual solution
+  Matrix Y = Matrix::Zero(dim, params.max_sol_rank);
+  std::vector<int> clique = test_params.expected_clique;
+  double clq_num = clique.size();
+  for (int i : clique) {
+    Y(i, 0) = std::sqrt(1 / clq_num);
+  }
+  // Add perturbation to solution
+  Eigen::MatrixXd perturb =
+      Eigen::MatrixXd::Random(dim, params.max_sol_rank) * 1.0E-1;
+  Y += perturb;
+  // Get initial violation
+  auto viol_init = problem.eval_constraints(Y);
+  // Call inflation
+  problem.retraction(Y);
+  // recompute violation
+  auto viol_retr = problem.eval_constraints(Y);
+  EXPECT_LT(viol_retr.norm(), viol_init.norm()) << "Retraction did not reduce cost";
 }
 
 TEST_P(LovascThetaParamTest, GeodesicStep) {
@@ -270,7 +359,7 @@ TEST_P(LovascThetaParamTest, GeodesicStep) {
   problem.qr_jacobian = get_soln_qr_dense(*Jac, Vector::Zero(problem.m), 1e-10);
   // Take a geodesic step
   double alpha = 1e-2;
-  auto [V, W] = problem.get_geodesic_step();
+  auto [V, W] = problem.get_geodesic_step(Y.cols());
   auto Y_1 = Y + alpha * V;
   auto Y_2 = Y + alpha * V + std::pow(alpha, 2) * W;
 
@@ -278,10 +367,10 @@ TEST_P(LovascThetaParamTest, GeodesicStep) {
   auto viol_1 = problem.eval_constraints(Y_1);
   auto viol_2 = problem.eval_constraints(Y_2);
   // Print violation norms
-  std::cout << "First order norm: " << (viol_1-viol).norm() << std::endl;
-  std::cout << "Second order norm: " << (viol_2-viol).norm() << std::endl;
+  std::cout << "First order norm: " << (viol_1 - viol).norm() << std::endl;
+  std::cout << "Second order norm: " << (viol_2 - viol).norm() << std::endl;
   // Check norm (should definitely decrease)
-  EXPECT_LT((viol_2-viol).norm(), (viol_1-viol).norm())
+  EXPECT_LT((viol_2 - viol).norm(), (viol_1 - viol).norm())
       << "Norm of violation was worse with second order geodesic step";
 }
 

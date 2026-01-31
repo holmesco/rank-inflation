@@ -16,9 +16,8 @@ RankInflation::RankInflation(const Matrix& C, double rho,
 Vector RankInflation::eval_constraints(const Matrix& Y,
                                        std::unique_ptr<Matrix>* Jac) const {
   // dimension assertions
-  int r = params_.max_sol_rank;
+  int r = Y.cols();
   assert(Y.rows() == dim);
-  assert(Y.cols() == r);
   if (Jac != nullptr) {
     assert((*Jac)->rows() == m);
     assert((*Jac)->cols() == dim * r);
@@ -151,7 +150,7 @@ Matrix RankInflation::inflate_solution(
         params_.enable_inc_rank) {
       rank_increase = true;
       // Get geodesic step
-      auto [V, W] = get_geodesic_step(params_.second_ord_geo);
+      auto [V, W] = get_geodesic_step(Y.cols(), params_.second_ord_geo);
       if (params_.second_ord_geo) {
         Y_plus.noalias() = Y_plus + params_.eps_geodesic * V +
                            std::pow(params_.eps_geodesic, 2) * W;
@@ -195,6 +194,104 @@ Matrix RankInflation::inflate_solution(
   }
 
   return Y;
+}
+
+void RankInflation::retraction(Matrix& Y) const {
+  // Initialize
+  int r = Y.cols();
+  int n_iter = 0;
+  Vector violation;
+  auto Jac = std::make_unique<Matrix>(m, dim * r);
+  // Loop
+  while (n_iter < params_.max_iter_retract) {
+    // ---------- RETRACTION -----------
+    // Evaluate violation and get jacobian
+    violation = eval_constraints(Y, &Jac);
+    // Check for convergence
+    if (violation.norm() < params_.tol_violation) break;
+    // QR decomposition of Jacobian
+    qr_jacobian = get_soln_qr_dense(*Jac, -violation, params_.tol_null_qr);
+    // Define retraction step
+    Vector delta;
+    switch (params_.retraction_method) {
+      case RetractionMethod::ExactNewton: {
+        // Build exact Hessian
+        Matrix Hess = (*Jac).transpose() * (*Jac);
+        // Add correction term along diagonal blocks
+        Matrix H_corr = build_sec_ord_corr_hessian(violation);
+        for (int i = 0; i < r; i++) {
+          Hess.block(i * dim, i * dim, dim, dim).noalias() += H_corr;
+        }
+        // build gradient
+        Vector grad = (*Jac).transpose() * violation;
+        // Solve system
+        qr_hessian = get_soln_qr_dense(Hess, -grad, params_.tol_null_qr);
+        // Define step
+        delta = qr_hessian.solution;
+        // Debug: compute minimum eigenvalue of Hessian
+        // Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(Hess);
+        // double min_eig = es.eigenvalues().minCoeff();
+        // std::cout << "Minimum Eigenvalue of Hessian: " << min_eig <<
+        // std::endl;
+        break;
+      }
+      case RetractionMethod::GaussNewton: {
+        // get GN solution
+        Vector& delta_gn = qr_jacobian.solution;
+        // Second order correction
+        if (params_.enable_sec_ord_corr) {
+          // Get system of equations for second order correction
+          auto [hess, grad] = build_proj_corr_grad_hess(
+              violation, qr_jacobian.nullspace_basis, delta_gn);
+          // Solve new system
+          qr_hessian = get_soln_qr_dense(hess, -grad, params_.tol_null_corr);
+          // reconstruct tangent-space solution
+          auto delta_corr = qr_jacobian.nullspace_basis * qr_hessian.solution;
+          // combine normal and tangent componenets
+          delta = delta_gn + delta_corr;
+        } else {
+          delta = qr_jacobian.solution;
+        }
+        break;
+      }
+      case RetractionMethod::GradientDescent: {
+        // Get QR Decomposition of Jac
+        qr_jacobian = get_soln_qr_dense(*Jac, -violation, params_.tol_null_qr);
+        delta = -(*Jac).transpose() * violation;
+        break;
+      }
+    }
+
+    // ----- LINE SEARCH -----
+    Matrix dY = delta.reshaped(dim, r);
+    double alpha;
+    if (params_.enable_line_search) {
+      alpha = RankInflation::backtrack_line_search(Y, dY, *Jac);
+    } else {
+      alpha = 1.0;
+    }
+    // Apply update
+    Y.noalias() = Y + alpha * dY;
+    n_iter++;
+    // Print Status
+    if (params_.verbose) {
+      // compute grad and step norms for printing
+      Vector grad = (*Jac).transpose() * violation;
+      double step_norm = alpha * dY.norm();
+      double grad_norm = grad.norm();
+
+      if (n_iter % 10 == 1) {
+        std::printf("%6s %6s %18s %10s %10s %10s\n", "Iter", "JacRank",
+                    "ViolationNorm", "Alpha", "StepNorm", "GradNorm");
+      }
+      std::printf("%6d %6d %18.6e %10.3e %10.6e %10.6e\n", n_iter,
+                  qr_jacobian.rank, violation.norm(), alpha, step_norm,
+                  grad_norm);
+      // std::cout << "Grad: " << grad.transpose() << std::endl;
+      // std::cout << "sol : " << std::endl << Y.reshaped().transpose() <<
+      // std::endl;
+    }
+  }
 }
 
 double RankInflation::backtrack_line_search(const Matrix& Y, const Matrix& dY,
@@ -252,15 +349,14 @@ SpMatrix RankInflation::build_wt_sum_constraints(const Vector& coeffs,
 }
 
 std::pair<Matrix, Matrix> RankInflation::get_geodesic_step(
-    bool second_order) const {
-  int r_max = params_.max_sol_rank;
+    int rank, bool second_order) const {
   // Get normalized direction in the tangent space
   int nulldim = qr_jacobian.nullspace_basis.cols();
   Vector phi = Vector::Random(nulldim);  // values in [-1,1]
-  Matrix V = (qr_jacobian.nullspace_basis * phi).reshaped(dim, r_max);
+  Matrix V = (qr_jacobian.nullspace_basis * phi).reshaped(dim, rank);
   V /= V.norm();
   // Get second order component
-  Matrix W(dim, r_max);
+  Matrix W(dim, rank);
   if (second_order) {
     Vector rhs(m);
     for (int i = 0; i < m; i++) {
@@ -271,7 +367,7 @@ std::pair<Matrix, Matrix> RankInflation::get_geodesic_step(
         rhs(i) = -(V.transpose() * C_ * V).trace();
       }
     }
-    W = qr_jacobian.qr_decomp.solve(rhs).reshaped(dim, r_max);
+    W = qr_jacobian.qr_decomp.solve(rhs).reshaped(dim, rank);
   }
 
   return {V, W};
