@@ -140,7 +140,7 @@ Matrix RankInflation::inflate_solution(
       alpha = 1.0;
     }
     // Apply update
-    Matrix Y_corrected = Y + alpha * dY;
+    Matrix Y_plus = Y + alpha * dY;
 
     // ------------ TANGENT STEP -----------------
     // Check if the Jabobian is exactly rank deficient by one.
@@ -177,10 +177,10 @@ Matrix RankInflation::inflate_solution(
       }
       double stepsize = n_iter > 0 ? params_.eps_null : params_.eps_null_init;
       // Add to solution
-      Y_corrected.noalias() = Y_corrected + stepsize * N;
+      Y_plus.noalias() = Y_plus + stepsize * N;
     }
     // Update solution
-    Y = Y_corrected;
+    Y = Y_plus;
     // Evaluate the current solution (violation and rank)
     violation = eval_constraints(Y, &Jac);
     r = get_rank(Y, params_.tol_rank_sol);
@@ -191,8 +191,8 @@ Matrix RankInflation::inflate_solution(
     // Print outputs
     if (params_.verbose) {
       // compute grad and step norms for printing
-      Vector grad = -(*Jac).transpose() * violation;
-      double step_norm = dY.norm();
+      Vector grad = (*Jac).transpose() * violation;
+      double step_norm = alpha * dY.norm();
       double grad_norm = grad.norm();
 
       if (n_iter % 10 == 1) {
@@ -204,6 +204,8 @@ Matrix RankInflation::inflate_solution(
                   qr_jacobian.rank, violation.norm(), alpha, step_norm,
                   grad_norm, rank_up);
       rank_increase = false;  // reset
+      std::cout << "Grad: " << grad.transpose() << std::endl;
+      std::cout << "sol : " << std::endl << Y.reshaped().transpose() << std::endl;
     }
   }
   if (Jac_final != nullptr) {
@@ -225,7 +227,8 @@ double RankInflation::backtrack_line_search(const Matrix& Y, const Matrix& dY,
   const double beta =
       params_.ln_search_red_factor;             // step size reduction factor
   const double c = params_.ln_search_suff_dec;  // sufficient decrease parameter
-
+  const Vector grad = Jac * violation;
+  const double expected_decrease = grad.transpose().dot(dY.reshaped());
   // Backtracking loop
   while (true) {
     // Compute new candidate solution
@@ -234,7 +237,7 @@ double RankInflation::backtrack_line_search(const Matrix& Y, const Matrix& dY,
     Vector violation_new = eval_constraints(Y_new);
     double viol_cost_new = violation_new.dot(violation_new);
     // Check Armijo condition (applies to our actual cost )
-    if (viol_cost_new <= viol_cost + c * alpha * (Jac * dY.reshaped()).norm()) {
+    if (viol_cost_new <= viol_cost + c * alpha * expected_decrease) {
       break;  // Sufficient decrease achieved
     }
     // Reduce step size

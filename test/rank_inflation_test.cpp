@@ -1,6 +1,8 @@
 /*
 c++ tests for rank inflation
 */
+#include "rank_inflation.hpp"
+
 #include <gtest/gtest.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,8 +11,6 @@ c++ tests for rank inflation
 #include <algorithm>
 #include <iostream>
 #include <utility>
-
-#include "rank_inflation.hpp"
 
 using namespace SDPTools;
 using Edge = std::pair<int, int>;
@@ -63,7 +63,7 @@ class LovascThetaParamTest
     : public ::testing::TestWithParam<LovascThetaTestCase> {};
 
 // Test constraint evaluation and gradient function
-TEST_P(LovascThetaParamTest, EvalConstraints) {
+TEST_P(LovascThetaParamTest, EvalFuncAndGrad) {
   const auto& test_params = GetParam();
   // get info from adjacency
   auto [edges, nonedges] = get_edges(test_params.adj);
@@ -99,26 +99,29 @@ TEST_P(LovascThetaParamTest, EvalConstraints) {
   for (int i = 0; i < output.size(); ++i) {
     EXPECT_NEAR(output(i), 0.0, tol) << "constraint " << i;
   }
-
-  // std::cout << "Jac: " << std::endl << Jac << std::endl;
+  // Perturb solution and check Jacobian via finite differences
+  Y += 0.01 * Matrix::Random(dim, 2);
+  output = problem.eval_constraints(Y, &Jac);
+  std::cout << "Jac: " << std::endl << *Jac << std::endl;
   // Numerical directional derivative check
-  const double eps = 1e-6;
+  const double eps = 1e-8;
   int r = problem.params_.max_sol_rank;
   int vec_size = r * dim;
-  Eigen::VectorXd delta_vec = Eigen::VectorXd::Random(vec_size);
-  delta_vec.normalize();
-  delta_vec *= eps;
-  // Map delta into a dim x r matrix (Eigen is column-major by default)
-  Eigen::Map<Matrix> deltaY(delta_vec.data(), dim, r);
-  Matrix Y2 = Y + deltaY;
-  auto output2 = problem.eval_constraints(Y2);
-  Eigen::VectorXd num_deriv = (output2 - output) / eps;
-  Eigen::VectorXd anal_dir = *Jac * delta_vec / eps;
   const double deriv_tol = 1e-5;
-  for (int i = 0; i < problem.m; ++i) {
-    EXPECT_NEAR(num_deriv(i), anal_dir(i), deriv_tol)
-        << "directional derivative mismatch at constraint " << i;
+  Eigen::MatrixXd ident = Eigen::MatrixXd::Identity(vec_size, vec_size);
+  for (int i = 0; i < vec_size; ++i) {
+    Eigen::VectorXd delta_vec = ident.col(i);
+    Matrix Y2 = Y + eps * delta_vec.reshaped(dim, r);
+    auto output2 = problem.eval_constraints(Y2);
+    Eigen::VectorXd num_deriv = (output2 - output) / eps;
+    Eigen::VectorXd anal_dir = *Jac * delta_vec;
+    for (int j = 0; j < problem.m; ++j) {
+      EXPECT_NEAR(num_deriv(j), anal_dir(j), deriv_tol)
+          << "directional derivative mismatch at constraint " << j
+          << " for direction " << i;
+    }
   }
+  
 }
 
 // Test RRQR Solve
@@ -221,11 +224,11 @@ TEST_P(LovascThetaParamTest, GradDescentRetraction) {
     Y(i, 0) = std::sqrt(1 / clq_num);
   }
   // Add perturbation to solution
-  Eigen::MatrixXd perturb = Eigen::MatrixXd::Random(dim, params.max_sol_rank) * 1.0E-4;
+  Eigen::MatrixXd perturb =
+      Eigen::MatrixXd::Random(dim, params.max_sol_rank) * 1.0E-1;
   Y += perturb;
   // Call inflation
   auto Y_ = problem.inflate_solution(Y);
-
 }
 
 // Test Second Order Correction
