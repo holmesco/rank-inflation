@@ -79,8 +79,7 @@ Matrix RankInflation::inflate_solution(
   while (n_iter < params_.max_iter && !converged) {
     // ---------- RETRACTION -----------
     // QR decomposition of Jacobian (and GN solve)
-    qr_jacobian =
-        get_soln_qr_dense(*Jac, -violation, params_.tol_null_qr);
+    qr_jacobian = get_soln_qr_dense(*Jac, -violation, params_.tol_null_qr);
     Vector delta;
     switch (params_.retraction_method) {
       case RetractionMethod::ExactNewton: {
@@ -151,10 +150,14 @@ Matrix RankInflation::inflate_solution(
     if (!jac_rank_check && violation.norm() < params_.tol_violation &&
         params_.enable_inc_rank) {
       rank_increase = true;
-      
-      double stepsize = n_iter > 0 ? params_.eps_null : params_.eps_null_init;
-      // Add to solution
-      Y_plus.noalias() = Y_plus + stepsize * N;
+      // Get geodesic step
+      auto [V, W] = get_geodesic_step(params_.second_ord_geo);
+      if (params_.second_ord_geo) {
+        Y_plus.noalias() = Y_plus + params_.eps_geodesic * V +
+                           std::pow(params_.eps_geodesic, 2) * W;
+      } else {
+        Y_plus.noalias() = Y_plus + params_.eps_geodesic * V;
+      }
     }
     // Update solution
     Y = Y_plus;
@@ -182,7 +185,8 @@ Matrix RankInflation::inflate_solution(
                   grad_norm, rank_up);
       rank_increase = false;  // reset
       // std::cout << "Grad: " << grad.transpose() << std::endl;
-      // std::cout << "sol : " << std::endl << Y.reshaped().transpose() << std::endl;
+      // std::cout << "sol : " << std::endl << Y.reshaped().transpose() <<
+      // std::endl;
     }
   }
   if (Jac_final != nullptr) {
@@ -247,44 +251,30 @@ SpMatrix RankInflation::build_wt_sum_constraints(const Vector& coeffs,
   return fullMatrix;
 }
 
-Matrix RankInflation::get_tangent_step() const {
-  int r_max = params_.max_sol_rank;
-  Matrix N;
-  if (params_.enable_sec_ord_corr &&
-      qr_hessian.nullspace_basis.cols() > 0) {
-    // Add perturbation from the inner nullspace
-    int nulldim = qr_hessian.nullspace_basis.cols();
-    // Get random matrix from nullspace
-    Vector phi = Vector::Random(nulldim);  // values in [-1,1]
-    N = (qr_jacobian.nullspace_basis * qr_hessian.nullspace_basis * phi)
-            .reshaped(dim, r_max);
-  } else if (qr_jacobian.nullspace_basis.cols() > 0) {
-    // Add perturbation from the outer nullspace
-    int nulldim = qr_jacobian.nullspace_basis.cols();
-    // Get random matrix from nullspace
-    Vector phi = Vector::Random(nulldim);  // values in [-1,1]
-    N = (qr_jacobian.nullspace_basis * phi).reshaped(dim, r_max);
-  } else {
-    // Add random perturbation
-    N = Matrix::Random(dim, r_max);
-  }
-  // Normalize
-  double norm_N = N.norm();
-  if (norm_N > 0) {
-    N /= norm_N;
-  }
-  return N;
-}
-
-Matrix RankInflation::get_geodesic_step() const {
+std::pair<Matrix, Matrix> RankInflation::get_geodesic_step(
+    bool second_order) const {
   int r_max = params_.max_sol_rank;
   // Get normalized direction in the tangent space
   int nulldim = qr_jacobian.nullspace_basis.cols();
   Vector phi = Vector::Random(nulldim);  // values in [-1,1]
   Matrix V = (qr_jacobian.nullspace_basis * phi).reshaped(dim, r_max);
   V /= V.norm();
-  
+  // Get second order component
+  Matrix W(dim, r_max);
+  if (second_order) {
+    Vector rhs(m);
+    for (int i = 0; i < m; i++) {
+      if (i < A_.size()) {
+        rhs(i) = -(V.transpose() * A_[i].selfadjointView<Eigen::Upper>() * V)
+                      .trace();
+      } else {
+        rhs(i) = -(V.transpose() * C_ * V).trace();
+      }
+    }
+    W = qr_jacobian.qr_decomp.solve(rhs).reshaped(dim, r_max);
+  }
 
+  return {V, W};
 }
 
 Matrix RankInflation::build_sec_ord_corr_hessian(

@@ -51,7 +51,7 @@ struct RankInflateParams {
   // Max number of iterations
   int max_iter = 100;
   // Retraction Method
-  RetractionMethod retraction_method = RetractionMethod::GaussNewton;
+  RetractionMethod retraction_method = RetractionMethod::ExactNewton;
 
   // Retraction solve parameters
   // -----------------------
@@ -60,9 +60,8 @@ struct RankInflateParams {
   // solutions.
   double tol_null_qr = 1.0E-14;
   // tolerance for constraint norm satisfaction.
-  double tol_violation = 1.0E-8;
-  // Enable for using the exact hessian (vs approximate)
-  bool enable_exact_hessian = true;
+  double tol_violation = 1.0E-6;
+
 
   // Second order correction
   // -----------------------
@@ -87,14 +86,12 @@ struct RankInflateParams {
   // Line search lower bound
   double alpha_min = 1e-4;
 
-  // Rank inflation parameters
+  // Geodesic step parameters
   // ----------------
-  // Nullspace step size (wrt Frobenius norm)
-  double eps_null = 1.0E-2;
-  // Nullspace step size on first iteration
-  // On the first iteration, our knowledge of the true null space is poor, so
-  // take a smaller step
-  double eps_null_init = 1.0e-2;
+  // If true enables second order geodesic step
+  bool second_ord_geo = true;
+  // Tangent space/geodesic step size (wrt Frobenius norm)
+  double eps_geodesic = 1.0E-2;
   // threshold for checking rank of the solution
   // (does not affect convergence, just for display)
   double tol_rank_sol = 1.0E-4;
@@ -169,12 +166,11 @@ class RankInflation {
       const Vector& violation, const Matrix& basis,
       const Vector& delta_n) const;
 
-  // Compute the tangent step for the current solution
-  // Internally, this uses the stored QR decomposition of the Jacobian
-  Matrix get_tangent_step() const;
-
-  // Compute a step that conforms to the second order geodesic
-  Matrix get_geodesic_step() const;
+  // Compute the components of a the second order geodesic step
+  // Returns a pair (V,W) such that the geodesic step is given by
+  //   Y' = Y + alpha*V + alpha^2*W
+  // If `second_order` is false then W is not a valid matrix and should not be used
+  std::pair<Matrix, Matrix> get_geodesic_step(bool second_order=true) const;
 
   // Returns true if the Jacobian is rank-deficient by exactly one
   // Input is the diagonal of R from the QR decomposition of the Jacobian

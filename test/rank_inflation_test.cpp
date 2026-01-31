@@ -121,7 +121,6 @@ TEST_P(LovascThetaParamTest, EvalFuncAndGrad) {
           << " for direction " << i;
     }
   }
-  
 }
 
 // Test RRQR Solve
@@ -196,6 +195,7 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
 }
 
 TEST_P(LovascThetaParamTest, GradDescentRetraction) {
+  // Change this fuction so that we just call the retraction function.
   const auto& test_params = GetParam();
   // get info from adjacency
   auto [edges, nonedges] = get_edges(test_params.adj);
@@ -229,6 +229,60 @@ TEST_P(LovascThetaParamTest, GradDescentRetraction) {
   Y += perturb;
   // Call inflation
   auto Y_ = problem.inflate_solution(Y);
+}
+
+TEST_P(LovascThetaParamTest, GeodesicStep) {
+  // Change this fuction so that we just call the retraction function.
+  const auto& test_params = GetParam();
+  // get info from adjacency
+  auto [edges, nonedges] = get_edges(test_params.adj);
+  int dim = test_params.adj.rows();
+  // Generate constraints
+  auto A = get_lovasz_constraints(dim, nonedges);
+  auto b = std::vector<double>(A.size(), 0.0);
+  b.back() = 1.0;
+  // generate cost
+  Matrix C = -Matrix::Ones(dim, dim);
+  double rho = -static_cast<double>(test_params.expected_clique.size());
+  // parameters
+  int rank = 3;
+  RankInflateParams params;
+  params.verbose = true;
+  params.max_sol_rank = rank;
+  params.retraction_method = RetractionMethod::GaussNewton;
+  // generate problem
+  auto problem = RankInflation(C, rho, A, b, params);
+  // Get actual solution
+  Matrix Y = Matrix::Zero(dim, params.max_sol_rank);
+  std::vector<int> clique = test_params.expected_clique;
+  double clq_num = clique.size();
+  for (int i : clique) {
+    Y(i, 0) = std::sqrt(1 / clq_num);
+  }
+  // Add perturbation to solution
+  Eigen::MatrixXd perturb =
+      Eigen::MatrixXd::Random(dim, params.max_sol_rank) * 1.0E-1;
+  Y += perturb;
+  // get jacobian and run QR decomposition
+  auto Jac = std::make_unique<Matrix>(problem.m, dim * rank);
+  auto viol = problem.eval_constraints(Y, &Jac);
+  Eigen::ColPivHouseholderQR<Matrix> qr(*Jac);
+  problem.qr_jacobian = get_soln_qr_dense(*Jac, Vector::Zero(problem.m), 1e-10);
+  // Take a geodesic step
+  double alpha = 1e-2;
+  auto [V, W] = problem.get_geodesic_step();
+  auto Y_1 = Y + alpha * V;
+  auto Y_2 = Y + alpha * V + std::pow(alpha, 2) * W;
+
+  // Evaluate the violation
+  auto viol_1 = problem.eval_constraints(Y_1);
+  auto viol_2 = problem.eval_constraints(Y_2);
+  // Print violation norms
+  std::cout << "First order norm: " << (viol_1-viol).norm() << std::endl;
+  std::cout << "Second order norm: " << (viol_2-viol).norm() << std::endl;
+  // Check norm (should definitely decrease)
+  EXPECT_LT((viol_2-viol).norm(), (viol_1-viol).norm())
+      << "Norm of violation was worse with second order geodesic step";
 }
 
 // Test Second Order Correction
