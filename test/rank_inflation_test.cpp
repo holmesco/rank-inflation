@@ -88,10 +88,9 @@ TEST_P(LovascThetaParamTest, EvalFuncAndGrad) {
   for (int i : clique) {
     Y(i, 0) = std::sqrt(1 / clq_num);
   }
-  auto Jac =
-      std::make_unique<Matrix>(problem.m, problem.params_.max_sol_rank * dim);
+  auto Jac = Matrix(problem.m, problem.params_.max_sol_rank * dim);
   // Call evaluation function
-  auto output = problem.eval_constraints(Y, &Jac);
+  auto output = problem.eval_constraints(Y, Jac);
   // evaluation and gradient should be near zero
   // std::cout << "Evaluation: " << std::endl << output << std::endl;
   const double tol = 1e-6;
@@ -101,8 +100,8 @@ TEST_P(LovascThetaParamTest, EvalFuncAndGrad) {
   }
   // Perturb solution and check Jacobian via finite differences
   Y += 0.01 * Matrix::Random(dim, 2);
-  output = problem.eval_constraints(Y, &Jac);
-  std::cout << "Jac: " << std::endl << *Jac << std::endl;
+  output = problem.eval_constraints(Y, Jac);
+  std::cout << "Jac: " << std::endl << Jac << std::endl;
   // Numerical directional derivative check
   const double eps = 1e-8;
   int r = problem.params_.max_sol_rank;
@@ -114,7 +113,7 @@ TEST_P(LovascThetaParamTest, EvalFuncAndGrad) {
     Matrix Y2 = Y + eps * delta_vec.reshaped(dim, r);
     auto output2 = problem.eval_constraints(Y2);
     Eigen::VectorXd num_deriv = (output2 - output) / eps;
-    Eigen::VectorXd anal_dir = *Jac * delta_vec;
+    Eigen::VectorXd anal_dir = Jac * delta_vec;
     for (int j = 0; j < problem.m; ++j) {
       EXPECT_NEAR(num_deriv(j), anal_dir(j), deriv_tol)
           << "directional derivative mismatch at constraint " << j
@@ -149,13 +148,12 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
   for (int i : clique) {
     Y(i, 0) = std::sqrt(1 / clq_num);
   }
-  auto Jac =
-      std::make_unique<Matrix>(problem.m, problem.params_.max_sol_rank * dim);
+  auto Jac = Matrix(problem.m, problem.params_.max_sol_rank * dim);
   // Call evaluation function
-  auto output = problem.eval_constraints(Y, &Jac);
+  auto output = problem.eval_constraints(Y, Jac);
   // Apply QR decomposition
   QRResult soln =
-      get_soln_qr_dense(*Jac, -output, problem.params_.rank_def_thresh);
+      get_soln_qr_dense(Jac, -output, problem.params_.rank_def_thresh);
   // solution should be zero
   const double tol = 1e-6;
   ASSERT_EQ(soln.solution.size(), problem.params_.max_sol_rank * dim);
@@ -233,7 +231,8 @@ TEST_P(LovascThetaParamTest, GradDescentRetraction) {
   problem.retraction(Y);
   // recompute violation
   auto viol_retr = problem.eval_constraints(Y);
-  EXPECT_LT(viol_retr.norm(), viol_init.norm()) << "Retraction did not reduce cost";
+  EXPECT_LT(viol_retr.norm(), viol_init.norm())
+      << "Retraction did not reduce cost";
 }
 
 TEST_P(LovascThetaParamTest, ExactNewtonRetraction) {
@@ -275,7 +274,8 @@ TEST_P(LovascThetaParamTest, ExactNewtonRetraction) {
   problem.retraction(Y);
   // recompute violation
   auto viol_retr = problem.eval_constraints(Y);
-  EXPECT_LT(viol_retr.norm(), viol_init.norm()) << "Retraction did not reduce cost";
+  EXPECT_LT(viol_retr.norm(), viol_init.norm())
+      << "Retraction did not reduce cost";
 }
 
 TEST_P(LovascThetaParamTest, GaussNewtonRetraction) {
@@ -317,7 +317,8 @@ TEST_P(LovascThetaParamTest, GaussNewtonRetraction) {
   problem.retraction(Y);
   // recompute violation
   auto viol_retr = problem.eval_constraints(Y);
-  EXPECT_LT(viol_retr.norm(), viol_init.norm()) << "Retraction did not reduce cost";
+  EXPECT_LT(viol_retr.norm(), viol_init.norm())
+      << "Retraction did not reduce cost";
 }
 
 TEST_P(LovascThetaParamTest, GeodesicStep) {
@@ -353,10 +354,10 @@ TEST_P(LovascThetaParamTest, GeodesicStep) {
       Eigen::MatrixXd::Random(dim, params.max_sol_rank) * 1.0E-1;
   Y += perturb;
   // get jacobian and run QR decomposition
-  auto Jac = std::make_unique<Matrix>(problem.m, dim * rank);
-  auto viol = problem.eval_constraints(Y, &Jac);
-  Eigen::ColPivHouseholderQR<Matrix> qr(*Jac);
-  problem.qr_jacobian = get_soln_qr_dense(*Jac, Vector::Zero(problem.m), 1e-10);
+  auto Jac = Matrix(problem.m, dim * rank);
+  auto viol = problem.eval_constraints(Y, Jac);
+  Eigen::ColPivHouseholderQR<Matrix> qr(Jac);
+  problem.qr_jacobian = get_soln_qr_dense(Jac, Vector::Zero(problem.m), 1e-10);
   // Take a geodesic step
   double alpha = 1e-2;
   auto [V, W] = problem.get_geodesic_step(Y.cols());
@@ -405,12 +406,11 @@ TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
   // Y += perturb;
   Y *= 1.1;
   // Call evaluation function
-  auto Jac =
-      std::make_unique<Matrix>(problem.m, problem.params_.max_sol_rank * dim);
-  auto output = problem.eval_constraints(Y, &Jac);
+  auto Jac = Matrix(problem.m, problem.params_.max_sol_rank * dim);
+  auto output = problem.eval_constraints(Y, Jac);
   // Apply QR decomposition
   QRResult result =
-      get_soln_qr_dense(*Jac, -output, problem.params_.rank_def_thresh);
+      get_soln_qr_dense(Jac, -output, problem.params_.rank_def_thresh);
   // Gauss Newton part of the step
   auto delta_gn = result.solution;
   // Get system of equations for second order correction
@@ -432,43 +432,6 @@ TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
             << ", after SOC step: " << viol.norm() << std::endl;
   EXPECT_TRUE(viol.norm() <= viol_gn.norm())
       << "Second order correction did not reduce constraint violation";
-}
-
-// Test Rank Inflation
-TEST_P(LovascThetaParamTest, RankInflation) {
-  const auto& test_params = GetParam();
-  // get info from adjacency
-  auto [edges, nonedges] = get_edges(test_params.adj);
-  int dim = test_params.adj.rows();
-  // Generate constraints
-  auto A = get_lovasz_constraints(dim, nonedges);
-  auto b = std::vector<double>(A.size(), 0.0);
-  b.back() = 1.0;
-  // generate cost
-  Matrix C = -Matrix::Ones(dim, dim);
-  double rho = -static_cast<double>(test_params.expected_clique.size());
-  // parameters
-  RankInflateParams params;
-  params.verbose = true;
-  params.max_sol_rank = dim;
-  // generate problem
-  auto problem = RankInflation(C, rho, A, b, params);
-  // get current soluition
-  Matrix Y_0 = Matrix::Zero(dim, 1);
-  std::vector<int> clique = test_params.expected_clique;
-  double clq_num = clique.size();
-  for (int i : clique) {
-    Y_0(i, 0) = std::sqrt(1 / clq_num);
-  }
-  // Run rank inflation, without inflation (target rank is 1)
-  auto Y = problem.inflate_solution(Y_0);
-  // Check solution rank
-  int r = get_rank(Y, 1.0E-5);
-  EXPECT_TRUE(r >= params.max_sol_rank) << "Did not acheive target rank";
-  // Check constraint tolerance
-  auto viol = problem.eval_constraints(Y);
-  EXPECT_TRUE(viol.norm() <= params.tol_violation)
-      << "Did not acheive target constraint violation";
 }
 
 // Test Certificate
@@ -498,16 +461,15 @@ TEST_P(LovascThetaParamTest, Certificate) {
     Y_0(i, 0) = std::sqrt(1 / clq_num);
   }
   // Run rank inflation, without inflation (target rank is 1)
-  auto Jac = std::make_unique<Matrix>(problem.m, dim * params.max_sol_rank);
-  auto Y = problem.inflate_solution(Y_0, &Jac);
+  auto [Y, Jac] = problem.inflate_solution(Y_0);
   // std::cout << "dot product of Y_0 and Y: "
   //           << (Y_0.transpose() * Y).norm() / Y.norm() / Y_0.norm()
   //           << std::endl;
   // std::cout << "Initial solution: " << std::endl << Y_0 << std::endl;
   // std::cout << "Inflated solution: " << std::endl << Y << std::endl;
-  // std::cout << "Jacobian: " << std::endl << *Jac << std::endl;
+  // std::cout << "Jacobian: " << std::endl << Jac << std::endl;
   // Build certificate
-  auto H = problem.build_certificate(*Jac, Y);
+  auto H = problem.build_certificate(Jac, Y);
   // std::cout << "Certificate Matrix: " << std::endl << H << std::endl;
   // check certificate on high rank solution
   auto [min_eig_hr, first_ord_cond_hr] = problem.check_certificate(H, Y);

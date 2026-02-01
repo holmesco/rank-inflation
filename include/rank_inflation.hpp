@@ -49,8 +49,7 @@ struct RankInflateParams {
   // Enable for increasing rank (for debugging)
   bool enable_inc_rank = true;
   // Max number of iterations
-  int max_iter = 100;
-  
+  int max_iter = 10;
 
   // Retraction solve parameters
   // -----------------------
@@ -64,7 +63,7 @@ struct RankInflateParams {
   // solutions.
   double tol_null_qr = 1.0E-14;
   // tolerance for constraint norm satisfaction.
-  double tol_violation = 1.0E-6;
+  double tol_violation = 1.0E-10;
 
   // Second order correction
   // -----------------------
@@ -92,12 +91,12 @@ struct RankInflateParams {
   // Geodesic step parameters
   // ----------------
   // If true enables second order geodesic step
-  bool second_ord_geo = true;
+  bool second_ord_geo = false;
   // Tangent space/geodesic step size (wrt Frobenius norm)
-  double eps_geodesic = 1.0E-2;
+  double eps_geodesic = 1.0E-1;
   // threshold for checking rank of the solution
   // (does not affect convergence, just for display)
-  double tol_rank_sol = 1.0E-6;
+  double tol_rank_sol = 1.0E-4;
   // Threshold for rank deficiency check of the Jacobian. Value is used to
   // compare the two smallest diagonal elements of the R matrix from the QR
   // decomposition. Note: we expect the Jacobian to be rank-deficient by one.
@@ -131,15 +130,29 @@ class RankInflation {
                 const std::vector<double>& b, RankInflateParams params);
 
   // Evaluate constraints (and cost if enabled) and compute the gradients
-  Vector eval_constraints(const Matrix& Y,
-                          std::unique_ptr<Matrix>* Jac = nullptr) const;
+  Vector eval_constraints(const Matrix& Y, Matrix& Jac) const;
+
+  // Eval constraints (without Jacobian)
+  Vector eval_constraints(const Matrix& Y) const {
+    auto dummy_jac = Matrix(m, dim * Y.cols());
+    return eval_constraints(Y, dummy_jac);
+  }
 
   // Inflate the solution to a desired rank
-  Matrix inflate_solution(const Matrix& Y_0,
-                          std::unique_ptr<Matrix>* Jac_final = nullptr) const;
-
-  // Build the optimality certificate for the problem using the KKT Jacobian and
-  // the (high rank) solution
+  // Returns the inflated solution as well as the corresponding Jacobian
+  std::pair<Matrix, Matrix> inflate_solution(const Matrix& Y_0) const;
+  
+  // Perform the retraction step onto the manifold. Matrix is filled with the final Jacobian
+  void retraction(Matrix& Y, Matrix& Jac) const;
+  
+  // Perform retraction without passing in a Jacobian.
+  void retraction(Matrix& Y) const{
+    auto dummy_jac = Matrix(m, dim * Y.cols());
+    return retraction(Y, dummy_jac);
+  }
+  
+  // Build the optimality certificate for the problem using the KKT Jacobian
+  // and the (high rank) solution
   Matrix build_certificate(const Matrix& Jac, const Matrix& Y) const;
 
   // Check global optimality of a solution
@@ -169,14 +182,14 @@ class RankInflation {
       const Vector& violation, const Matrix& basis,
       const Vector& delta_n) const;
 
-  // Perform the retraction step onto the manifold
-  void retraction(Matrix& Y) const;
 
   // Compute the components of a the second order geodesic step
   // Returns a pair (V,W) such that the geodesic step is given by
   //   Y' = Y + alpha*V + alpha^2*W
-  // If `second_order` is false then W is not a valid matrix and should not be used
-  std::pair<Matrix, Matrix> get_geodesic_step(int rank, bool second_order=true) const;
+  // If `second_order` is false then W is not a valid matrix and should not be
+  // used
+  std::pair<Matrix, Matrix> get_geodesic_step(int rank,
+                                              bool second_order = true) const;
 
   // Returns true if the Jacobian is rank-deficient by exactly one
   // Input is the diagonal of R from the QR decomposition of the Jacobian
