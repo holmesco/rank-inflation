@@ -454,12 +454,13 @@ TEST_P(LovascThetaParamTest, Certificate) {
   // generate problem
   auto problem = RankInflation(C, rho, A, b, params);
   // get current solution
-  std::vector<int> clique = test_params.expected_clique;
-  double clq_num = clique.size();
-  auto Y_0 = Matrix::Zero(dim, 1).eval();
-  for (int i : clique) {
-    Y_0(i, 0) = std::sqrt(1 / clq_num);
-  }
+  // std::vector<int> clique = test_params.expected_clique;
+  // double clq_num = clique.size();
+  // auto Y_0 = Matrix::Zero(dim, 1).eval();
+  // for (int i : clique) {
+  //   Y_0(i, 0) = std::sqrt(1 / clq_num);
+  // }
+  auto Y_0 = Matrix::Identity(dim, dim);
   // Run rank inflation, without inflation (target rank is 1)
   auto [Y, Jac] = problem.inflate_solution(Y_0);
   // std::cout << "dot product of Y_0 and Y: "
@@ -483,6 +484,35 @@ TEST_P(LovascThetaParamTest, Certificate) {
   std::cout << "Certificate on Initial Solution: " << std::endl;
   std::cout << "Minimum Eigenvalue of Certificate: " << min_eig << std::endl;
   std::cout << "First Order Condition Norm: " << first_ord_cond << std::endl;
+}
+
+// Test Certificate
+TEST_P(LovascThetaParamTest, AnalyticCenter) {
+  const auto& test_params = GetParam();
+  // get info from adjacency
+  auto [edges, nonedges] = get_edges(test_params.adj);
+  int dim = test_params.adj.rows();
+  // Generate constraints
+  auto A = get_lovasz_constraints(dim, nonedges);
+  auto b = std::vector<double>(A.size(), 0.0);
+  b.back() = 1.0;
+  // generate cost
+  Matrix C = -Matrix::Ones(dim, dim);
+  double rho = -static_cast<double>(test_params.expected_clique.size());
+  // parameters
+  RankInflateParams params;
+  params.verbose = true;
+  params.max_sol_rank = dim;
+  // generate problem
+  auto problem = RankInflation(C, rho, A, b, params);
+  // get current solution
+  std::vector<int> clique = test_params.expected_clique;
+  double clq_num = clique.size();
+  auto Y_0 = Matrix::Zero(dim, 1).eval();
+  for (int i : clique) {
+    Y_0(i, 0) = std::sqrt(1 / clq_num);
+  }
+  problem.get_analytic_center(Y_0);
 }
 
 // 4. The Parameter Suite

@@ -46,10 +46,8 @@ struct RankInflateParams {
   bool verbose = true;
   // Desired rank
   int max_sol_rank = 1;
-  // Enable for increasing rank (for debugging)
-  bool enable_inc_rank = true;
   // Max number of iterations
-  int max_iter = 10;
+  int max_iter = 3;
 
   // Retraction solve parameters
   // -----------------------
@@ -86,12 +84,12 @@ struct RankInflateParams {
   // Line search initialization
   double alpha_init = 1.0;
   // Line search lower bound
-  double alpha_min = 1e-4;
+  double alpha_min = 1e-10;
 
   // Geodesic step parameters
   // ----------------
   // If true enables second order geodesic step
-  bool second_ord_geo = false;
+  bool second_ord_geo = true;
   // Tangent space/geodesic step size (wrt Frobenius norm)
   double eps_geodesic = 1.0E-1;
   // threshold for checking rank of the solution
@@ -101,6 +99,12 @@ struct RankInflateParams {
   // compare the two smallest diagonal elements of the R matrix from the QR
   // decomposition. Note: we expect the Jacobian to be rank-deficient by one.
   double rank_def_thresh = 1.0E-2;
+
+  // Analytic Center parameters
+  // -------------------------
+  double tol_step_norm_ac = 1e-8;
+  double qr_null_thresh_ac = 1e-10;
+  double eps_init_ac = 1e-12;
 };
 
 class RankInflation {
@@ -141,16 +145,17 @@ class RankInflation {
   // Inflate the solution to a desired rank
   // Returns the inflated solution as well as the corresponding Jacobian
   std::pair<Matrix, Matrix> inflate_solution(const Matrix& Y_0) const;
-  
-  // Perform the retraction step onto the manifold. Matrix is filled with the final Jacobian
+
+  // Perform the retraction step onto the manifold. Matrix is filled with the
+  // final Jacobian
   void retraction(Matrix& Y, Matrix& Jac) const;
-  
+
   // Perform retraction without passing in a Jacobian.
-  void retraction(Matrix& Y) const{
+  void retraction(Matrix& Y) const {
     auto dummy_jac = Matrix(m, dim * Y.cols());
     return retraction(Y, dummy_jac);
   }
-  
+
   // Build the optimality certificate for the problem using the KKT Jacobian
   // and the (high rank) solution
   Matrix build_certificate(const Matrix& Jac, const Matrix& Y) const;
@@ -182,7 +187,6 @@ class RankInflation {
       const Vector& violation, const Matrix& basis,
       const Vector& delta_n) const;
 
-
   // Compute the components of a the second order geodesic step
   // Returns a pair (V,W) such that the geodesic step is given by
   //   Y' = Y + alpha*V + alpha^2*W
@@ -195,6 +199,10 @@ class RankInflation {
   // Input is the diagonal of R from the QR decomposition of the Jacobian
   bool check_jac_rank(const Vector& R_diag, double thresh_rank_def,
                       double thresh_rank) const;
+
+  Matrix get_analytic_center(const Matrix& Y_0) const;
+
+  std::pair<Matrix,Vector> get_analytic_center_system(const Matrix& X) const;
 };
 
 }  // namespace SDPTools

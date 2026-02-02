@@ -60,32 +60,14 @@ std::pair<Matrix, Matrix> RankInflation::inflate_solution(
   // *** Main Loop ***
   // Initialize
   int n_iter = 0;
-  Matrix Jac_final;
+  auto Jac = Matrix(dim, Y.cols() * dim);
   // Loop
   while (n_iter < params_.max_iter) {
-    // Apply Retraction
-    if (params_.verbose) {
-      std::cout << n_iter << "  RETRACTION" << std::endl;
-    }
-    auto Jac = Matrix(dim, Y.cols() * dim);
-    RankInflation::retraction(Y, Jac);
-
-    // ------------ PERTURBATION STEP -----------------
-    if (params_.verbose){
-      std::cout << "Retracted Solution Rank: " << get_rank(Y, params_.tol_rank_sol) << std::endl;
-      std::cout << "Jacobian Rank: " << get_rank(Jac, params_.tol_rank_sol) << std::endl;
-      std::cout << n_iter  << "  PERTURBATION" << std::endl;
-    }
-    // Check if the Jabobian is exactly rank deficient by one.
-    bool jac_rank_check = check_jac_rank(
-        qr_jacobian.R_diagonal, params_.rank_def_thresh, params_.tol_null_qr);
-    if (jac_rank_check) {
+    // Apply perturbation
+    if (n_iter > 0) {
       if (params_.verbose) {
-        std::cout << "CONVERGED!" << std::endl;
+        std::cout << n_iter << "  PERTURBATION" << std::endl;
       }
-      Jac_final = Jac;
-      break;
-    } else {
       // Get geodesic step
       auto [V, W] = get_geodesic_step(Y.cols(), params_.second_ord_geo);
       if (params_.second_ord_geo) {
@@ -94,15 +76,39 @@ std::pair<Matrix, Matrix> RankInflation::inflate_solution(
       } else {
         Y.noalias() = Y + params_.eps_geodesic * V;
       }
-      if (params_.verbose){
-        std::cout << "Perturbed Solution Rank: " << get_rank(Y, params_.tol_rank_sol) << std::endl;
+      if (params_.verbose) {
+        std::cout << "Perturbed Solution Rank: "
+                  << get_rank(Y, params_.tol_rank_sol) << std::endl;
       }
+    }
+
+    // Apply Retraction
+    if (params_.verbose) {
+      std::cout << n_iter << "  RETRACTION" << std::endl;
+    }
+    RankInflation::retraction(Y, Jac);
+
+    // Check if the Jabobian is exactly rank deficient by one.
+    bool jac_rank_check = check_jac_rank(
+        qr_jacobian.R_diagonal, params_.rank_def_thresh, params_.tol_null_qr);
+    if (jac_rank_check) {
+      if (params_.verbose) {
+        std::cout << "CONVERGED!" << std::endl;
+      }
+      break;
+    }
+    // Print outputs
+    if (params_.verbose) {
+      std::cout << "Retracted Solution Rank: "
+                << get_rank(Y, params_.tol_rank_sol) << std::endl;
+      std::cout << "Jacobian Rank: " << get_rank(Jac, params_.tol_rank_sol)
+                << std::endl;
     }
     // update
     n_iter++;
   }
 
-  return {Y, Jac_final};
+  return {Y, Jac};
 }
 
 void RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
@@ -418,14 +424,91 @@ bool RankInflation::check_jac_rank(const Vector& R_diag, double thresh_rank_def,
   // This ratio should be small to satisfy rank deficiency
   double ratio = vals[0] / vals[1];
   std::cout << "rank check diagonal:" << R_diag.transpose() << std::endl;
-  if (params_.verbose){
+  if (params_.verbose) {
     std::cout << "Jac R diag min val 0:" << vals[0] << std::endl;
     std::cout << "Jac R diag min val 1:" << vals[1] << std::endl;
   }
 
-  // Return true if ratio is below threshold and the other values are above the
-  // general threshold
-  return ratio < thresh_rank_def && vals[1] >= thresh_rank;
+  // // Return true if ratio is below threshold and the other values are above the
+  // // general threshold
+  // return ratio < thresh_rank_def && vals[1] >= thresh_rank;
+
+  // return true if all of the values except one are above the threshold
+  return vals[1] >= thresh_rank;
+}
+
+Matrix RankInflation::get_analytic_center(const Matrix& Y_0) const {
+  // Initialize
+  bool converged = false;
+  int n_iter = 0;
+  Matrix X =
+      Y_0 * Y_0.transpose() + Matrix::Identity(dim, dim) * params_.eps_init_ac;
+  while (n_iter < params_.max_iter) {
+    // Get system of equations
+    auto [C, d] = get_analytic_center_system(X);
+    // Sovle with QR factorization
+    QRResult result = get_soln_qr_dense(C.selfadjointView<Eigen::Upper>(), d,
+                                        params_.qr_null_thresh_ac);
+    std::cout << "Lin Sol:" << result.solution.transpose() << std::endl;
+    // Update X
+    auto Aw_sp = build_wt_sum_constraints(result.solution);
+    Matrix Aw = C_ * result.solution(m - 1) + Aw_sp;
+    auto deltaX = X - X * Aw * X;
+    X.noalias() = X + deltaX;
+    // Increment
+    n_iter++;
+    // Stopping Condition
+    if (deltaX.norm() < params_.tol_step_norm_ac) break;
+
+    // Print results
+    if (params_.verbose) {
+      int sol_rank = get_rank(X, params_.tol_rank_sol);
+      Vector violation(m);
+      Vector check_delta(m);
+      for (int i = 0; i < m; i++) {
+        if (i < b_.size()) {
+          violation(i) = d(i) - b_[i];
+          check_delta(i) =
+              (A_[i].selfadjointView<Eigen::Upper>() * deltaX).trace();
+        } else {
+          violation(i) = d(i) - rho_;
+          check_delta(i) = (C_ * deltaX).trace();
+        }
+      }
+      if (n_iter % 10 == 1) {
+        std::printf("%6s %6s %18s %10s\n", "Iter", "SolRank", "ViolationNorm",
+                    "StepNorm");
+      }
+      std::printf("%6d %6d %18.6e %10.6e\n", n_iter, sol_rank, violation.norm(),
+                  deltaX.norm());
+
+      std::cout << "Check Delta Norm: " << check_delta.norm() << std::endl;
+    }
+  }
+  return X;
+}
+
+std::pair<Matrix, Vector> RankInflation::get_analytic_center_system(
+    const Matrix& X) const {
+  // Construct AX matrices and rhs of linear system
+  Vector d(m);
+  std::vector<Matrix> AX;
+  for (int i = 0; i < m; i++) {
+    if (i < A_.size()) {
+      AX.push_back(A_[i].selfadjointView<Eigen::Upper>() * X);
+    } else {
+      AX.push_back(C_ * X);
+    }
+    d(i) = AX.back().trace();
+  }
+  // Construct the LHS matrix
+  Matrix C(m, m);
+  for (int i = 0; i < m; i++) {
+    for (int j = i; j < m; j++) {
+      C(i, j) = (AX[i] * AX[j]).trace();
+    }
+  }
+  return {C, d};
 }
 
 }  // namespace SDPTools
