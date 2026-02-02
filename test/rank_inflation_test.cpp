@@ -16,6 +16,34 @@ using namespace SDPTools;
 using Edge = std::pair<int, int>;
 using Triplet = Eigen::Triplet<double>;
 
+// Test case data structure
+struct SDPTestProblem {
+  int dim;     // matrix dimension
+  Matrix C;    // cost
+  double rho;  // scalar offset
+  std::vector<Eigen::SparseMatrix<double>> A;
+  std::vector<double> b;
+  Vector soln;
+  std::string name;
+
+  // Retrieve zero padded solution for testing.
+  Matrix make_solution(int rank) const {
+    Matrix zpad = Matrix::Zero(dim, rank-1);
+    Matrix Y(dim, rank);
+    Y << soln, zpad;
+    return Y;
+  }
+
+  RankInflation make(const RankInflateParams& params) const {
+    return RankInflation(C, rho, A, b, params);
+  }
+};
+
+// Fixture Class
+class InflationParamTest : public ::testing::TestWithParam<SDPTestProblem> {};
+
+// ----------- Lovasc Theta Helper Functions ----------------
+
 // Compute edges from adjacency, only provide upper triangle indices
 std::pair<std::vector<Edge>, std::vector<Edge>> get_edges(const Matrix& adj) {
   std::vector<Edge> edges;
@@ -51,44 +79,83 @@ std::vector<Eigen::SparseMatrix<double>> get_lovasz_constraints(
   return A;
 }
 
-// 1. Data structure to bundle the input and expected outputs
-struct LovascThetaTestCase {
-  Eigen::MatrixXd adj;
-  std::vector<int> expected_clique;
-  std::string test_name;
-};
+SDPTestProblem make_lovasz_test_case(const Eigen::MatrixXd& adj,
+                                     std::vector<int> clique,
+                                     std::string name) {
+  int dim = adj.rows();
+  auto [edges, nonedges] = get_edges(adj);
 
-// 2. The Fixture Class
-class LovascThetaParamTest
-    : public ::testing::TestWithParam<LovascThetaTestCase> {};
+  SDPTestProblem sdp;
+  // get cost and optimal solution
+  sdp.dim = dim;
+  sdp.C = -Matrix::Ones(dim, dim);
+  sdp.rho = -static_cast<double>(clique.size());
+  // get constraints
+  sdp.A = get_lovasz_constraints(dim, nonedges);
+  sdp.b.assign(sdp.A.size(), 0.0);
+  sdp.b.back() = 1.0;
 
+  // get solution
+  sdp.soln = Vector::Zero(dim);
+  double s = std::sqrt(1.0 / clique.size());
+  for (int i : clique) {
+    sdp.soln(i, 0) = s;
+  }
+  sdp.name = "LovaszTheta_" + name;
+  return sdp;
+}
+
+// ------------ Lovasz-Theta Data Matrices ------------
+static Matrix clique1_adj =
+    (Matrix(10, 10) << 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1,
+     1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1,
+     0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1,
+     0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1,
+     1, 1, 0, 1, 1, 0)
+        .finished();
+static Matrix clique2_adj =
+    (Eigen::MatrixXd(10, 10) << 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1,
+     1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1,
+     1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1,
+     0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1,
+     1, 1, 1, 0, 1, 1, 1, 1, 0)
+        .finished();
+static Matrix clique3_adj =
+    (Eigen::MatrixXd(20, 20) << 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1,
+     1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1,
+     1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1,
+     1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1,
+     1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1,
+     1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1,
+     1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1,
+     1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1,
+     1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0,
+     1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0,
+     1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1,
+     1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+     1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1,
+     0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1,
+     1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1,
+     1, 1, 1, 1, 0, 0, 1, 1, 0)
+        .finished();
+static Matrix clique4_adj = (Eigen::MatrixXd(5, 5) << 0, 1, 1, 0, 0, 1, 0, 1, 0,
+                             0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0)
+                                .finished();
+
+// ------------------  TESTS -----------------------
 // Test constraint evaluation and gradient function
-TEST_P(LovascThetaParamTest, EvalFuncAndGrad) {
-  const auto& test_params = GetParam();
-  // get info from adjacency
-  auto [edges, nonedges] = get_edges(test_params.adj);
-  int dim = test_params.adj.rows();
-  // Generate constraints
-  auto A = get_lovasz_constraints(dim, nonedges);
-  auto b = std::vector<double>(A.size(), 0.0);
-  b.back() = 1.0;
-  // generate cost
-  Matrix C = -Matrix::Ones(dim, dim);
-  double rho = -static_cast<double>(test_params.expected_clique.size());
+TEST_P(InflationParamTest, EvalFuncAndGrad) {
+  const auto& sdp = GetParam();
   // parameters
   RankInflateParams params;
   params.verbose = true;
   params.max_sol_rank = 2;
   // generate problem
-  auto problem = RankInflation(C, rho, A, b, params);
+  auto problem = sdp.make(params);
   // Test vector at actual solution
-  Matrix Y = Matrix::Zero(dim, 2);
-  std::vector<int> clique = test_params.expected_clique;
-  double clq_num = clique.size();
-  for (int i : clique) {
-    Y(i, 0) = std::sqrt(1 / clq_num);
-  }
-  auto Jac = Matrix(problem.m, problem.params_.max_sol_rank * dim);
+  Matrix Y = sdp.make_solution(params.max_sol_rank);
+  auto Jac = Matrix(problem.m, problem.params_.max_sol_rank * sdp.dim);
   // Call evaluation function
   auto output = problem.eval_constraints(Y, Jac);
   // evaluation and gradient should be near zero
@@ -99,18 +166,18 @@ TEST_P(LovascThetaParamTest, EvalFuncAndGrad) {
     EXPECT_NEAR(output(i), 0.0, tol) << "constraint " << i;
   }
   // Perturb solution and check Jacobian via finite differences
-  Y += 0.01 * Matrix::Random(dim, 2);
+  Y += 0.01 * Matrix::Random(sdp.dim, 2);
   output = problem.eval_constraints(Y, Jac);
   std::cout << "Jac: " << std::endl << Jac << std::endl;
   // Numerical directional derivative check
   const double eps = 1e-8;
   int r = problem.params_.max_sol_rank;
-  int vec_size = r * dim;
+  int vec_size = r * sdp.dim;
   const double deriv_tol = 1e-5;
   Eigen::MatrixXd ident = Eigen::MatrixXd::Identity(vec_size, vec_size);
   for (int i = 0; i < vec_size; ++i) {
     Eigen::VectorXd delta_vec = ident.col(i);
-    Matrix Y2 = Y + eps * delta_vec.reshaped(dim, r);
+    Matrix Y2 = Y + eps * delta_vec.reshaped(sdp.dim, r);
     auto output2 = problem.eval_constraints(Y2);
     Eigen::VectorXd num_deriv = (output2 - output) / eps;
     Eigen::VectorXd anal_dir = Jac * delta_vec;
@@ -123,39 +190,23 @@ TEST_P(LovascThetaParamTest, EvalFuncAndGrad) {
 }
 
 // Test RRQR Solve
-TEST_P(LovascThetaParamTest, RRQRSolve) {
-  const auto& test_params = GetParam();
-  // get info from adjacency
-  auto [edges, nonedges] = get_edges(test_params.adj);
-  int dim = test_params.adj.rows();
-  // Generate constraints
-  auto A = get_lovasz_constraints(dim, nonedges);
-  auto b = std::vector<double>(A.size(), 0.0);
-  b.back() = 1.0;
-  // generate cost
-  Matrix C = -Matrix::Ones(dim, dim);
-  double rho = -static_cast<double>(test_params.expected_clique.size());
+TEST_P(InflationParamTest, RRQRSolve) {
+  const auto& sdp = GetParam();
   // parameters
   RankInflateParams params;
   params.verbose = true;
   params.max_sol_rank = 2;
   // generate problem
-  auto problem = RankInflation(C, rho, A, b, params);
-  // Test vector at actual solution
-  Matrix Y = Matrix::Zero(dim, 2);
-  std::vector<int> clique = test_params.expected_clique;
-  double clq_num = clique.size();
-  for (int i : clique) {
-    Y(i, 0) = std::sqrt(1 / clq_num);
-  }
-  auto Jac = Matrix(problem.m, problem.params_.max_sol_rank * dim);
+  auto problem = sdp.make(params);  // Test vector at actual solution
+  Matrix Y = sdp.make_solution(params.max_sol_rank);
+  auto Jac = Matrix(problem.m, problem.params_.max_sol_rank * sdp.dim);
   // Call evaluation function
   auto output = problem.eval_constraints(Y, Jac);
   // Apply QR decomposition
   QRResult soln = get_soln_qr_dense(Jac, -output, problem.params_.tol_rank_jac);
   // solution should be zero
   const double tol = 1e-6;
-  ASSERT_EQ(soln.solution.size(), problem.params_.max_sol_rank * dim);
+  ASSERT_EQ(soln.solution.size(), problem.params_.max_sol_rank * sdp.dim);
   for (int i = 0; i < soln.solution.size(); ++i) {
     EXPECT_NEAR(soln.solution(i), 0.0, tol) << "row " << i;
   }
@@ -171,15 +222,15 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
     double alpha_norm = alpha.norm();
     if (alpha_norm > 0) alpha /= alpha_norm;
     Matrix dY = (soln.nullspace_basis * alpha)
-                    .reshaped(dim, problem.params_.max_sol_rank);
+                    .reshaped(sdp.dim, problem.params_.max_sol_rank);
     // Add delta to solution
     Matrix Y_plus = Y + dY;
     // Evaluate constraints at new solution
     Vector output_Y_plus = problem.eval_constraints(Y_plus);
     Vector output_dY = problem.eval_constraints(dY);
     // Constraint value
-    std::vector<double> vals(b.begin(), b.end());
-    vals.push_back(rho);
+    std::vector<double> vals(sdp.b.begin(), sdp.b.end());
+    vals.push_back(sdp.rho);
     Vector constraint_val = Vector::Map(vals.data(), vals.size());
     // linear component of the new output
     Vector output_linear =
@@ -191,19 +242,8 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
   }
 }
 
-TEST_P(LovascThetaParamTest, GradDescentRetraction) {
-  // Change this fuction so that we just call the retraction function.
-  const auto& test_params = GetParam();
-  // get info from adjacency
-  auto [edges, nonedges] = get_edges(test_params.adj);
-  int dim = test_params.adj.rows();
-  // Generate constraints
-  auto A = get_lovasz_constraints(dim, nonedges);
-  auto b = std::vector<double>(A.size(), 0.0);
-  b.back() = 1.0;
-  // generate cost
-  Matrix C = -Matrix::Ones(dim, dim);
-  double rho = -static_cast<double>(test_params.expected_clique.size());
+TEST_P(InflationParamTest, GradDescentRetraction) {
+  const auto& sdp = GetParam();
   // parameters
   RankInflateParams params;
   params.verbose = true;
@@ -212,17 +252,12 @@ TEST_P(LovascThetaParamTest, GradDescentRetraction) {
   params.max_iter = 20;
   params.alpha_min = 1e-12;
   // generate problem
-  auto problem = RankInflation(C, rho, A, b, params);
+  auto problem = sdp.make(params);
   // Get actual solution
-  Matrix Y = Matrix::Zero(dim, params.max_sol_rank);
-  std::vector<int> clique = test_params.expected_clique;
-  double clq_num = clique.size();
-  for (int i : clique) {
-    Y(i, 0) = std::sqrt(1 / clq_num);
-  }
+  Matrix Y = sdp.make_solution(params.max_sol_rank);
   // Add perturbation to solution
   Eigen::MatrixXd perturb =
-      Eigen::MatrixXd::Random(dim, params.max_sol_rank) * 1.0E-1;
+      Eigen::MatrixXd::Random(sdp.dim, params.max_sol_rank) * 1.0E-1;
   Y += perturb;
   // Get initial violation
   auto viol_init = problem.eval_constraints(Y);
@@ -234,19 +269,8 @@ TEST_P(LovascThetaParamTest, GradDescentRetraction) {
       << "Retraction did not reduce cost";
 }
 
-TEST_P(LovascThetaParamTest, ExactNewtonRetraction) {
-  // Change this fuction so that we just call the retraction function.
-  const auto& test_params = GetParam();
-  // get info from adjacency
-  auto [edges, nonedges] = get_edges(test_params.adj);
-  int dim = test_params.adj.rows();
-  // Generate constraints
-  auto A = get_lovasz_constraints(dim, nonedges);
-  auto b = std::vector<double>(A.size(), 0.0);
-  b.back() = 1.0;
-  // generate cost
-  Matrix C = -Matrix::Ones(dim, dim);
-  double rho = -static_cast<double>(test_params.expected_clique.size());
+TEST_P(InflationParamTest, ExactNewtonRetraction) {
+  const auto& sdp = GetParam();
   // parameters
   RankInflateParams params;
   params.verbose = true;
@@ -255,17 +279,12 @@ TEST_P(LovascThetaParamTest, ExactNewtonRetraction) {
   params.max_iter = 20;
   params.alpha_min = 1e-12;
   // generate problem
-  auto problem = RankInflation(C, rho, A, b, params);
+  auto problem = sdp.make(params);
   // Get actual solution
-  Matrix Y = Matrix::Zero(dim, params.max_sol_rank);
-  std::vector<int> clique = test_params.expected_clique;
-  double clq_num = clique.size();
-  for (int i : clique) {
-    Y(i, 0) = std::sqrt(1 / clq_num);
-  }
+  Matrix Y = sdp.make_solution(params.max_sol_rank);
   // Add perturbation to solution
   Eigen::MatrixXd perturb =
-      Eigen::MatrixXd::Random(dim, params.max_sol_rank) * 1.0E-1;
+      Eigen::MatrixXd::Random(sdp.dim, params.max_sol_rank) * 1.0E-1;
   Y += perturb;
   // Get initial violation
   auto viol_init = problem.eval_constraints(Y);
@@ -277,19 +296,8 @@ TEST_P(LovascThetaParamTest, ExactNewtonRetraction) {
       << "Retraction did not reduce cost";
 }
 
-TEST_P(LovascThetaParamTest, GaussNewtonRetraction) {
-  // Change this fuction so that we just call the retraction function.
-  const auto& test_params = GetParam();
-  // get info from adjacency
-  auto [edges, nonedges] = get_edges(test_params.adj);
-  int dim = test_params.adj.rows();
-  // Generate constraints
-  auto A = get_lovasz_constraints(dim, nonedges);
-  auto b = std::vector<double>(A.size(), 0.0);
-  b.back() = 1.0;
-  // generate cost
-  Matrix C = -Matrix::Ones(dim, dim);
-  double rho = -static_cast<double>(test_params.expected_clique.size());
+TEST_P(InflationParamTest, GaussNewtonRetraction) {
+  const auto& sdp = GetParam();
   // parameters
   RankInflateParams params;
   params.verbose = true;
@@ -298,17 +306,12 @@ TEST_P(LovascThetaParamTest, GaussNewtonRetraction) {
   params.max_iter = 20;
   params.alpha_min = 1e-12;
   // generate problem
-  auto problem = RankInflation(C, rho, A, b, params);
+  auto problem = sdp.make(params);
   // Get actual solution
-  Matrix Y = Matrix::Zero(dim, params.max_sol_rank);
-  std::vector<int> clique = test_params.expected_clique;
-  double clq_num = clique.size();
-  for (int i : clique) {
-    Y(i, 0) = std::sqrt(1 / clq_num);
-  }
+  Matrix Y = sdp.make_solution(params.max_sol_rank);
   // Add perturbation to solution
   Eigen::MatrixXd perturb =
-      Eigen::MatrixXd::Random(dim, params.max_sol_rank) * 1.0E-1;
+      Eigen::MatrixXd::Random(sdp.dim, params.max_sol_rank) * 1.0E-1;
   Y += perturb;
   // Get initial violation
   auto viol_init = problem.eval_constraints(Y);
@@ -320,19 +323,8 @@ TEST_P(LovascThetaParamTest, GaussNewtonRetraction) {
       << "Retraction did not reduce cost";
 }
 
-TEST_P(LovascThetaParamTest, GeodesicStep) {
-  // Change this fuction so that we just call the retraction function.
-  const auto& test_params = GetParam();
-  // get info from adjacency
-  auto [edges, nonedges] = get_edges(test_params.adj);
-  int dim = test_params.adj.rows();
-  // Generate constraints
-  auto A = get_lovasz_constraints(dim, nonedges);
-  auto b = std::vector<double>(A.size(), 0.0);
-  b.back() = 1.0;
-  // generate cost
-  Matrix C = -Matrix::Ones(dim, dim);
-  double rho = -static_cast<double>(test_params.expected_clique.size());
+TEST_P(InflationParamTest, GeodesicStep) {
+  const auto& sdp = GetParam();
   // parameters
   int rank = 3;
   RankInflateParams params;
@@ -340,20 +332,15 @@ TEST_P(LovascThetaParamTest, GeodesicStep) {
   params.max_sol_rank = rank;
   params.retraction_method = RetractionMethod::GaussNewton;
   // generate problem
-  auto problem = RankInflation(C, rho, A, b, params);
+  auto problem = sdp.make(params);
   // Get actual solution
-  Matrix Y = Matrix::Zero(dim, params.max_sol_rank);
-  std::vector<int> clique = test_params.expected_clique;
-  double clq_num = clique.size();
-  for (int i : clique) {
-    Y(i, 0) = std::sqrt(1 / clq_num);
-  }
+  Matrix Y = sdp.make_solution(params.max_sol_rank);
   // Add perturbation to solution
   Eigen::MatrixXd perturb =
-      Eigen::MatrixXd::Random(dim, params.max_sol_rank) * 1.0E-1;
+      Eigen::MatrixXd::Random(sdp.dim, params.max_sol_rank) * 1.0E-1;
   Y += perturb;
   // get jacobian and run QR decomposition
-  auto Jac = Matrix(problem.m, dim * rank);
+  auto Jac = Matrix(problem.m, sdp.dim * rank);
   auto viol = problem.eval_constraints(Y, Jac);
   Eigen::ColPivHouseholderQR<Matrix> qr(Jac);
   problem.qr_jacobian = get_soln_qr_dense(Jac, Vector::Zero(problem.m), 1e-10);
@@ -374,100 +361,19 @@ TEST_P(LovascThetaParamTest, GeodesicStep) {
       << "Norm of violation was worse with second order geodesic step";
 }
 
-// Test Second Order Correction
-TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
-  const auto& test_params = GetParam();
-  // get info from adjacency
-  auto [edges, nonedges] = get_edges(test_params.adj);
-  int dim = test_params.adj.rows();
-  // Generate constraints
-  auto A = get_lovasz_constraints(dim, nonedges);
-  auto b = std::vector<double>(A.size(), 0.0);
-  b.back() = 1.0;
-  // generate cost
-  Matrix C = -Matrix::Ones(dim, dim);
-  double rho = -static_cast<double>(test_params.expected_clique.size());
-  // parameters
-  RankInflateParams params;
-  params.verbose = true;
-  params.max_sol_rank = 2;
-  // generate problem
-  auto problem = RankInflation(C, rho, A, b, params);
-  // Test vector at actual solution
-  Matrix Y = Matrix::Zero(dim, 2);
-  std::vector<int> clique = test_params.expected_clique;
-  double clq_num = clique.size();
-  for (int i : clique) {
-    Y(i, 0) = std::sqrt(1 / clq_num);
-  }
-  // Add perturbation to solution
-  // Eigen::MatrixXd perturb = Eigen::MatrixXd::Random(dim, 2) * 0.1;
-  // Y += perturb;
-  Y *= 1.1;
-  // Call evaluation function
-  auto Jac = Matrix(problem.m, problem.params_.max_sol_rank * dim);
-  auto output = problem.eval_constraints(Y, Jac);
-  // Apply QR decomposition
-  QRResult result =
-      get_soln_qr_dense(Jac, -output, problem.params_.tol_rank_jac);
-  // Gauss Newton part of the step
-  auto delta_gn = result.solution;
-  // Get system of equations for second order correction
-  auto [hess, grad] = problem.build_proj_corr_grad_hess(
-      output, result.nullspace_basis, delta_gn);
-  // Solve new system
-  QRResult corr_result =
-      get_soln_qr_dense(hess, -grad, problem.params_.tol_null_corr);
-  // reconstruct solution
-  auto delta_corr = result.nullspace_basis * corr_result.solution;
-  auto delta = delta_gn + delta_corr;
-  // Evaluate
-  auto viol_gn =
-      problem.eval_constraints(Y + delta_gn.reshaped(dim, params.max_sol_rank));
-  auto viol =
-      problem.eval_constraints(Y + delta.reshaped(dim, params.max_sol_rank));
-  // print norm of violations
-  std::cout << "Norm of violation after GN step: " << viol_gn.norm()
-            << ", after SOC step: " << viol.norm() << std::endl;
-  EXPECT_TRUE(viol.norm() <= viol_gn.norm())
-      << "Second order correction did not reduce constraint violation";
-}
-
 // Test Certificate
-TEST_P(LovascThetaParamTest, Certificate) {
-  const auto& test_params = GetParam();
-  // get info from adjacency
-  auto [edges, nonedges] = get_edges(test_params.adj);
-  int dim = test_params.adj.rows();
-  // Generate constraints
-  auto A = get_lovasz_constraints(dim, nonedges);
-  auto b = std::vector<double>(A.size(), 0.0);
-  b.back() = 1.0;
-  // generate cost
-  Matrix C = -Matrix::Ones(dim, dim);
-  double rho = -static_cast<double>(test_params.expected_clique.size());
+TEST_P(InflationParamTest, Certificate) {
+  const auto& sdp = GetParam();
   // parameters
   RankInflateParams params;
   params.verbose = true;
-  params.max_sol_rank = dim;
+  params.max_sol_rank = sdp.dim;
   // generate problem
-  auto problem = RankInflation(C, rho, A, b, params);
+  auto problem = sdp.make(params);
   // get current solution
-  std::vector<int> clique = test_params.expected_clique;
-  double clq_num = clique.size();
-  auto Y_0 = Matrix::Zero(dim, 1).eval();
-  for (int i : clique) {
-    Y_0(i, 0) = std::sqrt(1 / clq_num);
-  }
-  // auto Y_0 = Matrix::Identity(dim, dim);
+  Matrix Y_0 = sdp.make_solution(params.max_sol_rank);
   // Run rank inflation, without inflation (target rank is 1)
   auto [Y, Jac] = problem.inflate_solution(Y_0);
-  // std::cout << "dot product of Y_0 and Y: "
-  //           << (Y_0.transpose() * Y).norm() / Y.norm() / Y_0.norm()
-  //           << std::endl;
-  // std::cout << "Initial solution: " << std::endl << Y_0 << std::endl;
-  // std::cout << "Inflated solution: " << std::endl << Y << std::endl;
-  // std::cout << "Jacobian: " << std::endl << Jac << std::endl;
   // Build certificate
   auto H = problem.build_certificate(Jac, Y);
   // std::cout << "Certificate Matrix: " << std::endl << H << std::endl;
@@ -477,7 +383,7 @@ TEST_P(LovascThetaParamTest, Certificate) {
   std::cout << "Minimum Eigenvalue of Certificate: " << min_eig_hr << std::endl;
   std::cout << "First Order Condition Norm: " << first_ord_cond_hr << std::endl;
   std::cout << "Cost at High Rank Solution: " << std::endl
-            << (Y.transpose() * C * Y).trace() << std::endl;
+            << (Y.transpose() * sdp.C * Y).trace() << std::endl;
   // check certificate on initial solution
   auto [min_eig, first_ord_cond] = problem.check_certificate(H, Y_0);
   std::cout << "Certificate on Initial Solution: " << std::endl;
@@ -486,89 +392,34 @@ TEST_P(LovascThetaParamTest, Certificate) {
 }
 
 // Test Certificate
-TEST_P(LovascThetaParamTest, AnalyticCenter) {
-  const auto& test_params = GetParam();
-  // get info from adjacency
-  auto [edges, nonedges] = get_edges(test_params.adj);
-  int dim = test_params.adj.rows();
-  // Generate constraints
-  auto A = get_lovasz_constraints(dim, nonedges);
-  auto b = std::vector<double>(A.size(), 0.0);
-  b.back() = 1.0;
-  // generate cost
-  Matrix C = -Matrix::Ones(dim, dim);
-  double rho = -static_cast<double>(test_params.expected_clique.size());
+TEST_P(InflationParamTest, AnalyticCenter) {
+  const auto& sdp = GetParam();
   // parameters
   RankInflateParams params;
   params.verbose = true;
-  params.max_sol_rank = dim;
+  params.max_sol_rank = sdp.dim;
   // generate problem
-  auto problem = RankInflation(C, rho, A, b, params);
+  auto problem = sdp.make(params);
   // get current solution
-  std::vector<int> clique = test_params.expected_clique;
-  double clq_num = clique.size();
-  auto Y_0 = Matrix::Zero(dim, 1).eval();
-  for (int i : clique) {
-    Y_0(i, 0) = std::sqrt(1 / clq_num);
-  }
-  problem.get_analytic_center(Y_0);
+  Matrix Y = sdp.make_solution(params.max_sol_rank);
+  auto X_0 = Y * Y.transpose();
+  auto X = problem.get_analytic_center(X_0);
 }
 
-// 4. The Parameter Suite
 INSTANTIATE_TEST_SUITE_P(
-    RankInflationSuite, LovascThetaParamTest,
+    RankInflationSuite, InflationParamTest,
     ::testing::Values(
         // CASE 1
-        LovascThetaTestCase{
-            (Eigen::MatrixXd(10, 10) << 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1,
-             1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1,
-             1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1,
-             1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1,
-             1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0)
-                .finished(),
-            {1, 3, 4, 6, 7, 8},
-            "Clique1_Standard"},
+        make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8}, "Clique1"),
         // CASE 2
-        LovascThetaTestCase{
-            (Eigen::MatrixXd(10, 10) << 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1,
-             1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1,
-             1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1,
-             1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1,
-             1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0)
-                .finished(),
-            {0, 2, 3, 5, 6, 8, 9},
-            "Clique2_Chromatic"},
+        make_lovasz_test_case(clique2_adj, {0, 2, 3, 5, 6, 8, 9}, "Clique2"),
         // CASE 3 (The 20x20 Matrix)
-        LovascThetaTestCase{
-            (Eigen::MatrixXd(20, 20) << 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0,
-             1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1,
-             0, 1, 0, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1,
-             1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1,
-             1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0,
-             1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-             0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1,
-             1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1,
-             0, 1, 1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0,
-             1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0,
-             0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1,
-             1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1,
-             1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1,
-             1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1,
-             1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1, 0, 1,
-             1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1,
-             1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1,
-             0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 0)
-                .finished(),
-            {4, 10, 13, 14, 15, 16, 17, 18},
-            "Clique3_Large20x20"},
+        make_lovasz_test_case(clique3_adj, {4, 10, 13, 14, 15, 16, 17, 18},
+                              "Clique3_Large20x20"),
         // CASE 4
-        LovascThetaTestCase{(Eigen::MatrixXd(5, 5) << 0, 1, 1, 0, 0, 1, 0, 1, 0,
-                             0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0)
-                                .finished(),
-                            {0, 1, 2},
-                            "Clique4_Disconnected"}),
-    // This helper function names the tests based on the 'test_name' field
-    [](const ::testing::TestParamInfo<LovascThetaParamTest::ParamType>& info) {
-      return info.param.test_name;
+        make_lovasz_test_case(clique4_adj, {0, 1, 2}, "Clique4_Disconnected")),
+    // This helper function names the tests based on the 'test_name'
+    // field
+    [](const ::testing::TestParamInfo<InflationParamTest::ParamType>& info) {
+      return info.param.name;
     });

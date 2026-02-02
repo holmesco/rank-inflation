@@ -101,9 +101,10 @@ struct RankInflateParams {
 
   // Analytic Center parameters
   // -------------------------
+  // tolerance for step size (terminate if below)
   double tol_step_norm_ac = 1e-8;
-  double qr_null_thresh_ac = 1e-10;
-  double eps_init_ac = 1e-12;
+  // tolerance for QR solve.
+  double qr_null_thresh_ac = 1e-8;
 };
 
 class RankInflation {
@@ -194,6 +195,7 @@ class RankInflation {
   std::pair<Matrix, Matrix> get_geodesic_step(int rank,
                                               bool second_order = true) const;
 
+  // Get analytic center
   Matrix get_analytic_center(const Matrix& Y_0) const;
 
   std::pair<Matrix, Vector> get_analytic_center_system(const Matrix& X) const;

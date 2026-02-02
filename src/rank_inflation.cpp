@@ -415,12 +415,11 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
   return result;
 }
 
-Matrix RankInflation::get_analytic_center(const Matrix& Y_0) const {
+Matrix RankInflation::get_analytic_center(const Matrix& X_0) const {
   // Initialize
   bool converged = false;
   int n_iter = 0;
-  Matrix X =
-      Y_0 * Y_0.transpose() + Matrix::Identity(dim, dim) * params_.eps_init_ac;
+  Matrix X = X_0;
   while (n_iter < params_.max_iter) {
     // Get system of equations
     auto [C, d] = get_analytic_center_system(X);
