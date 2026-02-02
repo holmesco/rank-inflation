@@ -47,7 +47,12 @@ struct RankInflateParams {
   // Desired rank
   int max_sol_rank = 1;
   // Max number of iterations
-  int max_iter = 3;
+  int max_iter = 10;
+  // threshold for checking rank of the solution
+  // (does not affect convergence, just for display)
+  double tol_rank_sol = 1.0E-4;
+  // Threshold for checking rank of the Jacobian
+  double tol_rank_jac = 1.0E-7;
 
   // Retraction solve parameters
   // -----------------------
@@ -56,10 +61,10 @@ struct RankInflateParams {
   RetractionMethod retraction_method = RetractionMethod::ExactNewton;
   // Max iterations for retraction
   int max_iter_retract = 100;
-  // Null space threshold for GN solve
-  // NOTE: Controls accuracy of GN solve. Should be small to get accurate
-  // solutions.
-  double tol_null_qr = 1.0E-14;
+  // Tollerance for QR decomposition of Jacobian matrix
+  // NOTE: Controls accuracy of GN solve. If made too small then can get
+  // unstable solutions.
+  double tol_jac_qr = 1.0E-7;
   // tolerance for constraint norm satisfaction.
   double tol_violation = 1.0E-10;
 
@@ -84,21 +89,15 @@ struct RankInflateParams {
   // Line search initialization
   double alpha_init = 1.0;
   // Line search lower bound
-  double alpha_min = 1e-10;
+  double alpha_min = 1e-14;
 
   // Geodesic step parameters
   // ----------------
   // If true enables second order geodesic step
-  bool second_ord_geo = true;
+  // NOTE: This seems to introduce numerical issues! Don't use for now.
+  bool second_ord_geo = false;
   // Tangent space/geodesic step size (wrt Frobenius norm)
-  double eps_geodesic = 1.0E-1;
-  // threshold for checking rank of the solution
-  // (does not affect convergence, just for display)
-  double tol_rank_sol = 1.0E-4;
-  // Threshold for rank deficiency check of the Jacobian. Value is used to
-  // compare the two smallest diagonal elements of the R matrix from the QR
-  // decomposition. Note: we expect the Jacobian to be rank-deficient by one.
-  double rank_def_thresh = 1.0E-2;
+  double eps_geodesic = 1.0E-2;
 
   // Analytic Center parameters
   // -------------------------
@@ -148,10 +147,10 @@ class RankInflation {
 
   // Perform the retraction step onto the manifold. Matrix is filled with the
   // final Jacobian
-  void retraction(Matrix& Y, Matrix& Jac) const;
+  Vector retraction(Matrix& Y, Matrix& Jac) const;
 
   // Perform retraction without passing in a Jacobian.
-  void retraction(Matrix& Y) const {
+  Vector retraction(Matrix& Y) const {
     auto dummy_jac = Matrix(m, dim * Y.cols());
     return retraction(Y, dummy_jac);
   }
@@ -195,14 +194,9 @@ class RankInflation {
   std::pair<Matrix, Matrix> get_geodesic_step(int rank,
                                               bool second_order = true) const;
 
-  // Returns true if the Jacobian is rank-deficient by exactly one
-  // Input is the diagonal of R from the QR decomposition of the Jacobian
-  bool check_jac_rank(const Vector& R_diag, double thresh_rank_def,
-                      double thresh_rank) const;
-
   Matrix get_analytic_center(const Matrix& Y_0) const;
 
-  std::pair<Matrix,Vector> get_analytic_center_system(const Matrix& X) const;
+  std::pair<Matrix, Vector> get_analytic_center_system(const Matrix& X) const;
 };
 
 }  // namespace SDPTools

@@ -60,7 +60,7 @@ std::pair<Matrix, Matrix> RankInflation::inflate_solution(
   // *** Main Loop ***
   // Initialize
   int n_iter = 0;
-  auto Jac = Matrix(dim, Y.cols() * dim);
+  auto Jac = Matrix(m, Y.cols() * dim);
   // Loop
   while (n_iter < params_.max_iter) {
     // Apply perturbation
@@ -86,12 +86,11 @@ std::pair<Matrix, Matrix> RankInflation::inflate_solution(
     if (params_.verbose) {
       std::cout << n_iter << "  RETRACTION" << std::endl;
     }
-    RankInflation::retraction(Y, Jac);
+    auto violation = RankInflation::retraction(Y, Jac);
 
     // Check if the Jabobian is exactly rank deficient by one.
-    bool jac_rank_check = check_jac_rank(
-        qr_jacobian.R_diagonal, params_.rank_def_thresh, params_.tol_null_qr);
-    if (jac_rank_check) {
+    int jac_rank = get_rank(Jac.topRows(A_.size()), params_.tol_rank_jac);
+    if (jac_rank >= A_.size() && violation.norm() < params_.tol_violation) {
       if (params_.verbose) {
         std::cout << "CONVERGED!" << std::endl;
       }
@@ -99,10 +98,7 @@ std::pair<Matrix, Matrix> RankInflation::inflate_solution(
     }
     // Print outputs
     if (params_.verbose) {
-      std::cout << "Retracted Solution Rank: "
-                << get_rank(Y, params_.tol_rank_sol) << std::endl;
-      std::cout << "Jacobian Rank: " << get_rank(Jac, params_.tol_rank_sol)
-                << std::endl;
+      std::cout << "Jacobian Rank: " << jac_rank << std::endl;
     }
     // update
     n_iter++;
@@ -111,7 +107,7 @@ std::pair<Matrix, Matrix> RankInflation::inflate_solution(
   return {Y, Jac};
 }
 
-void RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
+Vector RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
   // Initialize
   int r = Y.cols();
   int n_iter = 0;
@@ -121,7 +117,7 @@ void RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
     // Evaluate violation and get jacobian
     violation = eval_constraints(Y, Jac);
     // QR decomposition of Jacobian (run before checking convergence to get QR)
-    qr_jacobian = get_soln_qr_dense(Jac, -violation, params_.tol_null_qr);
+    qr_jacobian = get_soln_qr_dense(Jac, -violation, params_.tol_jac_qr);
     // Check for convergence
     if (violation.norm() < params_.tol_violation) break;
     // Define retraction step
@@ -138,7 +134,7 @@ void RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
         // build gradient
         Vector grad = Jac.transpose() * violation;
         // Solve system
-        qr_hessian = get_soln_qr_dense(Hess, -grad, params_.tol_null_qr);
+        qr_hessian = get_soln_qr_dense(Hess, -grad, params_.tol_jac_qr);
         // Define step
         delta = qr_hessian.solution;
         // Debug: compute minimum eigenvalue of Hessian
@@ -169,7 +165,7 @@ void RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
       }
       case RetractionMethod::GradientDescent: {
         // Get QR Decomposition of Jac
-        qr_jacobian = get_soln_qr_dense(Jac, -violation, params_.tol_null_qr);
+        qr_jacobian = get_soln_qr_dense(Jac, -violation, params_.tol_jac_qr);
         delta = -Jac.transpose() * violation;
         break;
       }
@@ -194,17 +190,18 @@ void RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
       double grad_norm = grad.norm();
 
       if (n_iter % 10 == 1) {
-        std::printf("%6s %6s %18s %10s %10s %10s\n", "Iter", "JacRank",
-                    "ViolationNorm", "Alpha", "StepNorm", "GradNorm");
+        std::printf("%6s %18s %10s %10s %10s\n", "Iter", "ViolationNorm",
+                    "Alpha", "StepNorm", "GradNorm");
       }
-      std::printf("%6d %6d %18.6e %10.3e %10.6e %10.6e\n", n_iter,
-                  qr_jacobian.rank, violation.norm(), alpha, step_norm,
-                  grad_norm);
+      std::printf("%6d %18.6e %10.3e %10.6e %10.6e\n", n_iter, violation.norm(),
+                  alpha, step_norm, grad_norm);
       // std::cout << "Grad: " << grad.transpose() << std::endl;
       // std::cout << "sol : " << std::endl << Y.reshaped().transpose() <<
       // std::endl;
     }
   }
+
+  return violation;
 }
 
 double RankInflation::backtrack_line_search(const Matrix& Y, const Matrix& dY,
@@ -281,6 +278,11 @@ std::pair<Matrix, Matrix> RankInflation::get_geodesic_step(
       }
     }
     W = qr_jacobian.qr_decomp.solve(rhs).reshaped(dim, rank);
+    std::cout << "Threshold " << qr_jacobian.qr_decomp.threshold() << std::endl;
+    std::cout << "R_diag: " << qr_jacobian.qr_decomp.matrixR().diagonal()
+              << std::endl;
+    std::cout << "Norm of W: " << W.norm() << std::endl;
+    std::cout << "Norm of RHS: " << rhs.norm() << std::endl;
   }
 
   return {V, W};
@@ -328,7 +330,7 @@ Matrix RankInflation::build_certificate(const Matrix& Jac,
 
   // Solve for Lagrange multipliers
   auto result =
-      get_soln_qr_dense(vecAY.transpose(), -vecCY, params_.tol_null_qr);
+      get_soln_qr_dense(vecAY.transpose(), -vecCY, params_.tol_rank_jac);
   // print diagonal and residual
   std::cout << "Lagrange solve residual norm: " << result.residual_norm
             << std::endl;
@@ -355,9 +357,9 @@ std::pair<double, double> RankInflation::check_certificate(
   return {min_eig, first_order_norm};
 }
 
-int get_rank(const Matrix& Y, const double threshold) {
+int get_rank(const Matrix& mat, const double threshold) {
   // 1. Perform Column Pivoted Householder QR (Rank-Revealing)
-  Eigen::ColPivHouseholderQR<Matrix> qr(Y);
+  Eigen::ColPivHouseholderQR<Matrix> qr(mat);
   qr.setThreshold(threshold);
   return qr.rank();
 }
@@ -411,30 +413,6 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
   result.R_diagonal = qr.matrixQR().diagonal();
   result.residual_norm = (A * result.solution - b).norm();
   return result;
-}
-
-bool RankInflation::check_jac_rank(const Vector& R_diag, double thresh_rank_def,
-                                   double thresh_rank) const {
-  // Sort the elements along the diagonal of the R matrix
-  std::vector<double> vals(R_diag.size());
-  for (int i = 0; i < R_diag.size(); ++i) {
-    vals[i] = std::abs(R_diag(i));
-  }
-  std::sort(vals.begin(), vals.end());
-  // This ratio should be small to satisfy rank deficiency
-  double ratio = vals[0] / vals[1];
-  std::cout << "rank check diagonal:" << R_diag.transpose() << std::endl;
-  if (params_.verbose) {
-    std::cout << "Jac R diag min val 0:" << vals[0] << std::endl;
-    std::cout << "Jac R diag min val 1:" << vals[1] << std::endl;
-  }
-
-  // // Return true if ratio is below threshold and the other values are above the
-  // // general threshold
-  // return ratio < thresh_rank_def && vals[1] >= thresh_rank;
-
-  // return true if all of the values except one are above the threshold
-  return vals[1] >= thresh_rank;
 }
 
 Matrix RankInflation::get_analytic_center(const Matrix& Y_0) const {

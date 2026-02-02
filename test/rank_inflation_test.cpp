@@ -152,8 +152,7 @@ TEST_P(LovascThetaParamTest, RRQRSolve) {
   // Call evaluation function
   auto output = problem.eval_constraints(Y, Jac);
   // Apply QR decomposition
-  QRResult soln =
-      get_soln_qr_dense(Jac, -output, problem.params_.rank_def_thresh);
+  QRResult soln = get_soln_qr_dense(Jac, -output, problem.params_.tol_rank_jac);
   // solution should be zero
   const double tol = 1e-6;
   ASSERT_EQ(soln.solution.size(), problem.params_.max_sol_rank * dim);
@@ -410,7 +409,7 @@ TEST_P(LovascThetaParamTest, SecondOrdCorrection) {
   auto output = problem.eval_constraints(Y, Jac);
   // Apply QR decomposition
   QRResult result =
-      get_soln_qr_dense(Jac, -output, problem.params_.rank_def_thresh);
+      get_soln_qr_dense(Jac, -output, problem.params_.tol_rank_jac);
   // Gauss Newton part of the step
   auto delta_gn = result.solution;
   // Get system of equations for second order correction
@@ -454,13 +453,13 @@ TEST_P(LovascThetaParamTest, Certificate) {
   // generate problem
   auto problem = RankInflation(C, rho, A, b, params);
   // get current solution
-  // std::vector<int> clique = test_params.expected_clique;
-  // double clq_num = clique.size();
-  // auto Y_0 = Matrix::Zero(dim, 1).eval();
-  // for (int i : clique) {
-  //   Y_0(i, 0) = std::sqrt(1 / clq_num);
-  // }
-  auto Y_0 = Matrix::Identity(dim, dim);
+  std::vector<int> clique = test_params.expected_clique;
+  double clq_num = clique.size();
+  auto Y_0 = Matrix::Zero(dim, 1).eval();
+  for (int i : clique) {
+    Y_0(i, 0) = std::sqrt(1 / clq_num);
+  }
+  // auto Y_0 = Matrix::Identity(dim, dim);
   // Run rank inflation, without inflation (target rank is 1)
   auto [Y, Jac] = problem.inflate_solution(Y_0);
   // std::cout << "dot product of Y_0 and Y: "
