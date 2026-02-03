@@ -23,12 +23,12 @@ struct SDPTestProblem {
   double rho;  // scalar offset
   std::vector<Eigen::SparseMatrix<double>> A;
   std::vector<double> b;
-  Vector soln;
+  Matrix soln;
   std::string name;
 
   // Retrieve zero padded solution for testing.
   Matrix make_solution(int rank) const {
-    Matrix zpad = Matrix::Zero(dim, rank-1);
+    Matrix zpad = Matrix::Zero(dim, rank - soln.cols());
     Matrix Y(dim, rank);
     Y << soln, zpad;
     return Y;
@@ -142,6 +142,72 @@ static Matrix clique3_adj =
 static Matrix clique4_adj = (Eigen::MatrixXd(5, 5) << 0, 1, 1, 0, 0, 1, 0, 1, 0,
                              0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0)
                                 .finished();
+
+// Get factorized solution to two sphere problem
+// It is assumed that weights is normalized and its length is 1-dim
+Matrix make_two_sphere_soln(double r1, double r2, double d, Vector weights) {
+  int n = weights.size() + 1;
+  // Feasible point on intersection
+  double alpha = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
+  double beta = std::sqrt(r1 * r1 - alpha * alpha);
+
+  // Construct Y matrix
+  auto Y = Matrix::Zero(n + 1, n - 1).eval();
+  for (int i = 0; i < n - 1; i++) {
+    Y(0, i) = alpha;
+    Y(i + 1, i) = beta;
+    Y(n, i) = 1.0;
+  }
+
+  return Y * weights.cwiseSqrt().asDiagonal();
+}
+// Generate an n-dimensional intersection problem between two spheres of radius
+// r1 and r2 that are spaced d distance apart along the first axis
+SDPTestProblem make_two_sphere_sdp(int n, double r1, double r2, double d) {
+  assert(d < r1 + r2 &&
+         "distance must be strictly less than the sum of the two radii");
+  Eigen::VectorXd c1 = Eigen::VectorXd::Zero(n);
+  Eigen::VectorXd c2 = Eigen::VectorXd::Zero(n);
+  c2(0) = d;  // shift along x-axis
+
+  int dim = n + 1;  // homogenizing variable t
+
+  SDPTestProblem sdp;
+  sdp.dim = dim;
+  sdp.C = Matrix::Zero(dim, dim);
+  sdp.rho = 0.0;
+
+  auto make_Q = [dim, n](const Eigen::VectorXd& c, double r) {
+    Eigen::SparseMatrix<double> A(dim, dim);
+    std::vector<Eigen::Triplet<double>> T;
+    for (int i = 0; i < n; ++i) T.emplace_back(i, i, 1.0);  // x^T x
+    for (int i = 0; i < n; ++i) {
+      T.emplace_back(i, n, -c(i));
+      T.emplace_back(n, i, -c(i));
+    }
+    T.emplace_back(n, n, c.squaredNorm() - r * r);
+    A.setFromTriplets(T.begin(), T.end());
+    return A;
+  };
+
+  sdp.A.push_back(make_Q(c1, r1));
+  sdp.b.push_back(0.0);
+
+  sdp.A.push_back(make_Q(c2, r2));
+  sdp.b.push_back(0.0);
+
+  // t^2 = 1
+  Eigen::SparseMatrix<double> At(dim, dim);
+  At.insert(n, n) = 1.0;
+  sdp.A.push_back(At);
+  sdp.b.push_back(1.0);
+
+  // Generate solution at analytic center
+  auto weights = Vector::Ones(n - 1) / (n - 1);
+  sdp.soln = make_two_sphere_soln(r1, r2, d, weights);
+
+  return sdp;
+}
 
 // ------------------  TESTS -----------------------
 // Test constraint evaluation and gradient function
@@ -391,19 +457,36 @@ TEST_P(InflationParamTest, Certificate) {
   std::cout << "First Order Condition Norm: " << first_ord_cond << std::endl;
 }
 
-// Test Certificate
-TEST_P(InflationParamTest, AnalyticCenter) {
-  const auto& sdp = GetParam();
+// Test Analytic Center
+TEST(InflationParamTest, AnalyticCenter) {
+  int dim = 3;
+  double r1 = 0.5;
+  double r2 = 0.5;
+  double d = 0.5;
+  auto sdp = make_two_sphere_sdp(dim, r1, r2, d);
   // parameters
   RankInflateParams params;
   params.verbose = true;
-  params.max_sol_rank = sdp.dim;
   // generate problem
   auto problem = sdp.make(params);
-  // get current solution
-  Matrix Y = sdp.make_solution(params.max_sol_rank);
+  // get optimal solution
+  Matrix Y = sdp.soln;
+  // compute center
+  auto X_star = problem.get_analytic_center(Y * Y.transpose());
+  // Start from skewed solution
+  auto weights = Vector::Ones(dim-1).eval();
+  weights(0) = 10.0;
+  weights /= weights.sum();
+  Y = make_two_sphere_soln(r1,r2, d, weights);
+  // recompute center
   auto X_0 = Y * Y.transpose();
   auto X = problem.get_analytic_center(X_0);
+
+  std::cout << "Optimal: "<< std::endl << X_star << std::endl;
+  std::cout << "Start point: "<< std::endl << X_0 << std::endl;
+  std::cout << "End point: "<< std::endl << X << std::endl;
+
+
 }
 
 INSTANTIATE_TEST_SUITE_P(

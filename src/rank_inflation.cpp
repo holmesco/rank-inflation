@@ -426,41 +426,34 @@ Matrix RankInflation::get_analytic_center(const Matrix& X_0) const {
     // Sovle with QR factorization
     QRResult result = get_soln_qr_dense(C.selfadjointView<Eigen::Upper>(), d,
                                         params_.qr_null_thresh_ac);
-    std::cout << "Lin Sol:" << result.solution.transpose() << std::endl;
     // Update X
     auto Aw_sp = build_wt_sum_constraints(result.solution);
     Matrix Aw = C_ * result.solution(m - 1) + Aw_sp;
     auto deltaX = X - X * Aw * X;
     X.noalias() = X + deltaX;
-    // Increment
-    n_iter++;
-    // Stopping Condition
-    if (deltaX.norm() < params_.tol_step_norm_ac) break;
-
     // Print results
     if (params_.verbose) {
       int sol_rank = get_rank(X, params_.tol_rank_sol);
       Vector violation(m);
-      Vector check_delta(m);
       for (int i = 0; i < m; i++) {
         if (i < b_.size()) {
           violation(i) = d(i) - b_[i];
-          check_delta(i) =
-              (A_[i].selfadjointView<Eigen::Upper>() * deltaX).trace();
         } else {
           violation(i) = d(i) - rho_;
-          check_delta(i) = (C_ * deltaX).trace();
         }
       }
-      if (n_iter % 10 == 1) {
+      if (n_iter % 10 == 0) {
         std::printf("%6s %6s %18s %10s\n", "Iter", "SolRank", "ViolationNorm",
                     "StepNorm");
       }
       std::printf("%6d %6d %18.6e %10.6e\n", n_iter, sol_rank, violation.norm(),
                   deltaX.norm());
 
-      std::cout << "Check Delta Norm: " << check_delta.norm() << std::endl;
     }
+    // Increment
+    n_iter++;
+    // Stopping Condition
+    if (deltaX.norm() < params_.tol_step_norm_ac) break;
   }
   return X;
 }
