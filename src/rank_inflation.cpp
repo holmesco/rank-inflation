@@ -138,7 +138,7 @@ Vector RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
         // Define step
         delta = qr_hessian.solution;
         // Debug: compute minimum eigenvalue of Hessian
-        // Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(Hess);
+        // Eigen::SelfAdjointEigenSolver<Matrix> es(Hess);
         // double min_eig = es.eigenvalues().minCoeff();
         // std::cout << "Minimum Eigenvalue of Hessian: " << min_eig <<
         // std::endl;
@@ -351,7 +351,7 @@ std::pair<double, double> RankInflation::check_certificate(
   double first_order_norm = (H * Y).norm();
   // Check Eigenvalues
   // Use SelfAdjointEigenSolver for symmetric matrices
-  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(H);
+  Eigen::SelfAdjointEigenSolver<Matrix> es(H);
   double min_eig = es.eigenvalues().minCoeff();
 
   return {min_eig, first_order_norm};
@@ -423,7 +423,7 @@ Matrix RankInflation::get_analytic_center(const Matrix& X_0) const {
   while (n_iter < params_.max_iter) {
     // Get system of equations
     auto [C, d] = get_analytic_center_system(X);
-    // Sovle with QR factorization
+    // Solve with QR factorization
     QRResult result = get_soln_qr_dense(C.selfadjointView<Eigen::Upper>(), d,
                                         params_.qr_null_thresh_ac);
     // Update X
@@ -448,7 +448,6 @@ Matrix RankInflation::get_analytic_center(const Matrix& X_0) const {
       }
       std::printf("%6d %6d %18.6e %10.6e\n", n_iter, sol_rank, violation.norm(),
                   deltaX.norm());
-
     }
     // Increment
     n_iter++;
@@ -479,6 +478,35 @@ std::pair<Matrix, Vector> RankInflation::get_analytic_center_system(
     }
   }
   return {C, d};
+}
+
+Matrix recover_lowrank_factor(const Matrix& A) {
+  // Use LDLT decomposition to get low-rank factors
+  // NOTE: LDLT is used because it is stable for semi-definite matrices and will
+  // effectively terminate when it encounters a max pivot that is numerically
+  // zero.
+  Eigen::LDLT<Matrix> ldlt(A);
+  Matrix L = ldlt.matrixL();
+  Vector D = ldlt.vectorD();
+  // Determine rank based on positive pivots
+  int rank = 0;
+  for (int i = 0; i < D.size(); i++) {
+    if (D(i) > 1e-12) {
+      rank++;
+    } else {
+      break;
+    }
+  }
+  // Build low-rank factor
+  Matrix Y(A.rows(), rank);
+  for (int i = 0; i < rank; i++) {
+    Y.col(i) = L.col(i) * std::sqrt(D(i));
+  }
+  // Unpivot the factors
+  auto P = ldlt.transpositionsP();
+  Y = P.transpose() * Y;
+
+  return Y;
 }
 
 }  // namespace SDPTools

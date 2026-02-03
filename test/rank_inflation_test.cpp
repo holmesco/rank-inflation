@@ -435,7 +435,7 @@ TEST_P(InflationParamTest, Certificate) {
   params.verbose = true;
   params.max_sol_rank = sdp.dim;
   // generate problem
-  auto problem = sdp.make(params);
+  RankInflation problem = sdp.make(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(params.max_sol_rank);
   // Run rank inflation, without inflation (target rank is 1)
@@ -474,19 +474,41 @@ TEST(InflationParamTest, AnalyticCenter) {
   // compute center
   auto X_star = problem.get_analytic_center(Y * Y.transpose());
   // Start from skewed solution
-  auto weights = Vector::Ones(dim-1).eval();
+  auto weights = Vector::Ones(dim - 1).eval();
   weights(0) = 10.0;
   weights /= weights.sum();
-  Y = make_two_sphere_soln(r1,r2, d, weights);
+  Y = make_two_sphere_soln(r1, r2, d, weights);
   // recompute center
   auto X_0 = Y * Y.transpose();
   auto X = problem.get_analytic_center(X_0);
 
-  std::cout << "Optimal: "<< std::endl << X_star << std::endl;
-  std::cout << "Start point: "<< std::endl << X_0 << std::endl;
-  std::cout << "End point: "<< std::endl << X << std::endl;
+  const double tol = 1e-8;
+  double diff_opt = (X - X_star).norm();
+  double diff_start = (X_0 - X_star).norm();
+  std::cout << "norm(X - X_star): " << diff_opt << std::endl;
+  std::cout << "norm(X_0 - X_star): " << diff_start << std::endl;
+  EXPECT_NEAR(diff_opt, 0.0, tol);
+  EXPECT_GT(diff_start, tol);
+}
 
-
+TEST(InflationParamTest, LowRankRecovery) {
+  int dim = 3;
+  double r1 = 0.5;
+  double r2 = 0.5;
+  double d = 0.5;
+  // Start from skewed solution
+  auto weights = Vector::Ones(dim - 1).eval();
+  weights(0) = 10.0;
+  weights /= weights.sum();
+  auto Y0 = make_two_sphere_soln(r1, r2, d, weights);
+  // recompute center
+  auto X0 = Y0 * Y0.transpose();
+  auto Y = recover_lowrank_factor(X0);
+  // Compare to original solution
+  auto diff = (X0 - Y * Y.transpose()).norm();
+  const double tol = 1e-8;
+  EXPECT_NEAR(diff, 0.0, tol);
+  EXPECT_TRUE(Y.cols() == Y0.cols());
 }
 
 INSTANTIATE_TEST_SUITE_P(

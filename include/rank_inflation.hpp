@@ -32,6 +32,10 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
 // Compute the rank of a dense matrix with rank-revealing QR
 int get_rank(const Matrix& Y, const double threshold);
 
+// Use LDL^T factorization to recover a low-rank factor from a psd matrix.
+// Note: This is efficient when the rank is low compared to the size of the matrix.
+Matrix recover_lowrank_factor(const Matrix& A);
+
 enum class RetractionMethod {
   GradientDescent,
   GaussNewton,
