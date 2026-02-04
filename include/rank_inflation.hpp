@@ -33,7 +33,8 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
 int get_rank(const Matrix& Y, const double threshold);
 
 // Use LDL^T factorization to recover a low-rank factor from a psd matrix.
-// Note: This is efficient when the rank is low compared to the size of the matrix.
+// Note: This is efficient when the rank is low compared to the size of the
+// matrix.
 Matrix recover_lowrank_factor(const Matrix& A);
 
 enum class RetractionMethod {
@@ -54,7 +55,7 @@ struct RankInflateParams {
   int max_iter = 10;
   // threshold for checking rank of the solution
   // (does not affect convergence, just for display)
-  double tol_rank_sol = 1.0E-4;
+  double tol_rank_sol = 1.0E-5;
   // Threshold for checking rank of the Jacobian
   double tol_rank_jac = 1.0E-7;
 
@@ -107,8 +108,13 @@ struct RankInflateParams {
   // -------------------------
   // tolerance for step size (terminate if below)
   double tol_step_norm_ac = 1e-8;
-  // tolerance for QR solve.
-  double qr_null_thresh_ac = 1e-8;
+  // threshold for QR solve.
+  double qr_thresh_ac = 1e-8;
+  // reduce violation in centering step
+  bool reduce_violation_ac = false;
+
+  // max number of iterations for centering
+  int max_iter_ac = 200;
 };
 
 class RankInflation {
@@ -150,11 +156,13 @@ class RankInflation {
   // Returns the inflated solution as well as the corresponding Jacobian
   std::pair<Matrix, Matrix> inflate_solution(const Matrix& Y_0) const;
 
-  // Perform the retraction step onto the manifold. Matrix is filled with the
-  // final Jacobian
+  // Perform the retraction step onto the manifold and returns the final
+  // violation. Jac is filled with the Jacobian of the constraints at the
+  // retracted point.
   Vector retraction(Matrix& Y, Matrix& Jac) const;
 
-  // Perform retraction without passing in a Jacobian.
+  // Perform the retraction step onto the manifold and returns the final
+  // violation.
   Vector retraction(Matrix& Y) const {
     auto dummy_jac = Matrix(m, dim * Y.cols());
     return retraction(Y, dummy_jac);
@@ -199,10 +207,13 @@ class RankInflation {
   std::pair<Matrix, Matrix> get_geodesic_step(int rank,
                                               bool second_order = true) const;
 
-  // Get analytic center
-  Matrix get_analytic_center(const Matrix& Y_0) const;
+  // Centering method to compute the analytic center of the current
+  // feasible region starting from X_0
+  Matrix get_analytic_center(const Matrix& X_0, double delta = 0.0) const;
 
-  std::pair<Matrix, Vector> get_analytic_center_system(const Matrix& X) const;
+  // Helper function to build the system of equations for the analytic center
+  std::tuple<Matrix, Vector, Vector> get_analytic_center_system(
+      const Matrix& Z, const Matrix& X) const;
 };
 
 }  // namespace SDPTools

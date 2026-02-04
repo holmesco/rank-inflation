@@ -415,33 +415,34 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
   return result;
 }
 
-Matrix RankInflation::get_analytic_center(const Matrix& X_0) const {
+Matrix RankInflation::get_analytic_center(const Matrix& X_0,
+                                          double delta) const {
   // Initialize
   bool converged = false;
   int n_iter = 0;
   Matrix X = X_0;
-  while (n_iter < params_.max_iter) {
+  while (n_iter < params_.max_iter_ac) {
+    // Define perturbed version of X
+    Matrix Z = X + Matrix::Identity(dim, dim) * delta;
     // Get system of equations
-    auto [C, d] = get_analytic_center_system(X);
+    auto [C, d, violation] = get_analytic_center_system(Z, X);
     // Solve with QR factorization
-    QRResult result = get_soln_qr_dense(C.selfadjointView<Eigen::Upper>(), d,
-                                        params_.qr_null_thresh_ac);
+    Vector rhs;
+    if (params_.reduce_violation_ac){
+      rhs = d+violation;
+    }else{
+      rhs = d;
+    }
+    QRResult result = get_soln_qr_dense(C.selfadjointView<Eigen::Upper>(),rhs,
+                                        params_.qr_thresh_ac);
     // Update X
     auto Aw_sp = build_wt_sum_constraints(result.solution);
     Matrix Aw = C_ * result.solution(m - 1) + Aw_sp;
-    auto deltaX = X - X * Aw * X;
+    auto deltaX = Z - Z * Aw * Z;
     X.noalias() = X + deltaX;
     // Print results
     if (params_.verbose) {
       int sol_rank = get_rank(X, params_.tol_rank_sol);
-      Vector violation(m);
-      for (int i = 0; i < m; i++) {
-        if (i < b_.size()) {
-          violation(i) = d(i) - b_[i];
-        } else {
-          violation(i) = d(i) - rho_;
-        }
-      }
       if (n_iter % 10 == 0) {
         std::printf("%6s %6s %18s %10s\n", "Iter", "SolRank", "ViolationNorm",
                     "StepNorm");
@@ -457,27 +458,31 @@ Matrix RankInflation::get_analytic_center(const Matrix& X_0) const {
   return X;
 }
 
-std::pair<Matrix, Vector> RankInflation::get_analytic_center_system(
-    const Matrix& X) const {
-  // Construct AX matrices and rhs of linear system
+std::tuple<Matrix, Vector, Vector> RankInflation::get_analytic_center_system(
+    const Matrix& Z, const Matrix& X) const {
+  // Construct AZ matrices and rhs of linear system
   Vector d(m);
-  std::vector<Matrix> AX;
+  Vector violation(m);
+  std::vector<Matrix> AZ;
   for (int i = 0; i < m; i++) {
+    // compute violation
     if (i < A_.size()) {
-      AX.push_back(A_[i].selfadjointView<Eigen::Upper>() * X);
+      AZ.push_back(A_[i].selfadjointView<Eigen::Upper>() * Z);
+      violation(i) = (A_[i].selfadjointView<Eigen::Upper>() * X).trace() - b_[i];
     } else {
-      AX.push_back(C_ * X);
+      AZ.push_back(C_ * Z);
+      violation(i) = (C_ * X).trace() - rho_;
     }
-    d(i) = AX.back().trace();
+    d(i) = AZ.back().trace();
   }
   // Construct the LHS matrix
   Matrix C(m, m);
   for (int i = 0; i < m; i++) {
     for (int j = i; j < m; j++) {
-      C(i, j) = (AX[i] * AX[j]).trace();
+      C(i, j) = (AZ[i] * AZ[j]).trace();
     }
   }
-  return {C, d};
+  return {C, d, violation};
 }
 
 Matrix recover_lowrank_factor(const Matrix& A) {
@@ -491,7 +496,7 @@ Matrix recover_lowrank_factor(const Matrix& A) {
   // Determine rank based on positive pivots
   int rank = 0;
   for (int i = 0; i < D.size(); i++) {
-    if (D(i) > 1e-12) {
+    if (D(i) > 1e-18) {
       rank++;
     } else {
       break;
