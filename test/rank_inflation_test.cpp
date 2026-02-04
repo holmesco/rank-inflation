@@ -206,9 +206,12 @@ SDPTestProblem make_two_sphere_sdp(int n, double r1, double r2, double d) {
   sdp.A.push_back(At);
   sdp.b.push_back(1.0);
 
-  // Generate solution at analytic center
-  auto weights = Vector::Ones(n - 1) / (n - 1);
+  // Generate low rank solution
+  auto weights = Vector::Zero(n - 1).eval();
+  weights(0) = 1.0;
   sdp.soln = make_two_sphere_soln(r1, r2, d, weights);
+
+  sdp.name = "TwoSphereDim" + std::to_string(n);
 
   return sdp;
 }
@@ -472,7 +475,7 @@ TEST_P(InflationParamTest, CertWithCenter) {
   // get current solution
   Matrix Y_0 = sdp.make_solution(params.max_sol_rank);
   // Run rank inflation, without inflation (target rank is 1)
-  auto X = problem.get_analytic_center(Y_0*Y_0.transpose(), 1e-6);
+  auto X = problem.get_analytic_center(Y_0 * Y_0.transpose(), 1e-6);
   Matrix Y = recover_lowrank_factor(X);
   auto Jac = Matrix(problem.m, Y.cols() * sdp.dim);
   auto violation = problem.eval_constraints(Y, Jac);
@@ -491,76 +494,35 @@ TEST_P(InflationParamTest, CertWithCenter) {
   std::cout << "Certificate on Initial Solution: " << std::endl;
   std::cout << "Minimum Eigenvalue of Certificate: " << min_eig << std::endl;
   std::cout << "First Order Condition Norm: " << first_ord_cond << std::endl;
-
-}
-
-// Test Analytic Centering
-TEST(InflationParamTest, AnalyticCenter) {
-  int dim = 3;
-  double r1 = 0.5;
-  double r2 = 0.5;
-  double d = 0.5;
-  auto sdp = make_two_sphere_sdp(dim, r1, r2, d);
-  // parameters
-  RankInflateParams params;
-  params.verbose = true;
-  // generate problem
-  auto problem = sdp.make(params);
-  // get optimal solution
-  Matrix Y = sdp.soln;
-  // compute center
-  auto X_star = problem.get_analytic_center(Y * Y.transpose());
-  // Start from skewed solution
-  auto weights = Vector::Ones(dim - 1).eval();
-  weights(0) = 10.0;
-  weights /= weights.sum();
-  Y = make_two_sphere_soln(r1, r2, d, weights);
-  // recompute center
-  auto X_0 = Y * Y.transpose();
-  auto X = problem.get_analytic_center(X_0);
-
-  const double tol = 1e-8;
-  double diff_opt = (X - X_star).norm();
-  double diff_start = (X_0 - X_star).norm();
-  std::cout << "norm(X - X_star): " << diff_opt << std::endl;
-  std::cout << "norm(X_0 - X_star): " << diff_start << std::endl;
-  EXPECT_NEAR(diff_opt, 0.0, tol);
-  EXPECT_GT(diff_start, tol);
 }
 
 // Test Analytic Centering when one initialized column is zero
-TEST(InflationParamTest, AnalyticLowRank) {
-  int dim = 4;
-  double r1 = 0.5;
-  double r2 = 0.5;
-  double d = 0.5;
-  auto sdp = make_two_sphere_sdp(dim, r1, r2, d);
+TEST_P(InflationParamTest, AnalyticCenter) {
+  const auto& sdp = GetParam();
   // parameters
   RankInflateParams params;
   params.verbose = true;
   // generate problem
   auto problem = sdp.make(params);
-  // get optimal solution
-  Matrix Y = sdp.soln;
-  // compute center
-  auto X_star = problem.get_analytic_center(Y * Y.transpose());
-  // Start from skewed solution
-  auto weights = Vector::Ones(dim - 1).eval();
-  weights(0) = 10.0;
-  weights(weights.size() - 1) = 1e-8;  // zero out last weight
-  weights /= weights.sum();
-  Y = make_two_sphere_soln(r1, r2, d, weights);
-  // recompute center
-  auto X_0 = Y * Y.transpose();
-  auto X = problem.get_analytic_center(X_0, 1e-7);
-
-  const double tol = 1e-8;
-  double diff_opt = (X - X_star).norm();
-  double diff_start = (X_0 - X_star).norm();
-  std::cout << "norm(X - X_star): " << diff_opt << std::endl;
-  std::cout << "norm(X_0 - X_star): " << diff_start << std::endl;
-  EXPECT_NEAR(diff_opt, 0.0, tol);
-  EXPECT_GT(diff_start, tol);
+  auto Y = sdp.soln;
+  // Compute Analyic center starting from low rank solution
+  auto X0 = Y * Y.transpose();
+  double delta = 1e-7;
+  auto X = problem.get_analytic_center(X0, delta);
+  // Compute analytic center objecive value
+  double obj_0 = problem.get_analytic_center_objective(X0, delta);
+  double obj_star = problem.get_analytic_center_objective(X, delta);
+  // Check objective decrease
+  std::cout << "Analytic Center Objective initially: " << obj_0 << std::endl;
+  std::cout << "Analytic Center Objective at Low Rank Init: " << obj_star
+            << std::endl;
+  EXPECT_LT(obj_star, obj_0) << "Analytic center objective did not improve";
+  // Check for rank increase
+  auto rank_0 = get_rank(X0, 1e-6);
+  auto rank_star = get_rank(X, 1e-6);
+  std::cout << "Rank at Init: " << rank_0 << ", Rank at Center: " << rank_star
+            << std::endl;
+  EXPECT_GE(rank_star, rank_0) << "Rank did not increase at analytic center";
 }
 
 TEST(InflationParamTest, LowRankRecovery) {
@@ -594,7 +556,9 @@ INSTANTIATE_TEST_SUITE_P(
         make_lovasz_test_case(clique3_adj, {4, 10, 13, 14, 15, 16, 17, 18},
                               "Clique3_Large20x20"),
         // CASE 4
-        make_lovasz_test_case(clique4_adj, {0, 1, 2}, "Clique4_Disconnected")),
+        make_lovasz_test_case(clique4_adj, {0, 1, 2}, "Clique4_Disconnected"),
+        // CASE 5: Two Sphere Intersection
+        make_two_sphere_sdp(5, 1.0, 1.0, 1.5)),
     // This helper function names the tests based on the 'test_name'
     // field
     [](const ::testing::TestParamInfo<InflationParamTest::ParamType>& info) {

@@ -214,6 +214,12 @@ class RankInflation {
   // Helper function to build the system of equations for the analytic center
   std::tuple<Matrix, Vector, Vector> get_analytic_center_system(
       const Matrix& Z, const Matrix& X) const;
+
+  double get_analytic_center_objective(const Matrix& X,
+                                     double delta = 0.0) const {
+    auto I = Matrix::Identity(X.rows(), X.cols());
+    return -std::log((X + I * delta).determinant());
+  }
 };
 
 }  // namespace SDPTools
