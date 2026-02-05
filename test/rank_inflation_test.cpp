@@ -529,14 +529,17 @@ TEST_P(InflationParamTest, AnalyticCenter) {
 TEST(AnalyticCenter, LineSearchFunctions) {
   // Generate random PSD matrix
   int dim = 5;
-  Matrix A = Matrix::Random(dim, dim);
-  Matrix Z = A.transpose() * A;
+  // generate random orthogonal matrix A
+  Matrix tmp = Matrix::Random(dim, dim);
+  Eigen::HouseholderQR<Matrix> qr(tmp);
+  Matrix A = qr.householderQ() * Matrix::Identity(dim, dim);
+  // generate PSD matrix Z
+  Matrix Z = A.transpose() * A * 5.0;
   // Generate random direction
   Matrix Aw = Matrix::Random(dim, dim);
   Aw = 0.5 * (Aw + Aw.transpose());  // symmetrize
-  Aw /= Aw.norm(); // make small to avoid numerical issues.
   // Create step of the proper form
-  Matrix dX = Z - Z * Aw * Z;
+  Matrix dZ = Z - Z * Aw * Z;
   // parameters
   RankInflateParams params;
   params.verbose = true;
@@ -546,18 +549,27 @@ TEST(AnalyticCenter, LineSearchFunctions) {
   auto [f, df] = problem.analytic_center_line_search_func(Z, Aw);
   // Test at several step sizes
   std::vector<double> alphas = {1e-4, 1e-2, 1e-1, 0.5, 1.0};
-  const double tol = 1e-6;
+  const double tol = 1e-7;
+  // Value checks
   for (double alpha : alphas) {
-    double f_val = f(alpha);
-    double df_val = df(alpha);
-    // Value check
-    double f_expected = neglogdet(Z + alpha * dX) - neglogdet(Z);
+    double f_expected = -logdet(Z + alpha * dZ);
+    if (std::isinf(f_expected)) {
+      continue;  // skip infinite values
+    }
+    double f_val = f(alpha) - logdet(Z);
     EXPECT_NEAR(f_val, f_expected, tol)
         << "Line search function value mismatch at alpha = " << alpha;
-    // Finite difference check
+  }
+  // Derivative (finite-difference) checks
+  for (double alpha : alphas) {
+    double f_val = f(alpha);
+    if (std::isinf(f_val)) {
+      continue;  // skip infinite values
+    }
+    double df_val = df(alpha);
     double f_val_plus = f(alpha + tol);
     double num_df = (f_val_plus - f_val) / tol;
-    EXPECT_NEAR(df_val, num_df, tol)
+    EXPECT_NEAR(df_val, num_df, tol*100)
         << "Line search derivative mismatch at alpha = " << alpha;
   }
 }

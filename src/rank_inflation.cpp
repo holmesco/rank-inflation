@@ -435,20 +435,26 @@ Matrix RankInflation::get_analytic_center(const Matrix& X_0) const {
     }
     QRResult result = get_soln_qr_dense(C.selfadjointView<Eigen::Upper>(), rhs,
                                         params_.qr_thresh_ac);
-    // Update X
+    // Get step direction
     auto Aw_sp = build_wt_sum_constraints(result.solution);
     Matrix Aw = C_ * result.solution(m - 1) + Aw_sp;
+    // Line search to find optimal step size
+    double alpha = 1.0;
+    if (params_.enable_line_search_ac) {
+      alpha = analytic_center_bisect(Z, Aw);
+    }
+    // Update step
     auto deltaX = Z - Z * Aw * Z;
-    X.noalias() = X + deltaX;
+    X.noalias() = X + alpha * deltaX;
     // Print results
     if (params_.verbose) {
       int sol_rank = get_rank(X, params_.tol_rank_sol);
       if (n_iter % 10 == 0) {
-        std::printf("%6s %6s %18s %10s\n", "Iter", "SolRank", "ViolationNorm",
-                    "StepNorm");
+        std::printf("%6s %6s %18s %10s %8s\n", "Iter", "SolRank",
+                    "ViolationNorm", "StepNorm", "Alpha");
       }
-      std::printf("%6d %6d %18.6e %10.6e\n", n_iter, sol_rank, violation.norm(),
-                  deltaX.norm());
+      std::printf("%6d %6d %18.6e %10.6e %8.3e\n", n_iter, sol_rank,
+                  violation.norm(), deltaX.norm(), alpha);
     }
     // Increment
     n_iter++;
@@ -502,21 +508,27 @@ std::pair<ScalarFunc, ScalarFunc>
 RankInflation::analytic_center_line_search_func(const Matrix& Z,
                                                 const Matrix& Aw) const {
   // Cholesky decomposition of augmented solution
-  Eigen::LLT<Matrix> lltOfZ(Z);
-  if (lltOfZ.info() == Eigen::NumericalIssue) {
+  Eigen::LLT<Matrix> cholZ(Z);
+  if (cholZ.info() == Eigen::NumericalIssue) {
     throw std::runtime_error("Matrix Z is not positive definite.");
   }
-  Matrix L = lltOfZ.matrixL();
+  Matrix L = cholZ.matrixL();
   // Compute eigenvalues of L^T * Aw * L
   Matrix M = L.transpose() * Aw * L;
   Eigen::SelfAdjointEigenSolver<Matrix> es(M);
+  if (es.info() != Eigen::Success) {
+    throw std::runtime_error("Eigenvalue decomposition failed.");
+  }
   Vector eigs = es.eigenvalues();
 
-  // Define the line search function
+  // Define the line search functions
   auto f = [eigs](double alpha) {
     double val = 0.0;
     for (int i = 0; i < eigs.size(); i++) {
       val -= std::log(1.0 + alpha * (1 - eigs(i)));
+    }
+    if (std::isnan(val)) {
+      val = std::numeric_limits<double>::infinity();
     }
     return val;
   };

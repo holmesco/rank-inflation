@@ -42,7 +42,17 @@ Matrix recover_lowrank_factor(const Matrix& A);
 double bisection_line_search(const ScalarFunc& df, double alpha_low,
                              double alpha_high, double tol);
 
-inline double neglogdet(const Matrix& X) { return -std::log((X).determinant()); }
+inline double logdet(const Matrix& X) { 
+  // Compute log determinant via Cholesky decomposition
+  Eigen::LLT<Matrix> lltOfX(X);
+  if (lltOfX.info() != Eigen::Success) {
+    return -std::numeric_limits<double>::infinity();
+  }
+  const Matrix& L = lltOfX.matrixL();
+  double val = 2.0 * L.diagonal().array().log().sum();
+  return val;
+}
+  
 
 enum class RetractionMethod {
   GradientDescent,
@@ -126,6 +136,8 @@ struct RankInflateParams {
   // line search (bisection) parameters for centering
   // NOTE: line search param will be certain to 1/2^k for k = ls_iter_ac
   double tol_bisect_ac = 1e-6;
+  // line search enable for analytic center
+  bool enable_line_search_ac = true;
 };
 
 class RankInflation {
@@ -229,7 +241,7 @@ class RankInflation {
 
   double get_analytic_center_objective(const Matrix& X) const {
     auto I = Matrix::Identity(X.rows(), X.cols());
-    return neglogdet(X + I * params_.delta_ac);
+    return -logdet(X + I * params_.delta_ac);
   }
 
   // Perform bisection line search to find optimal step size for analytic
