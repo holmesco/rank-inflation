@@ -11,6 +11,7 @@ using Matrix = Eigen::MatrixXd;
 using Vector = Eigen::VectorXd;
 using Triplet = Eigen::Triplet<double>;
 using SpMatrix = Eigen::SparseMatrix<double>;
+using ScalarFunc = std::function<double(double)>;
 
 // Result of solving a linear system using rank-revealing QR decomposition.
 // Contains both the least-squares particular solution and the nullspace basis.
@@ -36,6 +37,12 @@ int get_rank(const Matrix& Y, const double threshold);
 // Note: This is efficient when the rank is low compared to the size of the
 // matrix.
 Matrix recover_lowrank_factor(const Matrix& A);
+
+// Bisection line search to find root of scalar function df
+double bisection_line_search(const ScalarFunc& df, double alpha_low,
+                             double alpha_high, double tol);
+
+inline double neglogdet(const Matrix& X) { return -std::log((X).determinant()); }
 
 enum class RetractionMethod {
   GradientDescent,
@@ -112,9 +119,13 @@ struct RankInflateParams {
   double qr_thresh_ac = 1e-8;
   // reduce violation in centering step
   bool reduce_violation_ac = false;
-
   // max number of iterations for centering
-  int max_iter_ac = 200;
+  int max_iter_ac = 50;
+  // delta parameter for centering
+  double delta_ac = 1e-6;
+  // line search (bisection) parameters for centering
+  // NOTE: line search param will be certain to 1/2^k for k = ls_iter_ac
+  double tol_bisect_ac = 1e-6;
 };
 
 class RankInflation {
@@ -207,19 +218,29 @@ class RankInflation {
   std::pair<Matrix, Matrix> get_geodesic_step(int rank,
                                               bool second_order = true) const;
 
+  // ----------- ANALYTIC CENTERING METHODS ------------
   // Centering method to compute the analytic center of the current
   // feasible region starting from X_0
-  Matrix get_analytic_center(const Matrix& X_0, double delta = 0.0) const;
+  Matrix get_analytic_center(const Matrix& X_0) const;
 
   // Helper function to build the system of equations for the analytic center
   std::tuple<Matrix, Vector, Vector> get_analytic_center_system(
       const Matrix& Z, const Matrix& X) const;
 
-  double get_analytic_center_objective(const Matrix& X,
-                                     double delta = 0.0) const {
+  double get_analytic_center_objective(const Matrix& X) const {
     auto I = Matrix::Identity(X.rows(), X.cols());
-    return -std::log((X + I * delta).determinant());
+    return neglogdet(X + I * params_.delta_ac);
   }
+
+  // Perform bisection line search to find optimal step size for analytic
+  // center
+  double analytic_center_bisect(const Matrix& Z, const Matrix& Aw) const;
+
+  // Line search function and derivative for analytic center
+  // NOTE: it was shown in Boyd that this function is convex, so simple
+  // bisection on the derivative is sufficient
+  std::pair<ScalarFunc, ScalarFunc> analytic_center_line_search_func(
+      const Matrix& Z, const Matrix& Aw) const;
 };
 
 }  // namespace SDPTools

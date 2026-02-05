@@ -470,12 +470,13 @@ TEST_P(InflationParamTest, CertWithCenter) {
   RankInflateParams params;
   params.verbose = true;
   params.max_sol_rank = sdp.dim;
+  params.delta_ac = 1e-7;
   // generate problem
   RankInflation problem = sdp.make(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(params.max_sol_rank);
   // Run rank inflation, without inflation (target rank is 1)
-  auto X = problem.get_analytic_center(Y_0 * Y_0.transpose(), 1e-6);
+  auto X = problem.get_analytic_center(Y_0 * Y_0.transpose());
   Matrix Y = recover_lowrank_factor(X);
   auto Jac = Matrix(problem.m, Y.cols() * sdp.dim);
   auto violation = problem.eval_constraints(Y, Jac);
@@ -502,16 +503,16 @@ TEST_P(InflationParamTest, AnalyticCenter) {
   // parameters
   RankInflateParams params;
   params.verbose = true;
+  params.delta_ac = 1e-7;
   // generate problem
   auto problem = sdp.make(params);
   auto Y = sdp.soln;
   // Compute Analyic center starting from low rank solution
   auto X0 = Y * Y.transpose();
-  double delta = 1e-7;
-  auto X = problem.get_analytic_center(X0, delta);
+  auto X = problem.get_analytic_center(X0);
   // Compute analytic center objecive value
-  double obj_0 = problem.get_analytic_center_objective(X0, delta);
-  double obj_star = problem.get_analytic_center_objective(X, delta);
+  double obj_0 = problem.get_analytic_center_objective(X0);
+  double obj_star = problem.get_analytic_center_objective(X);
   // Check objective decrease
   std::cout << "Analytic Center Objective initially: " << obj_0 << std::endl;
   std::cout << "Analytic Center Objective at Low Rank Init: " << obj_star
@@ -523,6 +524,42 @@ TEST_P(InflationParamTest, AnalyticCenter) {
   std::cout << "Rank at Init: " << rank_0 << ", Rank at Center: " << rank_star
             << std::endl;
   EXPECT_GE(rank_star, rank_0) << "Rank did not increase at analytic center";
+}
+
+TEST(AnalyticCenter, LineSearchFunctions) {
+  // Generate random PSD matrix
+  int dim = 5;
+  Matrix A = Matrix::Random(dim, dim);
+  Matrix Z = A.transpose() * A;
+  // Generate random direction
+  Matrix Aw = Matrix::Random(dim, dim);
+  Aw = 0.5 * (Aw + Aw.transpose());  // symmetrize
+  Aw /= Aw.norm(); // make small to avoid numerical issues.
+  // Create step of the proper form
+  Matrix dX = Z - Z * Aw * Z;
+  // parameters
+  RankInflateParams params;
+  params.verbose = true;
+  RankInflation problem(Matrix::Zero(dim, dim), 0.0, {}, {}, params);
+  double delta = 1e-6;
+  // Generate functions
+  auto [f, df] = problem.analytic_center_line_search_func(Z, Aw);
+  // Test at several step sizes
+  std::vector<double> alphas = {1e-4, 1e-2, 1e-1, 0.5, 1.0};
+  const double tol = 1e-6;
+  for (double alpha : alphas) {
+    double f_val = f(alpha);
+    double df_val = df(alpha);
+    // Value check
+    double f_expected = neglogdet(Z + alpha * dX) - neglogdet(Z);
+    EXPECT_NEAR(f_val, f_expected, tol)
+        << "Line search function value mismatch at alpha = " << alpha;
+    // Finite difference check
+    double f_val_plus = f(alpha + tol);
+    double num_df = (f_val_plus - f_val) / tol;
+    EXPECT_NEAR(df_val, num_df, tol)
+        << "Line search derivative mismatch at alpha = " << alpha;
+  }
 }
 
 TEST(InflationParamTest, LowRankRecovery) {

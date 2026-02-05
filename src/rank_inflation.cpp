@@ -415,9 +415,9 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
   return result;
 }
 
-Matrix RankInflation::get_analytic_center(const Matrix& X_0,
-                                          double delta) const {
+Matrix RankInflation::get_analytic_center(const Matrix& X_0) const {
   // Initialize
+  double delta = params_.delta_ac;
   bool converged = false;
   int n_iter = 0;
   Matrix X = X_0;
@@ -428,12 +428,12 @@ Matrix RankInflation::get_analytic_center(const Matrix& X_0,
     auto [C, d, violation] = get_analytic_center_system(Z, X);
     // Solve with QR factorization
     Vector rhs;
-    if (params_.reduce_violation_ac){
-      rhs = d+violation;
-    }else{
+    if (params_.reduce_violation_ac) {
+      rhs = d + violation;
+    } else {
       rhs = d;
     }
-    QRResult result = get_soln_qr_dense(C.selfadjointView<Eigen::Upper>(),rhs,
+    QRResult result = get_soln_qr_dense(C.selfadjointView<Eigen::Upper>(), rhs,
                                         params_.qr_thresh_ac);
     // Update X
     auto Aw_sp = build_wt_sum_constraints(result.solution);
@@ -468,7 +468,8 @@ std::tuple<Matrix, Vector, Vector> RankInflation::get_analytic_center_system(
     // compute violation
     if (i < A_.size()) {
       AZ.push_back(A_[i].selfadjointView<Eigen::Upper>() * Z);
-      violation(i) = (A_[i].selfadjointView<Eigen::Upper>() * X).trace() - b_[i];
+      violation(i) =
+          (A_[i].selfadjointView<Eigen::Upper>() * X).trace() - b_[i];
     } else {
       AZ.push_back(C_ * Z);
       violation(i) = (C_ * X).trace() - rho_;
@@ -485,11 +486,77 @@ std::tuple<Matrix, Vector, Vector> RankInflation::get_analytic_center_system(
   return {C, d, violation};
 }
 
+double RankInflation::analytic_center_bisect(const Matrix& Z,
+                                             const Matrix& Aw) const {
+  // Create the objective function and deriviative
+  auto [f, df] = analytic_center_line_search_func(Z, Aw);
+  // Bisection parameters
+  double alpha_low = 0.0;
+  double alpha_high = 1.0;
+  double tol = params_.tol_bisect_ac;
+  // Perform bisection line search
+  return bisection_line_search(df, alpha_low, alpha_high, tol);
+}
+
+std::pair<ScalarFunc, ScalarFunc>
+RankInflation::analytic_center_line_search_func(const Matrix& Z,
+                                                const Matrix& Aw) const {
+  // Cholesky decomposition of augmented solution
+  Eigen::LLT<Matrix> lltOfZ(Z);
+  if (lltOfZ.info() == Eigen::NumericalIssue) {
+    throw std::runtime_error("Matrix Z is not positive definite.");
+  }
+  Matrix L = lltOfZ.matrixL();
+  // Compute eigenvalues of L^T * Aw * L
+  Matrix M = L.transpose() * Aw * L;
+  Eigen::SelfAdjointEigenSolver<Matrix> es(M);
+  Vector eigs = es.eigenvalues();
+
+  // Define the line search function
+  auto f = [eigs](double alpha) {
+    double val = 0.0;
+    for (int i = 0; i < eigs.size(); i++) {
+      val -= std::log(1.0 + alpha * (1 - eigs(i)));
+    }
+    return val;
+  };
+  // Define the derivative function
+  auto df = [eigs](double alpha) {
+    double val = 0.0;
+    for (int i = 0; i < eigs.size(); i++) {
+      val -= (1 - eigs(i)) / (1.0 + alpha * (1 - eigs(i)));
+    }
+    return val;
+  };
+
+  return {f, df};
+}
+
+double bisection_line_search(const ScalarFunc& df, double alpha_low,
+                             double alpha_high, double tol) {
+  // Ensure that the upper bound is valid
+  while (df(alpha_high) < 0) {
+    alpha_low = alpha_high;
+    alpha_high *= 2.0;  // expand search interval
+  }
+  // Bisection loop
+  double alpha_mid;
+  while ((alpha_high - alpha_low) > tol) {
+    alpha_mid = 0.5 * (alpha_low + alpha_high);
+    if (df(alpha_mid) > 0) {
+      alpha_high = alpha_mid;
+    } else {
+      alpha_low = alpha_mid;
+    }
+  }
+  return 0.5 * (alpha_low + alpha_high);
+}
+
 Matrix recover_lowrank_factor(const Matrix& A) {
   // Use LDLT decomposition to get low-rank factors
-  // NOTE: LDLT is used because it is stable for semi-definite matrices and will
-  // effectively terminate when it encounters a max pivot that is numerically
-  // zero.
+  // NOTE: LDLT is used because it is stable for semi-definite matrices and
+  // will effectively terminate when it encounters a max pivot that is
+  // numerically zero.
   Eigen::LDLT<Matrix> ldlt(A);
   Matrix L = ldlt.matrixL();
   Vector D = ldlt.vectorD();
