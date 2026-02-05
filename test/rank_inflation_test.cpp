@@ -470,16 +470,22 @@ TEST_P(InflationParamTest, CertWithCenter) {
   RankInflateParams params;
   params.verbose = true;
   params.max_sol_rank = sdp.dim;
-  params.delta_ac = 1e-7;
+  params.delta_ac = 1e-5;
   // generate problem
   RankInflation problem = sdp.make(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(params.max_sol_rank);
   // Run rank inflation, without inflation (target rank is 1)
   auto X = problem.get_analytic_center(Y_0 * Y_0.transpose());
+  // print eigenvalues of X
+  Eigen::SelfAdjointEigenSolver<Matrix> es(X);
+  std::cout << "Eigenvalues of Analytic Center X: " << es.eigenvalues().transpose()
+            << std::endl;
   Matrix Y = recover_lowrank_factor(X);
   auto Jac = Matrix(problem.m, Y.cols() * sdp.dim);
   auto violation = problem.eval_constraints(Y, Jac);
+  std::cout << "Violation at Analytic Center: " << violation.norm()
+            << std::endl;
   // Build certificate
   auto H = problem.build_certificate(Jac, Y);
   // std::cout << "Certificate Matrix: " << std::endl << H << std::endl;
@@ -503,7 +509,7 @@ TEST_P(InflationParamTest, AnalyticCenter) {
   // parameters
   RankInflateParams params;
   params.verbose = true;
-  params.delta_ac = 1e-7;
+  params.delta_ac = 1e-5;
   // generate problem
   auto problem = sdp.make(params);
   auto Y = sdp.soln;
@@ -513,6 +519,11 @@ TEST_P(InflationParamTest, AnalyticCenter) {
   // Compute analytic center objecive value
   double obj_0 = problem.get_analytic_center_objective(X0);
   double obj_star = problem.get_analytic_center_objective(X);
+  // check that the center is PSD
+  Eigen::SelfAdjointEigenSolver<Matrix> es(X);
+  for (int i = 0; i < es.eigenvalues().size(); ++i) {
+    EXPECT_GE(es.eigenvalues()(i), -params_.delta_ac) << "Analytic center is not PSD";
+  }
   // Check objective decrease
   std::cout << "Analytic Center Objective initially: " << obj_0 << std::endl;
   std::cout << "Analytic Center Objective at Low Rank Init: " << obj_star

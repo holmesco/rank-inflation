@@ -421,6 +421,8 @@ Matrix RankInflation::get_analytic_center(const Matrix& X_0) const {
   bool converged = false;
   int n_iter = 0;
   Matrix X = X_0;
+  double f_val = get_analytic_center_objective(X);
+  // Main loop
   while (n_iter < params_.max_iter_ac) {
     // Define perturbed version of X
     Matrix Z = X + Matrix::Identity(dim, dim) * delta;
@@ -435,26 +437,38 @@ Matrix RankInflation::get_analytic_center(const Matrix& X_0) const {
     }
     QRResult result = get_soln_qr_dense(C.selfadjointView<Eigen::Upper>(), rhs,
                                         params_.qr_thresh_ac);
+    // std::cout << "R diag AC: " << result.R_diagonal.transpose() << std::endl;
+    // std::cout << "AC Solve Residual Norm: " << result.residual_norm
+    //           << std::endl;
+    // std::cout << "violation" << std::endl << violation.transpose() << std::endl;
+
     // Get step direction
     auto Aw_sp = build_wt_sum_constraints(result.solution);
     Matrix Aw = C_ * result.solution(m - 1) + Aw_sp;
     // Line search to find optimal step size
     double alpha = 1.0;
+    double f_val_dec = 0.0;
     if (params_.enable_line_search_ac) {
-      alpha = analytic_center_bisect(Z, Aw);
+      std::tie(alpha, f_val_dec) = analytic_center_backtrack(Z, Aw);
+      f_val -= f_val_dec;
     }
     // Update step
     auto deltaX = Z - Z * Aw * Z;
     X.noalias() = X + alpha * deltaX;
+    // Objective value
+    if (!params_.enable_line_search_ac) {
+      // Evaluate objective at new solution
+      f_val = get_analytic_center_objective(X);
+    }
     // Print results
     if (params_.verbose) {
       int sol_rank = get_rank(X, params_.tol_rank_sol);
       if (n_iter % 10 == 0) {
-        std::printf("%6s %6s %18s %10s %8s\n", "Iter", "SolRank",
-                    "ViolationNorm", "StepNorm", "Alpha");
+        std::printf("%6s %6s %18s %10s %8s %8s\n", "Iter", "SolRank",
+                    "ViolationNorm", "StepNorm", "Alpha", "Obj Val.");
       }
-      std::printf("%6d %6d %18.6e %10.6e %8.3e\n", n_iter, sol_rank,
-                  violation.norm(), deltaX.norm(), alpha);
+      std::printf("%6d %6d %18.6e %10.6e %8.3e %8.3e\n", n_iter, sol_rank,
+                  violation.norm(), deltaX.norm(), alpha, f_val);
     }
     // Increment
     n_iter++;
@@ -490,6 +504,38 @@ std::tuple<Matrix, Vector, Vector> RankInflation::get_analytic_center_system(
     }
   }
   return {C, d, violation};
+}
+
+std::pair<double, double> RankInflation::analytic_center_backtrack(
+    const Matrix& Z, const Matrix& Aw) const {
+  // NOTE: Should make this function generic for any line search function
+  //  Initial step size
+  double alpha = params_.alpha_init;
+  // Current objective and gradient
+  auto [f, df] = analytic_center_line_search_func(Z, Aw);
+  double df_0 = df(0.0);
+  double f_val = f(0.0);
+  // Backtracking parameters
+  const double beta =
+      params_.ln_search_red_factor;             // step size reduction factor
+  const double c = params_.ln_search_suff_dec;  // sufficient decrease parameter
+  // Backtracking loop
+  while (true) {
+    // Evaluate objective at new solution
+    double f_val_new = f(alpha);
+    // Check Armijo condition
+    if (f_val_new <= f_val + c * alpha * df_0) {
+      break;  // Sufficient decrease achieved
+    }
+    // Reduce step size
+    alpha *= beta;
+    // Prevent too small step sizes
+    if (alpha < params_.alpha_min) {
+      alpha = params_.alpha_min;
+      break;  // Stop if step size is too small
+    }
+  }
+  return {alpha, f(alpha)};
 }
 
 double RankInflation::analytic_center_bisect(const Matrix& Z,

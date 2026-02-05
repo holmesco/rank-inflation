@@ -42,7 +42,7 @@ Matrix recover_lowrank_factor(const Matrix& A);
 double bisection_line_search(const ScalarFunc& df, double alpha_low,
                              double alpha_high, double tol);
 
-inline double logdet(const Matrix& X) { 
+inline double logdet(const Matrix& X) {
   // Compute log determinant via Cholesky decomposition
   Eigen::LLT<Matrix> lltOfX(X);
   if (lltOfX.info() != Eigen::Success) {
@@ -52,7 +52,6 @@ inline double logdet(const Matrix& X) {
   double val = 2.0 * L.diagonal().array().log().sum();
   return val;
 }
-  
 
 enum class RetractionMethod {
   GradientDescent,
@@ -72,7 +71,7 @@ struct RankInflateParams {
   int max_iter = 10;
   // threshold for checking rank of the solution
   // (does not affect convergence, just for display)
-  double tol_rank_sol = 1.0E-5;
+  double tol_rank_sol = 1.0E-6;
   // Threshold for checking rank of the Jacobian
   double tol_rank_jac = 1.0E-7;
 
@@ -126,7 +125,7 @@ struct RankInflateParams {
   // tolerance for step size (terminate if below)
   double tol_step_norm_ac = 1e-8;
   // threshold for QR solve.
-  double qr_thresh_ac = 1e-8;
+  double qr_thresh_ac = 1e-10;
   // reduce violation in centering step
   bool reduce_violation_ac = false;
   // max number of iterations for centering
@@ -137,7 +136,7 @@ struct RankInflateParams {
   // NOTE: line search param will be certain to 1/2^k for k = ls_iter_ac
   double tol_bisect_ac = 1e-6;
   // line search enable for analytic center
-  bool enable_line_search_ac = true;
+  bool enable_line_search_ac = false;
 };
 
 class RankInflation {
@@ -243,6 +242,10 @@ class RankInflation {
     auto I = Matrix::Identity(X.rows(), X.cols());
     return -logdet(X + I * params_.delta_ac);
   }
+
+  // Analytic center backtracking line search
+  std::pair<double, double> analytic_center_backtrack(const Matrix& Z,
+                                                      const Matrix& Aw ) const;
 
   // Perform bisection line search to find optimal step size for analytic
   // center
