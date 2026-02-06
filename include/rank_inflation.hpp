@@ -34,9 +34,10 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
 int get_rank(const Matrix& Y, const double threshold);
 
 // Use LDL^T factorization to recover a low-rank factor from a psd matrix.
+// threshold: diagonal threshold for determining rank.
 // Note: This is efficient when the rank is low compared to the size of the
 // matrix.
-Matrix recover_lowrank_factor(const Matrix& A);
+Matrix recover_lowrank_factor(const Matrix& A, double threshold);
 
 // Bisection line search to find root of scalar function df
 double bisection_line_search(const ScalarFunc& df, double alpha_low,
@@ -87,7 +88,7 @@ struct RankInflateParams {
   // unstable solutions.
   double tol_jac_qr = 1.0E-7;
   // tolerance for constraint norm satisfaction.
-  double tol_violation = 1.0E-10;
+  double tol_retr_grad_norm = 1.0E-10;
 
   // Second order correction
   // -----------------------
@@ -123,11 +124,9 @@ struct RankInflateParams {
   // Analytic Center parameters
   // -------------------------
   // tolerance for step size (terminate if below)
-  double tol_step_norm_ac = 1e-8;
-  // threshold for QR solve.
-  double qr_thresh_ac = 1e-10;
+  double tol_step_norm_ac = 1e-10;
   // reduce violation in centering step
-  bool reduce_violation_ac = false;
+  bool reduce_violation_ac = true;
   // max number of iterations for centering
   int max_iter_ac = 50;
   // delta parameter for centering

@@ -87,10 +87,12 @@ std::pair<Matrix, Matrix> RankInflation::inflate_solution(
       std::cout << n_iter << "  RETRACTION" << std::endl;
     }
     auto violation = RankInflation::retraction(Y, Jac);
+    // Get gradient norm
+    Vector grad = Jac.transpose() * violation;
 
     // Check if the Jabobian is exactly rank deficient by one.
     int jac_rank = get_rank(Jac.topRows(A_.size()), params_.tol_rank_jac);
-    if (jac_rank >= A_.size() && violation.norm() < params_.tol_violation) {
+    if (jac_rank >= A_.size() && grad.norm() < params_.tol_retr_grad_norm) {
       if (params_.verbose) {
         std::cout << "CONVERGED!" << std::endl;
       }
@@ -118,8 +120,10 @@ Vector RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
     violation = eval_constraints(Y, Jac);
     // QR decomposition of Jacobian (run before checking convergence to get QR)
     qr_jacobian = get_soln_qr_dense(Jac, -violation, params_.tol_jac_qr);
+    // build gradient
+    Vector grad = Jac.transpose() * violation;
     // Check for convergence
-    if (violation.norm() < params_.tol_violation) break;
+    if (grad.norm() < params_.tol_retr_grad_norm) break;
     // Define retraction step
     Vector delta;
     switch (params_.retraction_method) {
@@ -131,8 +135,6 @@ Vector RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
         for (int i = 0; i < r; i++) {
           Hess.block(i * dim, i * dim, dim, dim).noalias() += H_corr;
         }
-        // build gradient
-        Vector grad = Jac.transpose() * violation;
         // Solve system
         qr_hessian = get_soln_qr_dense(Hess, -grad, params_.tol_jac_qr);
         // Define step
@@ -435,16 +437,17 @@ Matrix RankInflation::get_analytic_center(const Matrix& X_0) const {
     } else {
       rhs = d;
     }
-    QRResult result = get_soln_qr_dense(C.selfadjointView<Eigen::Upper>(), rhs,
-                                        params_.qr_thresh_ac);
-    // std::cout << "R diag AC: " << result.R_diagonal.transpose() << std::endl;
-    // std::cout << "AC Solve Residual Norm: " << result.residual_norm
-    //           << std::endl;
-    // std::cout << "violation" << std::endl << violation.transpose() << std::endl;
-
+    // Solve the linear equation with LDLT decomposition (includes pivoting by default)
+    // Note: This method is preferred because the system is PSD, but can be ill-conditioned, especially in early iterations
+    Eigen::LDLT<Eigen::MatrixXd> ldlt(C.selfadjointView<Eigen::Upper>());
+    // Check for success (critical for rank-deficient cases)
+    if (ldlt.info() == Eigen::NumericalIssue || !ldlt.isPositive()) {
+        std::cout << "The matrix is not PSD or has severe numerical issues." << std::endl;
+    }
+    Vector soln = ldlt.solve(rhs);
     // Get step direction
-    auto Aw_sp = build_wt_sum_constraints(result.solution);
-    Matrix Aw = C_ * result.solution(m - 1) + Aw_sp;
+    auto Aw_sp = build_wt_sum_constraints(soln);
+    Matrix Aw = C_ * soln(m - 1) + Aw_sp;
     // Line search to find optimal step size
     double alpha = 1.0;
     double f_val_dec = 0.0;
@@ -610,7 +613,7 @@ double bisection_line_search(const ScalarFunc& df, double alpha_low,
   return 0.5 * (alpha_low + alpha_high);
 }
 
-Matrix recover_lowrank_factor(const Matrix& A) {
+Matrix recover_lowrank_factor(const Matrix& A, double threshold) {
   // Use LDLT decomposition to get low-rank factors
   // NOTE: LDLT is used because it is stable for semi-definite matrices and
   // will effectively terminate when it encounters a max pivot that is
@@ -621,7 +624,7 @@ Matrix recover_lowrank_factor(const Matrix& A) {
   // Determine rank based on positive pivots
   int rank = 0;
   for (int i = 0; i < D.size(); i++) {
-    if (D(i) > 1e-18) {
+    if (D(i) > threshold) {
       rank++;
     } else {
       break;

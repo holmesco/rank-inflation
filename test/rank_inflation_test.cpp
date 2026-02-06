@@ -470,18 +470,15 @@ TEST_P(InflationParamTest, CertWithCenter) {
   RankInflateParams params;
   params.verbose = true;
   params.max_sol_rank = sdp.dim;
-  params.delta_ac = 1e-5;
+  params.delta_ac = 1e-6;
   // generate problem
   RankInflation problem = sdp.make(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(params.max_sol_rank);
   // Run rank inflation, without inflation (target rank is 1)
   auto X = problem.get_analytic_center(Y_0 * Y_0.transpose());
-  // print eigenvalues of X
-  Eigen::SelfAdjointEigenSolver<Matrix> es(X);
-  std::cout << "Eigenvalues of Analytic Center X: " << es.eigenvalues().transpose()
-            << std::endl;
-  Matrix Y = recover_lowrank_factor(X);
+  // Recover low rank solution
+  Matrix Y = recover_lowrank_factor(X, 1e-10);
   auto Jac = Matrix(problem.m, Y.cols() * sdp.dim);
   auto violation = problem.eval_constraints(Y, Jac);
   std::cout << "Violation at Analytic Center: " << violation.norm()
@@ -509,7 +506,7 @@ TEST_P(InflationParamTest, AnalyticCenter) {
   // parameters
   RankInflateParams params;
   params.verbose = true;
-  params.delta_ac = 1e-5;
+  params.delta_ac = 1e-7;
   // generate problem
   auto problem = sdp.make(params);
   auto Y = sdp.soln;
@@ -522,7 +519,7 @@ TEST_P(InflationParamTest, AnalyticCenter) {
   // check that the center is PSD
   Eigen::SelfAdjointEigenSolver<Matrix> es(X);
   for (int i = 0; i < es.eigenvalues().size(); ++i) {
-    EXPECT_GE(es.eigenvalues()(i), -params_.delta_ac) << "Analytic center is not PSD";
+    EXPECT_GE(es.eigenvalues()(i), -params.delta_ac) << "Analytic center is not PSD";
   }
   // Check objective decrease
   std::cout << "Analytic Center Objective initially: " << obj_0 << std::endl;
@@ -535,6 +532,13 @@ TEST_P(InflationParamTest, AnalyticCenter) {
   std::cout << "Rank at Init: " << rank_0 << ", Rank at Center: " << rank_star
             << std::endl;
   EXPECT_GE(rank_star, rank_0) << "Rank did not increase at analytic center";
+
+  // Recover low rank solution
+  Matrix Y_hr = recover_lowrank_factor(X, 1e-10);
+  auto Jac = Matrix(problem.m, Y_hr.cols() * sdp.dim);
+  auto violation = problem.eval_constraints(Y_hr, Jac);
+  std::cout << "Violation at Analytic Center: " << violation.norm()
+            << std::endl;
 }
 
 TEST(AnalyticCenter, LineSearchFunctions) {
@@ -597,7 +601,7 @@ TEST(InflationParamTest, LowRankRecovery) {
   auto Y0 = make_two_sphere_soln(r1, r2, d, weights);
   // recompute center
   auto X0 = Y0 * Y0.transpose();
-  auto Y = recover_lowrank_factor(X0);
+  auto Y = recover_lowrank_factor(X0, 1e-10);
   // Compare to original solution
   auto diff = (X0 - Y * Y.transpose()).norm();
   const double tol = 1e-8;
