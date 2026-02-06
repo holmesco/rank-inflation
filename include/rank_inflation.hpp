@@ -37,7 +37,7 @@ struct RankInflateParams {
   // unstable solutions.
   double tol_jac_qr = 1.0E-7;
   // tolerance for constraint norm satisfaction.
-  double tol_retr_grad_norm = 1.0E-10;
+  double tol_retr_grad_norm = 1.0E-9;
 
   // Second order correction
   // -----------------------
@@ -73,18 +73,26 @@ struct RankInflateParams {
   // Analytic Center parameters
   // -------------------------
   // tolerance for step size (terminate if below)
-  double tol_step_norm_ac = 1e-10;
+  double tol_step_norm_ac = 1e-8;
   // reduce violation in centering step
   bool reduce_violation_ac = true;
   // max number of iterations for centering
   int max_iter_ac = 50;
-  // delta parameter for centering
-  double delta_ac = 1e-6;
+  
+  // max number of iterations for adaptive centering
+  int max_iter_adaptive_ac = 20;
+  // initial delta for centering (should be large enough to ensure good convergence even for low rank solutions, but not too large to cause slow convergence)
+  double delta_init_ac = 1e-7;
+  // final delta for centering (should be small to get close to boundary, but not too small to cause numerical issues)
+  double delta_min_ac = 1e-9;
+  // update factor for adjusting delta in adaptive centering (should be between zero and one, smaller values lead to more conservative updates)
+  double adapt_factor_ac = 0.5;
+
+  // line search enable for analytic center
+  bool enable_line_search_ac = false;
   // line search (bisection) parameters for centering
   // NOTE: line search param will be certain to 1/2^k for k = ls_iter_ac
   double tol_bisect_ac = 1e-6;
-  // line search enable for analytic center
-  bool enable_line_search_ac = false;
 };
 
 class RankInflation {
@@ -178,17 +186,28 @@ class RankInflation {
                                               bool second_order = true) const;
 
   // ----------- ANALYTIC CENTERING METHODS ------------
+
+  // Adaptive centering method to compute the analytic center of the SDP.
+  // The method starts with a large delta parameter to ensure good convergence
+  // even for low rank solutions, and then reduces delta adaptively until it
+  // reaches the desired value.
+  Matrix get_analytic_center_adaptive(const Matrix& X_0) const;
+
   // Centering method to compute the analytic center of the current
-  // feasible region starting from X_0
-  Matrix get_analytic_center(const Matrix& X_0) const;
+  // feasible region starting from X_0.
+  // Delta represents a perturbation parameter to ensure we stay in the interior
+  // of the PSD cone even when the solution is low rank. If delta is zero then
+  // no perturbation is applied.
+  Matrix get_analytic_center(const Matrix& X_0, double delta = 0.0) const;
 
-  // Helper function to build the system of equations for the analytic center
-  std::tuple<Matrix, Vector, Vector> get_analytic_center_system(
-      const Matrix& Z, const Matrix& X) const;
+  // Builds and solves the system of equations for the analytic center step,
+  // returning the optimal multipliers and the current violation of constraints
+  std::pair<Vector, Vector> solve_analytic_center_system(const Matrix& Z,
+                                                         const Matrix& X) const;
 
-  double get_analytic_center_objective(const Matrix& X) const {
+  double get_analytic_center_objective(const Matrix& X, double delta) const {
     auto I = Matrix::Identity(X.rows(), X.cols());
-    return -logdet(X + I * params_.delta_ac);
+    return -logdet(X + I * delta);
   }
 
   // Analytic center backtracking line search

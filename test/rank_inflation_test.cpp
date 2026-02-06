@@ -470,17 +470,20 @@ TEST_P(InflationParamTest, CertWithCenter) {
   RankInflateParams params;
   params.verbose = true;
   params.max_sol_rank = sdp.dim;
-  params.delta_ac = 1e-6;
+  auto delta = 1e-7;
   // generate problem
   RankInflation problem = sdp.make(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(params.max_sol_rank);
   // Run rank inflation, without inflation (target rank is 1)
-  auto X = problem.get_analytic_center(Y_0 * Y_0.transpose());
+  auto X = problem.get_analytic_center(Y_0 * Y_0.transpose(), delta);
+  std::cout << "Eigenvalues of Center: " << std::endl
+            << Eigen::SelfAdjointEigenSolver<Matrix>(X).eigenvalues()
+            << std::endl;
   // Recover low rank solution
-  Matrix Y = recover_lowrank_factor(X, 1e-10);
+  Matrix Y = recover_lowrank_factor(X, 0.0);
   auto Jac = Matrix(problem.m, Y.cols() * sdp.dim);
-  auto violation = problem.eval_constraints(Y, Jac);
+  auto violation = problem.retraction(Y, Jac);
   std::cout << "Violation at Analytic Center: " << violation.norm()
             << std::endl;
   // Build certificate
@@ -500,26 +503,25 @@ TEST_P(InflationParamTest, CertWithCenter) {
   std::cout << "First Order Condition Norm: " << first_ord_cond << std::endl;
 }
 
-// Test Analytic Centering when one initialized column is zero
-TEST_P(InflationParamTest, AnalyticCenter) {
+TEST_P(InflationParamTest, AnalyticCenterFixedPerturb) {
   const auto& sdp = GetParam();
   // parameters
   RankInflateParams params;
   params.verbose = true;
-  params.delta_ac = 1e-7;
+  double delta = 1e-7;
   // generate problem
   auto problem = sdp.make(params);
   auto Y = sdp.soln;
   // Compute Analyic center starting from low rank solution
   auto X0 = Y * Y.transpose();
-  auto X = problem.get_analytic_center(X0);
+  auto X = problem.get_analytic_center(X0, delta);
   // Compute analytic center objecive value
-  double obj_0 = problem.get_analytic_center_objective(X0);
-  double obj_star = problem.get_analytic_center_objective(X);
+  double obj_0 = problem.get_analytic_center_objective(X0, delta);
+  double obj_star = problem.get_analytic_center_objective(X, delta);
   // check that the center is PSD
   Eigen::SelfAdjointEigenSolver<Matrix> es(X);
   for (int i = 0; i < es.eigenvalues().size(); ++i) {
-    EXPECT_GE(es.eigenvalues()(i), -params.delta_ac) << "Analytic center is not PSD";
+    EXPECT_GE(es.eigenvalues()(i), -delta) << "Analytic center is not PSD";
   }
   // Check objective decrease
   std::cout << "Analytic Center Objective initially: " << obj_0 << std::endl;
@@ -536,9 +538,53 @@ TEST_P(InflationParamTest, AnalyticCenter) {
   // Recover low rank solution
   Matrix Y_hr = recover_lowrank_factor(X, 1e-10);
   auto Jac = Matrix(problem.m, Y_hr.cols() * sdp.dim);
-  auto violation = problem.eval_constraints(Y_hr, Jac);
-  std::cout << "Violation at Analytic Center: " << violation.norm()
+  auto violation = problem.retraction(Y_hr, Jac);
+  std::cout << "Violation After Retraction: " << violation.norm()
             << std::endl;
+  std::cout << "rank of recovered solution: " << get_rank(Y_hr, 1e-5) << std::endl;
+}
+
+TEST_P(InflationParamTest, AnalyticCenterAdaptive) {
+  const auto& sdp = GetParam();
+  // parameters
+  RankInflateParams params;
+  params.verbose = true;
+  params.delta_init_ac = 1e-7;
+  params.delta_min_ac = 1e-9;
+  params.adapt_factor_ac = 0.5;
+  // generate problem
+  auto problem = sdp.make(params);
+  auto Y = sdp.soln;
+  // Compute Analyic center starting from low rank solution
+  auto X0 = Y * Y.transpose();
+  auto X = problem.get_analytic_center_adaptive(X0);
+  // Compute analytic center objecive value
+  double obj_0 = problem.get_analytic_center_objective(X0, 1e-8);
+  double obj_star = problem.get_analytic_center_objective(X, 1e-8);
+  // check that the center is PSD
+  Eigen::SelfAdjointEigenSolver<Matrix> es(X);
+  for (int i = 0; i < es.eigenvalues().size(); ++i) {
+    EXPECT_GE(es.eigenvalues()(i), -params.delta_min_ac) << "Analytic center is not PSD";
+  }
+  // Check objective decrease
+  std::cout << "Analytic Center Objective initially: " << obj_0 << std::endl;
+  std::cout << "Analytic Center Objective at Low Rank Init: " << obj_star
+            << std::endl;
+  EXPECT_LT(obj_star, obj_0) << "Analytic center objective did not improve";
+  // Check for rank increase
+  auto rank_0 = get_rank(X0, 1e-6);
+  auto rank_star = get_rank(X, 1e-6);
+  std::cout << "Rank at Init: " << rank_0 << ", Rank at Center: " << rank_star
+            << std::endl;
+  EXPECT_GE(rank_star, rank_0) << "Rank did not increase at analytic center";
+
+  // Recover low rank solution
+  Matrix Y_hr = recover_lowrank_factor(X, 1e-10);
+  auto Jac = Matrix(problem.m, Y_hr.cols() * sdp.dim);
+  auto violation = problem.retraction(Y_hr, Jac);
+  std::cout << "Violation After Retraction: " << violation.norm()
+            << std::endl;
+  std::cout << "rank of recovered solution: " << get_rank(Y_hr, 1e-5) << std::endl;
 }
 
 TEST(AnalyticCenter, LineSearchFunctions) {
