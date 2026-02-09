@@ -51,6 +51,41 @@ Matrix recover_lowrank_factor(const Matrix& A, double threshold) {
   return Y;
 }
 
+Matrix get_positive_eigspace(const Matrix& mat, double threshold) {
+  Eigen::SelfAdjointEigenSolver<Matrix> solver(mat);
+
+  if (solver.info() != Eigen::Success) {
+    throw std::runtime_error("Eigenvalue decomposition failed.");
+  }
+
+  // Eigenvalues are sorted in increasing order
+  const Vector& evals = solver.eigenvalues();
+  const Matrix& evecs = solver.eigenvectors();
+
+  // 1. Count positive eigenvalues
+  int positiveCount = 0;
+  for (int i = evals.size() - 1; i >= 0; --i) {
+    if (evals[i] > threshold) {
+      positiveCount++;
+    } else {
+      break;
+    }
+  }
+
+  if (positiveCount == 0) return Matrix(mat.rows(), 0);
+
+  // 2. Extract the positive eigenvalues and take their square root
+  // .tail() gets the last 'positiveCount' elements (the largest ones)
+  Vector sqrtEvals = evals.tail(positiveCount).array().sqrt();
+
+  // 3. Extract the corresponding eigenvectors
+  Matrix topEvecs = evecs.rightCols(positiveCount);
+
+  // 4. Weight the columns: Each column i is multiplied by sqrt(lambda_i)
+  // Using .asDiagonal() is computationally efficient in Eigen
+  return topEvecs * sqrtEvals.asDiagonal();
+}
+
 int get_rank(const Matrix& mat, const double threshold) {
   // 1. Perform Column Pivoted Householder QR (Rank-Revealing)
   Eigen::ColPivHouseholderQR<Matrix> qr(mat);

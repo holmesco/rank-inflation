@@ -41,6 +41,13 @@ int get_rank(const Matrix& Y, const double threshold);
 // matrix.
 Matrix recover_lowrank_factor(const Matrix& A, double threshold);
 
+/**
+ * Returns a matrix where columns are eigenvectors weighted by the square root
+ * of their corresponding positive eigenvalues.
+ * Resulting matrix W satisfies W * W.transpose() ≈ mat (for positive parts).
+ */
+Matrix get_positive_eigspace(const Matrix& mat, double threshold = 1e-9);
+
 // Bisection line search to find root of scalar function df
 double bisection_line_search(const ScalarFunc& df, double alpha_low,
                              double alpha_high, double tol);
