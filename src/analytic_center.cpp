@@ -2,7 +2,8 @@
 
 namespace SDPTools {
 
-Matrix RankInflation::get_analytic_center_adaptive(const Matrix& X_0) const {
+template <typename T>
+Matrix RankInflation<T>::get_analytic_center_adaptive(const Matrix& X_0) const {
   double delta = params_.delta_init_ac;
   auto X = X_0;
   while (delta >= params_.delta_min_ac) {
@@ -19,7 +20,8 @@ Matrix RankInflation::get_analytic_center_adaptive(const Matrix& X_0) const {
   return X;
 }
 
-Matrix RankInflation::get_analytic_center(const Matrix& X_0,
+template <typename T>
+Matrix RankInflation<T>::get_analytic_center(const Matrix& X_0,
                                           double delta) const {
   // Initialize
   int n_iter = 0;
@@ -69,7 +71,8 @@ Matrix RankInflation::get_analytic_center(const Matrix& X_0,
   return X;
 }
 
-std::pair<Vector, Vector> RankInflation::solve_analytic_center_system(
+template <typename T>
+std::pair<Vector, Vector> RankInflation<T>::solve_analytic_center_system(
     const Matrix& Z, const Matrix& X) const {
   // Construct AZ matrices, violation vector and d vector
   Vector d(m);
@@ -78,9 +81,9 @@ std::pair<Vector, Vector> RankInflation::solve_analytic_center_system(
   for (int i = 0; i < m; i++) {
     // compute violation
     if (i < A_.size()) {
-      AZ.push_back(A_[i].selfadjointView<Eigen::Upper>() * Z);
+      AZ.push_back(A_[i].template selfadjointView<Eigen::Upper>() * Z);
       violation(i) =
-          (A_[i].selfadjointView<Eigen::Upper>() * X).trace() - b_[i];
+          (A_[i].template selfadjointView<Eigen::Upper>() * X).trace() - b_[i];
     } else {
       AZ.push_back(C_ * Z);
       violation(i) = (C_ * X).trace() - rho_;
@@ -116,7 +119,8 @@ std::pair<Vector, Vector> RankInflation::solve_analytic_center_system(
   return {multipliers, violation};
 }
 
-std::pair<double, double> RankInflation::analytic_center_backtrack(
+template <typename T>
+std::pair<double, double> RankInflation<T>::analytic_center_backtrack(
     const Matrix& Z, const Matrix& Aw) const {
   // NOTE: Should make this function generic for any line search function
   //  Initial step size
@@ -148,7 +152,8 @@ std::pair<double, double> RankInflation::analytic_center_backtrack(
   return {alpha, f(alpha)};
 }
 
-double RankInflation::analytic_center_bisect(const Matrix& Z,
+template <typename T>
+double RankInflation<T>::analytic_center_bisect(const Matrix& Z,
                                              const Matrix& Aw) const {
   // Create the objective function and deriviative
   auto [f, df] = analytic_center_line_search_func(Z, Aw);
@@ -160,8 +165,9 @@ double RankInflation::analytic_center_bisect(const Matrix& Z,
   return bisection_line_search(df, alpha_low, alpha_high, tol);
 }
 
+template <typename T>
 std::pair<ScalarFunc, ScalarFunc>
-RankInflation::analytic_center_line_search_func(const Matrix& Z,
+RankInflation<T>::analytic_center_line_search_func(const Matrix& Z,
                                                 const Matrix& Aw) const {
   // Cholesky decomposition of augmented solution
   Eigen::LLT<Matrix> cholZ(Z);
@@ -199,4 +205,24 @@ RankInflation::analytic_center_line_search_func(const Matrix& Z,
 
   return {f, df};
 }
+
+
+template <typename T>
+RankInflation<Matrix> RankInflation<T>::get_reduced_problem(const Matrix& V) const {
+  // Compute the reduced cost matrix
+  Matrix C_red = V.transpose() * C_ * V;
+  // Compute the reduced constraint matrices
+  std::vector<Matrix> A_red;
+  for (const auto& A_i : A_) {
+    Matrix A_i_red = V.transpose() * A_i.template selfadjointView<Eigen::Upper>() * V;
+    A_red.emplace_back(A_i_red);
+  }
+  // Create the reduced problem
+  // Note: here we use move to avoid pass-by-value copy
+  return RankInflation<Matrix>(std::move(C_red), rho_, std::move(A_red), b_, params_);
+}
+
+template class RankInflation<Eigen::MatrixXd>;
+template class RankInflation<Eigen::SparseMatrix<double>>;
 }  // namespace SDPTools
+

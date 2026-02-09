@@ -15,13 +15,14 @@ c++ tests for rank inflation
 using namespace SDPTools;
 using Edge = std::pair<int, int>;
 using Triplet = Eigen::Triplet<double>;
+using SpMatrix = Eigen::SparseMatrix<double>;
 
 // Test case data structure
 struct SDPTestProblem {
   int dim;     // matrix dimension
   Matrix C;    // cost
   double rho;  // scalar offset
-  std::vector<Eigen::SparseMatrix<double>> A;
+  std::vector<SpMatrix> A;
   std::vector<double> b;
   Matrix soln;
   std::string name;
@@ -34,8 +35,8 @@ struct SDPTestProblem {
     return Y;
   }
 
-  RankInflation make(const RankInflateParams& params) const {
-    return RankInflation(C, rho, A, b, params);
+  RankInflation<SpMatrix> make(const RankInflateParams& params) const {
+    return RankInflation<SpMatrix>(C, rho, A, b, params);
   }
 };
 
@@ -481,9 +482,51 @@ TEST_P(InflationParamTest, CertWithCenter) {
             << Eigen::SelfAdjointEigenSolver<Matrix>(X).eigenvalues()
             << std::endl;
   // Recover low rank solution
-  Matrix Y = recover_lowrank_factor(X, 0.0);
+  Matrix Y = get_positive_eigspace(X, 2 * delta);
   auto Jac = Matrix(problem.m, Y.cols() * sdp.dim);
   auto violation = problem.retraction(Y, Jac);
+  std::cout << "Violation at Analytic Center: " << violation.norm()
+            << std::endl;
+  // Build certificate
+  auto H = problem.build_certificate(Jac, Y);
+  // std::cout << "Certificate Matrix: " << std::endl << H << std::endl;
+  // check certificate on high rank solution
+  auto [min_eig_hr, first_ord_cond_hr] = problem.check_certificate(H, Y);
+  std::cout << "Certificate on High Rank Solution: " << std::endl;
+  std::cout << "Minimum Eigenvalue of Certificate: " << min_eig_hr << std::endl;
+  std::cout << "First Order Condition Norm: " << first_ord_cond_hr << std::endl;
+  std::cout << "Cost at High Rank Solution: " << std::endl
+            << (Y.transpose() * sdp.C * Y).trace() << std::endl;
+  // check certificate on initial solution
+  auto [min_eig, first_ord_cond] = problem.check_certificate(H, Y_0);
+  std::cout << "Certificate on Initial Solution: " << std::endl;
+  std::cout << "Minimum Eigenvalue of Certificate: " << min_eig << std::endl;
+  std::cout << "First Order Condition Norm: " << first_ord_cond << std::endl;
+}
+
+TEST_P(InflationParamTest, CertReduced) {
+  const auto& sdp = GetParam();
+  // parameters
+  RankInflateParams params;
+  params.verbose = true;
+  params.max_sol_rank = sdp.dim;
+  auto delta = 1e-7;
+  // generate problem
+  RankInflation problem = sdp.make(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(params.max_sol_rank);
+  // Run rank inflation, without inflation (target rank is 1)
+  auto X = problem.get_analytic_center(Y_0 * Y_0.transpose(), delta);
+  // Get reduced system
+  Matrix Y = get_positive_eigspace(X, params.tol_rank_sol);
+  auto prob_reduced = problem.get_reduced_problem(Y);
+  auto Delta =
+      prob_reduced.get_analytic_center(Matrix::Identity(Y.cols(), Y.cols()), 1e-9);
+  Matrix Delta_half = get_lowrank_factor(Delta, 0.0);
+  Y.noalias() = Y * Delta_half;
+  // Get violation at center
+  auto Jac = Matrix(prob_reduced.m, Y.cols() * sdp.dim);
+  auto violation = problem.eval_constraints(Y);
   std::cout << "Violation at Analytic Center: " << violation.norm()
             << std::endl;
   // Build certificate
@@ -536,12 +579,12 @@ TEST_P(InflationParamTest, AnalyticCenterFixedPerturb) {
   EXPECT_GE(rank_star, rank_0) << "Rank did not increase at analytic center";
 
   // Recover low rank solution
-  Matrix Y_hr = recover_lowrank_factor(X, 1e-10);
+  Matrix Y_hr = get_lowrank_factor(X, 1e-10);
   auto Jac = Matrix(problem.m, Y_hr.cols() * sdp.dim);
   auto violation = problem.retraction(Y_hr, Jac);
-  std::cout << "Violation After Retraction: " << violation.norm()
+  std::cout << "Violation After Retraction: " << violation.norm() << std::endl;
+  std::cout << "rank of recovered solution: " << get_rank(Y_hr, 1e-5)
             << std::endl;
-  std::cout << "rank of recovered solution: " << get_rank(Y_hr, 1e-5) << std::endl;
 }
 
 TEST_P(InflationParamTest, AnalyticCenterAdaptive) {
@@ -564,7 +607,8 @@ TEST_P(InflationParamTest, AnalyticCenterAdaptive) {
   // check that the center is PSD
   Eigen::SelfAdjointEigenSolver<Matrix> es(X);
   for (int i = 0; i < es.eigenvalues().size(); ++i) {
-    EXPECT_GE(es.eigenvalues()(i), -params.delta_min_ac) << "Analytic center is not PSD";
+    EXPECT_GE(es.eigenvalues()(i), -params.delta_min_ac)
+        << "Analytic center is not PSD";
   }
   // Check objective decrease
   std::cout << "Analytic Center Objective initially: " << obj_0 << std::endl;
@@ -579,12 +623,12 @@ TEST_P(InflationParamTest, AnalyticCenterAdaptive) {
   EXPECT_GE(rank_star, rank_0) << "Rank did not increase at analytic center";
 
   // Recover low rank solution
-  Matrix Y_hr = recover_lowrank_factor(X, 1e-10);
+  Matrix Y_hr = get_lowrank_factor(X, 1e-10);
   auto Jac = Matrix(problem.m, Y_hr.cols() * sdp.dim);
   auto violation = problem.retraction(Y_hr, Jac);
-  std::cout << "Violation After Retraction: " << violation.norm()
+  std::cout << "Violation After Retraction: " << violation.norm() << std::endl;
+  std::cout << "rank of recovered solution: " << get_rank(Y_hr, 1e-5)
             << std::endl;
-  std::cout << "rank of recovered solution: " << get_rank(Y_hr, 1e-5) << std::endl;
 }
 
 TEST(AnalyticCenter, LineSearchFunctions) {
@@ -604,7 +648,9 @@ TEST(AnalyticCenter, LineSearchFunctions) {
   // parameters
   RankInflateParams params;
   params.verbose = true;
-  RankInflation problem(Matrix::Zero(dim, dim), 0.0, {}, {}, params);
+  std::vector<Matrix> As = {};  // empty for this test
+  std::vector<double> bs = {};
+  RankInflation problem(Matrix::Zero(dim, dim), 0.0, As, bs, params);
   double delta = 1e-6;
   // Generate functions
   auto [f, df] = problem.analytic_center_line_search_func(Z, Aw);
@@ -630,7 +676,7 @@ TEST(AnalyticCenter, LineSearchFunctions) {
     double df_val = df(alpha);
     double f_val_plus = f(alpha + tol);
     double num_df = (f_val_plus - f_val) / tol;
-    EXPECT_NEAR(df_val, num_df, tol*100)
+    EXPECT_NEAR(df_val, num_df, tol * 100)
         << "Line search derivative mismatch at alpha = " << alpha;
   }
 }
@@ -647,7 +693,7 @@ TEST(InflationParamTest, LowRankRecovery) {
   auto Y0 = make_two_sphere_soln(r1, r2, d, weights);
   // recompute center
   auto X0 = Y0 * Y0.transpose();
-  auto Y = recover_lowrank_factor(X0, 1e-10);
+  auto Y = get_lowrank_factor(X0, 1e-10);
   // Compare to original solution
   auto diff = (X0 - Y * Y.transpose()).norm();
   const double tol = 1e-8;

@@ -2,18 +2,25 @@
 
 namespace SDPTools {
 
-RankInflation::RankInflation(const Matrix& C, double rho,
-                             const std::vector<Eigen::SparseMatrix<double>>& A,
-                             const std::vector<double>& b,
+template <typename T>
+RankInflation<T>::RankInflation(const Matrix C, double rho,
+                             const std::vector<T> A,
+                             const std::vector<double> b,
                              RankInflateParams params)
-    : C_(C), A_(A), rho_(rho), b_(b), params_(params) {
+    : C_(std::move(C)),
+      A_(std::move(A)),
+      rho_(rho),
+      b_(std::move(b)),
+      params_(params),
+      dense_constraints(true) {
   // dimension of the SDP
   dim = C.rows();
   // number of constraints to enforce during inflation
   m = A.size() + 1;
 }
 
-Vector RankInflation::eval_constraints(const Matrix& Y, Matrix& Jac) const {
+template <typename T>
+Vector RankInflation<T>::eval_constraints(const Matrix& Y, Matrix& Jac) const {
   // dimension assertions
   int r = Y.cols();
   assert(Y.rows() == dim);
@@ -31,7 +38,7 @@ Vector RankInflation::eval_constraints(const Matrix& Y, Matrix& Jac) const {
     if (i < A_.size()) {
       // Constraints
       // NOTE: Converting to DENSE here. Optimize this later
-      grad_vec = (A_[i].selfadjointView<Eigen::Upper>() * Y).reshaped();
+      grad_vec = (A_[i].template selfadjointView<Eigen::Upper>() * Y).reshaped();
       constraint_value = b_[i];
     } else {
       // Cost "constraint"
@@ -46,7 +53,8 @@ Vector RankInflation::eval_constraints(const Matrix& Y, Matrix& Jac) const {
   return result;
 }
 
-std::pair<Matrix, Matrix> RankInflation::inflate_solution(
+template <typename T>
+std::pair<Matrix, Matrix> RankInflation<T>::inflate_solution(
     const Matrix& Y_0) const {
   // convenience definitions
   int r_max = params_.max_sol_rank;
@@ -86,7 +94,7 @@ std::pair<Matrix, Matrix> RankInflation::inflate_solution(
     if (params_.verbose) {
       std::cout << n_iter << "  RETRACTION" << std::endl;
     }
-    auto violation = RankInflation::retraction(Y, Jac);
+    auto violation = RankInflation<T>::retraction(Y, Jac);
     // Get gradient norm
     Vector grad = Jac.transpose() * violation;
 
@@ -109,7 +117,8 @@ std::pair<Matrix, Matrix> RankInflation::inflate_solution(
   return {Y, Jac};
 }
 
-Vector RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
+template <typename T>
+Vector RankInflation<T>::retraction(Matrix& Y, Matrix& Jac) const {
   // Initialize
   int r = Y.cols();
   int n_iter = 0;
@@ -177,7 +186,7 @@ Vector RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
     Matrix dY = delta.reshaped(dim, r);
     double alpha;
     if (params_.enable_line_search) {
-      alpha = RankInflation::backtrack_line_search(Y, dY, Jac);
+      alpha = RankInflation<T>::backtrack_line_search(Y, dY, Jac);
     } else {
       alpha = 1.0;
     }
@@ -206,7 +215,8 @@ Vector RankInflation::retraction(Matrix& Y, Matrix& Jac) const {
   return violation;
 }
 
-double RankInflation::backtrack_line_search(const Matrix& Y, const Matrix& dY,
+template <typename T>
+double RankInflation<T>::backtrack_line_search(const Matrix& Y, const Matrix& dY,
                                             const Matrix& Jac) const {
   // Initial step size
   double alpha = params_.alpha_init;
@@ -241,10 +251,11 @@ double RankInflation::backtrack_line_search(const Matrix& Y, const Matrix& dY,
   return alpha;
 }
 
-SpMatrix RankInflation::build_wt_sum_constraints(const Vector& coeffs,
+template <typename MatType>
+MatType RankInflation<MatType>::build_wt_sum_constraints(const Vector& coeffs,
                                                  double tol) const {
   // 1. Calculate the weighted sum of the upper-triangular parts
-  SpMatrix upperSum = coeffs[0] * A_[0];
+  MatType upperSum = coeffs[0] * A_[0];
   for (size_t i = 1; i < A_.size(); ++i) {
     if (std::abs(coeffs(i)) > tol) {
       upperSum += coeffs[i] * A_[i];
@@ -254,13 +265,13 @@ SpMatrix RankInflation::build_wt_sum_constraints(const Vector& coeffs,
   // 2. Reflect the upper triangle into the lower triangle to get the full
   // matrix .selfadjointView<Eigen::Upper>() treats the matrix as symmetric and
   // the assignment to a SparseMatrix fills in the missing entries.
-  SpMatrix fullMatrix = upperSum.selfadjointView<Eigen::Upper>();
+  MatType fullMatrix = upperSum.template selfadjointView<Eigen::Upper>();
 
-  fullMatrix.makeCompressed();
   return fullMatrix;
 }
 
-std::pair<Matrix, Matrix> RankInflation::get_geodesic_step(
+template <typename T>
+std::pair<Matrix, Matrix> RankInflation<T>::get_geodesic_step(
     int rank, bool second_order) const {
   // Get normalized direction in the tangent space
   int nulldim = qr_jacobian.nullspace_basis.cols();
@@ -273,7 +284,7 @@ std::pair<Matrix, Matrix> RankInflation::get_geodesic_step(
     Vector rhs(m);
     for (int i = 0; i < m; i++) {
       if (i < A_.size()) {
-        rhs(i) = -(V.transpose() * A_[i].selfadjointView<Eigen::Upper>() * V)
+        rhs(i) = -(V.transpose() * A_[i].template selfadjointView<Eigen::Upper>() * V)
                       .trace();
       } else {
         rhs(i) = -(V.transpose() * C_ * V).trace();
@@ -290,7 +301,8 @@ std::pair<Matrix, Matrix> RankInflation::get_geodesic_step(
   return {V, W};
 }
 
-Matrix RankInflation::build_sec_ord_corr_hessian(
+template <typename T>
+Matrix RankInflation<T>::build_sec_ord_corr_hessian(
     const Vector& violation) const {
   // build weighted sum of constraint matrices with violation values
   auto f_A = build_wt_sum_constraints(violation, params_.tol_viol_hess);
@@ -301,7 +313,8 @@ Matrix RankInflation::build_sec_ord_corr_hessian(
   return hess_corr * 2;
 }
 
-std::pair<Matrix, Vector> RankInflation::build_proj_corr_grad_hess(
+template <typename T>
+std::pair<Matrix, Vector> RankInflation<T>::build_proj_corr_grad_hess(
     const Vector& violation, const Matrix& basis, const Vector& delta_n) const {
   // Get rank of current solution
   int r = basis.rows() / dim;
@@ -323,7 +336,8 @@ std::pair<Matrix, Vector> RankInflation::build_proj_corr_grad_hess(
   return {hess, grad};
 }
 
-Matrix RankInflation::build_certificate(const Matrix& Jac,
+template <typename T>
+Matrix RankInflation<T>::build_certificate(const Matrix& Jac,
                                         const Matrix& Y) const {
   // Get components of stationarity condition
   // vec(C*Y) is last row of jacobian, split it off
@@ -347,7 +361,8 @@ Matrix RankInflation::build_certificate(const Matrix& Jac,
   return H;
 }
 
-std::pair<double, double> RankInflation::check_certificate(
+template <typename T>
+std::pair<double, double> RankInflation<T>::check_certificate(
     const Matrix& H, const Matrix& Y) const {
   // Evaluate the stationarity condition
   double first_order_norm = (H * Y).norm();
@@ -359,5 +374,9 @@ std::pair<double, double> RankInflation::check_certificate(
   return {min_eig, first_order_norm};
 }
 
+// Template Instantiations
+template class RankInflation<Eigen::MatrixXd>;
+template class RankInflation<Eigen::SparseMatrix<double>>;
 
 }  // namespace SDPTools
+

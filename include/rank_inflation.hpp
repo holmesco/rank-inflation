@@ -1,4 +1,6 @@
 #pragma once
+#include <variant>
+
 #include "utils.hpp"
 
 namespace SDPTools {
@@ -78,14 +80,18 @@ struct RankInflateParams {
   bool reduce_violation_ac = true;
   // max number of iterations for centering
   int max_iter_ac = 50;
-  
+
   // max number of iterations for adaptive centering
   int max_iter_adaptive_ac = 20;
-  // initial delta for centering (should be large enough to ensure good convergence even for low rank solutions, but not too large to cause slow convergence)
+  // initial delta for centering (should be large enough to ensure good
+  // convergence even for low rank solutions, but not too large to cause slow
+  // convergence)
   double delta_init_ac = 1e-7;
-  // final delta for centering (should be small to get close to boundary, but not too small to cause numerical issues)
+  // final delta for centering (should be small to get close to boundary, but
+  // not too small to cause numerical issues)
   double delta_min_ac = 1e-9;
-  // update factor for adjusting delta in adaptive centering (should be between zero and one, smaller values lead to more conservative updates)
+  // update factor for adjusting delta in adaptive centering (should be between
+  // zero and one, smaller values lead to more conservative updates)
   double adapt_factor_ac = 0.5;
 
   // line search enable for analytic center
@@ -95,7 +101,9 @@ struct RankInflateParams {
   double tol_bisect_ac = 1e-6;
 };
 
-class RankInflation {
+// Templated to deal with sparse and dense matrices
+template <typename MatType>
+class RankInflation{
  public:
   // dimension of the sdp
   // NOTE: if required we could template on size to make things faster
@@ -106,10 +114,12 @@ class RankInflation {
   const Matrix C_;
   // optimal cost value
   const double rho_;
-  // constraint matrices
-  const std::vector<Eigen::SparseMatrix<double>>& A_;
+  // constraint matrices use 
+  const std::vector<MatType> A_;
+  // flag to indicate that the constraints are dense
+  bool dense_constraints;
   // constraint values
-  const std::vector<double>& b_;
+  const std::vector<double> b_;
   // parameters
   RankInflateParams params_;
   // Store QR decomposition results
@@ -117,9 +127,9 @@ class RankInflation {
   mutable QRResult qr_hessian;
 
   // Constructor
-  RankInflation(const Matrix& C, double rho,
-                const std::vector<Eigen::SparseMatrix<double>>& A,
-                const std::vector<double>& b, RankInflateParams params);
+  RankInflation(const Matrix C, double rho,
+                const std::vector<MatType> A,
+                const std::vector<double> b, RankInflateParams params);
 
   // Evaluate constraints (and cost if enabled) and compute the gradients
   Vector eval_constraints(const Matrix& Y, Matrix& Jac) const;
@@ -169,7 +179,7 @@ class RankInflation {
   // Build weighted sum of constraint matrices: sum_i A_i * lambda_i
   // If the coefficient falls below `tol` then the corresponding constraint is
   // not added to the sum
-  SpMatrix build_wt_sum_constraints(const Vector& coeffs,
+  MatType build_wt_sum_constraints(const Vector& coeffs,
                                     double tol = 0.0) const;
 
   // Compute the second order correction Hessian projected into a given basis
@@ -223,6 +233,9 @@ class RankInflation {
   // bisection on the derivative is sufficient
   std::pair<ScalarFunc, ScalarFunc> analytic_center_line_search_func(
       const Matrix& Z, const Matrix& Aw) const;
+
+  // Retrieve a reduced version of the problem using the basis given by V.
+  RankInflation<Matrix> get_reduced_problem(const Matrix& V) const;
 };
 
 }  // namespace SDPTools
