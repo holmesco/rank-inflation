@@ -31,6 +31,15 @@ find_package(Boost REQUIRED)
 find_package(Boost REQUIRED COMPONENTS filesystem system)
 message(STATUS "Boost Version: ${Boost_VERSION}")
 
+# ----- MOSEK ------ 
+# Define MOSEK paths (Update these to your actual paths)
+set(MOSEK_DIR "/opt/mosek/11.1/tools/platform/linux64x86")
+set(MOSEK_INCLUDE_DIR "${MOSEK_DIR}/h")
+set(MOSEK_BIN_DIR "${MOSEK_DIR}/bin")
+# include dirs and add lib
+include_directories(${MOSEK_INCLUDE_DIR})
+find_library(MOSEK_LIB mosek64 PATHS ${MOSEK_BIN_DIR})
+find_library(FUSION_LIB fusion64 PATHS ${MOSEK_BIN_DIR})
 
 if(BUILD_TESTS)
   FetchContent_Declare(
@@ -65,6 +74,7 @@ target_link_libraries(rank_inflation PRIVATE
     Boost::system)
 target_link_libraries(rank_inflation PUBLIC Eigen3::Eigen)
 target_link_libraries(rank_inflation PUBLIC OpenMP::OpenMP_CXX)
+target_link_libraries(rank_inflation PUBLIC ${FUSION_LIB} ${MOSEK_LIB})
 
 # debug flag  
 if(DEBUG_FLAG)
