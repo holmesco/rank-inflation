@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y \
     libopenblas-dev \
     libboost-all-dev \
     nvtop \
+    bzip2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install IPOPT
@@ -60,36 +61,59 @@ ENV LANGUAGE en_US:en
 ENV LC_ALL en_US.UTF-8
 
 # Install original clipper
-RUN mkdir extern/clipper/build \
-    && cd extern/clipper/build \
-    && cmake .. \
-    && make \
-    && make pip-install 
+COPY ./clipper /opt/clipper/
+RUN if [ -d /opt/clipper/build ]; then rm -rf /opt/clipper/build; fi && \
+    mkdir -p /opt/clipper/build && cd /opt/clipper/build &&\
+    cmake .. && make && make pip-install 
 
-# Install libraries for SuiteSparse
-RUN apt-get update && apt-get install -y \
-    libblas-dev \
-    liblapack-dev \
-    && rm -rf /var/lib/apt/lists/*
+# SuiteSparse Requires IntelMKL to work. Add this later
+# # Install libraries for SuiteSparse
+# RUN apt-get update && apt-get install -y \
+#     libblas-dev \
+#     liblapack-dev \
+#     && rm -rf /var/lib/apt/lists/*
+
 # Install SuiteSparse from scratch (assumed already cloned to extern/SuiteSparse)
-RUN cd extern/SuiteSparse \
-    && mkdir -p build && cd build \
-    && cmake .. \
-    && cmake --build . \
-    && cmake --install .
+# COPY ./SuiteSparse/ /opt/SuiteSparse/
+# RUN if [ -d /opt/SuiteSparse/build ]; then rm -rf /opt/SuiteSparse/build; fi && \
+#     mkdir -p /opt/SuiteSparse/build && cd /opt/SuiteSparse/build && \
+#     cmake .. && cmake --build . && cmake --install .
 
-
+# Install mosek
+ADD mosektoolslinux64x86.tar.bz2 /opt
+RUN cd /opt/mosek/11.1/tools/platform/linux64x86/src/fusion_cxx && make install
+# Set Environment Variables
+ENV MOSEK_HOME="/opt/mosek/11.1/tools/platform/linux64x86"
+ENV PATH="${MOSEK_HOME}/bin:${PATH}"
+ENV LD_LIBRARY_PATH="${MOSEK_HOME}/bin:${LD_LIBRARY_PATH}"
+# Add license
+COPY mosek.lic /opt/mosek/
+ENV MOSEKLM_LICENSE_FILE="/opt/mosek/mosek.lic"
 
 # Set up user inside container to avoid issues with permissions.
 ARG USERNAME=cho
 ARG USER_UID=1094
 ARG USER_GID=1094
 
-RUN groupadd --gid $USER_GID $USERNAME \
-&& useradd --uid $USER_UID --gid $USER_GID -m $USERNAME \
-&& chown -R $USERNAME /opt/conda
+# Create the user and group
+# We use the ":-" syntax to handle empty or unset variables
+RUN GROUP_ID=${USER_GID:-1000} && \
+    USER_ID=${USER_UID:-1000} && \
+    # Create group: if it exists, just exit success (-f)
+    groupadd -f --gid ${GROUP_ID} ${USERNAME} || true && \
+    # Create user: assign to the group we just made/verified
+    useradd --uid ${USER_ID} --gid ${GROUP_ID} -m ${USERNAME} || true && \
+    # Add sudo support
+    apt-get update && apt-get install -y sudo && \
+    echo "${USERNAME} ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} && \
+    chmod 0440 /etc/sudoers.d/${USERNAME}
 
-RUN chown -R $USERNAME /opt/cuHALLaR
+# Change any ownerships here
+RUN chown -R $USERNAME /opt/cuHALLaR \
+&& chown -R $USERNAME /opt/conda \
+# && chown -R $USERNAME /opt/SuiteSparse \
+&& chown -R $USERNAME /opt/clipper 
 
+# switch to user and set workspace
 USER $USERNAME
 WORKDIR /workspace

@@ -1,8 +1,13 @@
 {
-  "name": "clipperp-cert-dev",
+  "name": "rank-inflation-dev",
   "build": {
     "context": "../extern",
-    "dockerfile": "Dockerfile"
+    "dockerfile": "Dockerfile",
+    "args": {
+      "USERNAME": "${localEnv:USER}",
+      "USER_UID": "${localEnv:UID}",
+      "USER_GID": "${localEnv:UID}" // GID same as UID
+    }
   },
   "runArgs": [
     "--gpus=all",
