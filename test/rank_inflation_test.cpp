@@ -481,11 +481,12 @@ TEST_P(InflationParamTest, CertWithCenter) {
             << Eigen::SelfAdjointEigenSolver<Matrix>(X).eigenvalues()
             << std::endl;
   // Recover low rank solution
-  Matrix Y = recover_lowrank_factor(X, 0.0);
+  Matrix Y = get_positive_eigspace(X, params.tol_rank_sol);
   auto Jac = Matrix(problem.m, Y.cols() * sdp.dim);
   auto violation = problem.retraction(Y, Jac);
   std::cout << "Violation at Analytic Center: " << violation.norm()
             << std::endl;
+  std::cout << "rank of recovered solution: " << get_rank(Y, 1e-5) << std::endl;
   // Build certificate
   auto H = problem.build_certificate(Jac, Y);
   // std::cout << "Certificate Matrix: " << std::endl << H << std::endl;
