@@ -65,7 +65,7 @@ Matrix get_positive_eigspace(const Matrix& mat, double threshold) {
   // 1. Count positive eigenvalues
   int positiveCount = 0;
   for (int i = evals.size() - 1; i >= 0; --i) {
-    if (evals[i] > threshold*evals[0]) {  // relative threshold to handle scale
+    if (evals[i] > threshold) {  // relative threshold to handle scale
       positiveCount++;
     } else {
       break;

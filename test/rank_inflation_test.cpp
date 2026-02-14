@@ -1,220 +1,15 @@
 /*
 c++ tests for rank inflation
 */
-#include "rank_inflation.hpp"
+#include "test_harness.hpp"
+#include "interior_point_sdp.hpp"
 
-#include <gtest/gtest.h>
-#include <stdio.h>
-#include <stdlib.h>
-
-#include <Eigen/Dense>
-#include <algorithm>
-#include <iostream>
-#include <utility>
 
 using namespace SDPTools;
-using Edge = std::pair<int, int>;
-using Triplet = Eigen::Triplet<double>;
-
-// Test case data structure
-struct SDPTestProblem {
-  int dim;     // matrix dimension
-  Matrix C;    // cost
-  double rho;  // scalar offset
-  std::vector<Eigen::SparseMatrix<double>> A;
-  std::vector<double> b;
-  Matrix soln;
-  std::string name;
-
-  // Retrieve zero padded solution for testing.
-  Matrix make_solution(int rank) const {
-    Matrix zpad = Matrix::Zero(dim, rank - soln.cols());
-    Matrix Y(dim, rank);
-    Y << soln, zpad;
-    return Y;
-  }
-
-  RankInflation make(const RankInflateParams& params) const {
-    return RankInflation(C, rho, A, b, params);
-  }
-};
 
 // Fixture Class
 class InflationParamTest : public ::testing::TestWithParam<SDPTestProblem> {};
 
-// ----------- Lovasc Theta Helper Functions ----------------
-
-// Compute edges from adjacency, only provide upper triangle indices
-std::pair<std::vector<Edge>, std::vector<Edge>> get_edges(const Matrix& adj) {
-  std::vector<Edge> edges;
-  std::vector<Edge> nonedges;
-  for (int i = 0; i < adj.rows(); i++) {
-    for (int j = i + 1; j < adj.rows(); j++) {
-      if (adj(i, j) > 0.0) {
-        edges.push_back({i, j});
-      } else {
-        nonedges.push_back({i, j});
-      }
-    }
-  }
-  return {edges, nonedges};
-}
-
-// Convert adjancency to rank inflation problem
-std::vector<Eigen::SparseMatrix<double>> get_lovasz_constraints(
-    int dim, std::vector<Edge> nonedges) {
-  // generate constraints
-  std::vector<Eigen::SparseMatrix<double>> A;
-  std::vector<double> b;
-  for (auto edge : nonedges) {
-    // define sparse matrix
-    A.emplace_back(dim, dim);
-    std::vector<Triplet> tripletList;
-    tripletList.push_back(Triplet(edge.first, edge.second, 1.0));
-    A.back().setFromTriplets(tripletList.begin(), tripletList.end());
-  }
-  // Trace constraint
-  A.emplace_back(dim, dim);
-  A.back().setIdentity();
-  return A;
-}
-
-SDPTestProblem make_lovasz_test_case(const Eigen::MatrixXd& adj,
-                                     std::vector<int> clique,
-                                     std::string name) {
-  int dim = adj.rows();
-  auto [edges, nonedges] = get_edges(adj);
-
-  SDPTestProblem sdp;
-  // get cost and optimal solution
-  sdp.dim = dim;
-  sdp.C = -Matrix::Ones(dim, dim);
-  sdp.rho = -static_cast<double>(clique.size());
-  // get constraints
-  sdp.A = get_lovasz_constraints(dim, nonedges);
-  sdp.b.assign(sdp.A.size(), 0.0);
-  sdp.b.back() = 1.0;
-
-  // get solution
-  sdp.soln = Vector::Zero(dim);
-  double s = std::sqrt(1.0 / clique.size());
-  for (int i : clique) {
-    sdp.soln(i, 0) = s;
-  }
-  sdp.name = "LovaszTheta_" + name;
-  return sdp;
-}
-
-// ------------ Lovasz-Theta Data Matrices ------------
-static Matrix clique1_adj =
-    (Matrix(10, 10) << 0, 0, 1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 0, 1, 1, 1,
-     1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1,
-     0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1,
-     0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1,
-     1, 1, 0, 1, 1, 0)
-        .finished();
-static Matrix clique2_adj =
-    (Eigen::MatrixXd(10, 10) << 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1,
-     1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1,
-     1, 1, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1,
-     0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1,
-     1, 1, 1, 0, 1, 1, 1, 1, 0)
-        .finished();
-static Matrix clique3_adj =
-    (Eigen::MatrixXd(20, 20) << 0, 0, 1, 0, 0, 1, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1,
-     1, 1, 0, 1, 0, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1,
-     1, 0, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 0, 0, 1,
-     1, 1, 1, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1,
-     1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 1, 0, 1, 1, 1, 0, 0, 1,
-     1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1,
-     1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1,
-     1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 0, 1, 0, 0, 0, 1, 0, 1,
-     1, 0, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1,
-     1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0,
-     1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 1, 1, 0, 1, 1, 0,
-     1, 1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1,
-     1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
-     1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 1, 1, 0, 1, 1, 0, 1,
-     0, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0, 1, 1, 1, 1, 1,
-     1, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 1, 1,
-     1, 1, 1, 1, 0, 0, 1, 1, 0)
-        .finished();
-static Matrix clique4_adj = (Eigen::MatrixXd(5, 5) << 0, 1, 1, 0, 0, 1, 0, 1, 0,
-                             0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0)
-                                .finished();
-
-// Get factorized solution to two sphere problem
-// It is assumed that weights is normalized and its length is 1-dim
-Matrix make_two_sphere_soln(double r1, double r2, double d, Vector weights) {
-  int n = weights.size() + 1;
-  // Feasible point on intersection
-  double alpha = (r1 * r1 - r2 * r2 + d * d) / (2 * d);
-  double beta = std::sqrt(r1 * r1 - alpha * alpha);
-
-  // Construct Y matrix
-  auto Y = Matrix::Zero(n + 1, n - 1).eval();
-  for (int i = 0; i < n - 1; i++) {
-    Y(0, i) = alpha;
-    Y(i + 1, i) = beta;
-    Y(n, i) = 1.0;
-  }
-
-  return Y * weights.cwiseSqrt().asDiagonal();
-}
-// Generate an n-dimensional intersection problem between two spheres of radius
-// r1 and r2 that are spaced d distance apart along the first axis
-SDPTestProblem make_two_sphere_sdp(int n, double r1, double r2, double d) {
-  assert(d < r1 + r2 &&
-         "distance must be strictly less than the sum of the two radii");
-  Eigen::VectorXd c1 = Eigen::VectorXd::Zero(n);
-  Eigen::VectorXd c2 = Eigen::VectorXd::Zero(n);
-  c2(0) = d;  // shift along x-axis
-
-  int dim = n + 1;  // homogenizing variable t
-
-  SDPTestProblem sdp;
-  sdp.dim = dim;
-
-  auto make_Q = [dim, n](const Eigen::VectorXd& c, double r) {
-    Eigen::SparseMatrix<double> A(dim, dim);
-    std::vector<Eigen::Triplet<double>> T;
-    for (int i = 0; i < n; ++i) T.emplace_back(i, i, 1.0);  // x^T x
-    for (int i = 0; i < n; ++i) {
-      T.emplace_back(i, n, -c(i));
-      T.emplace_back(n, i, -c(i));
-    }
-    T.emplace_back(n, n, c.squaredNorm() - r * r);
-    A.setFromTriplets(T.begin(), T.end());
-    return A;
-  };
-
-  sdp.A.push_back(make_Q(c1, r1));
-  sdp.b.push_back(0.0);
-
-  // sdp.C = Matrix::Zero(dim, dim);
-  // sdp.rho = 0.0;
-  // sdp.A.push_back(make_Q(c2, r2));
-  // sdp.b.push_back(0.0);
-
-  // Set second sphere as cost
-  sdp.C = make_Q(c2, r2);
-  sdp.rho = 0.0;
-
-  // t^2 = 1
-  Eigen::SparseMatrix<double> At(dim, dim);
-  At.insert(n, n) = 1.0;
-  sdp.A.push_back(At);
-  sdp.b.push_back(1.0);
-
-  // Generate low rank solution
-  auto weights = Vector::Zero(n - 1).eval();
-  weights(0) = 1.0;
-  sdp.soln = make_two_sphere_soln(r1, r2, d, weights);
-
-  sdp.name = "TwoSphereDim" + std::to_string(n);
-
-  return sdp;
-}
 
 // ------------------  TESTS -----------------------
 // Test constraint evaluation and gradient function
@@ -504,7 +299,7 @@ TEST_P(InflationParamTest, CertWithCenter) {
   std::cout << "First Order Condition Norm: " << first_ord_cond << std::endl;
 }
 
-TEST_P(InflationParamTest, AnalyticCenterFixedPerturb) {
+TEST_P(InflationParamTest, AnalyticCenter) {
   const auto& sdp = GetParam();
   // parameters
   RankInflateParams params;
@@ -522,70 +317,48 @@ TEST_P(InflationParamTest, AnalyticCenterFixedPerturb) {
   // check that the center is PSD
   Eigen::SelfAdjointEigenSolver<Matrix> es(X);
   for (int i = 0; i < es.eigenvalues().size(); ++i) {
+    std::cout << "Eigenvalue " << i << ": " << es.eigenvalues()(i) << std::endl;
     EXPECT_GE(es.eigenvalues()(i), -delta) << "Analytic center is not PSD";
   }
   // Check objective decrease
   std::cout << "Analytic Center Objective initially: " << obj_0 << std::endl;
-  std::cout << "Analytic Center Objective at Low Rank Init: " << obj_star
+  std::cout << "Analytic Center Objective solution: " << obj_star
             << std::endl;
   EXPECT_LT(obj_star, obj_0) << "Analytic center objective did not improve";
   // Check for rank increase
-  auto rank_0 = get_rank(X0, 1e-6);
-  auto rank_star = get_rank(X, 1e-6);
+  auto rank_0 = Y.cols();
+  auto Y_sol = get_positive_eigspace(X, params.tol_rank_sol);
+  auto rank_star = Y_sol.cols();
   std::cout << "Rank at Init: " << rank_0 << ", Rank at Center: " << rank_star
             << std::endl;
   EXPECT_GE(rank_star, rank_0) << "Rank did not increase at analytic center";
+  // Compare with rank of Interior point solution
+  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b, false);
+  auto Y_mosek = get_positive_eigspace(mosek_soln.X, params.tol_rank_sol);
+  auto rank_mosek = Y_mosek.cols();
+  std::cout << "Rank at IP Solution: " << rank_mosek << std::endl;
+  EXPECT_EQ(rank_star, rank_mosek) << "Rank at center is not equal to Mosek solution rank";
 
-  // Recover low rank solution
-  Matrix Y_hr = recover_lowrank_factor(X, 1e-10);
-  auto Jac = Matrix(problem.m, Y_hr.cols() * sdp.dim);
-  auto violation = problem.retraction(Y_hr, Jac);
-  std::cout << "Violation After Retraction: " << violation.norm()
-            << std::endl;
-  std::cout << "rank of recovered solution: " << get_rank(Y_hr, 1e-5) << std::endl;
+  // Norm of the difference between the IP solution and the center solution should be small
+  double diff_norm = (Y_sol * Y_sol.transpose() - Y_mosek*Y_mosek.transpose()).norm();
+  std::cout << "Norm of difference between center and Mosek solution: " << diff_norm << std::endl;
+  EXPECT_NEAR(diff_norm, 0.0, 1e-4) << "Analytic center solution is not close to Mosek solution";
 }
 
-TEST_P(InflationParamTest, AnalyticCenterAdaptive) {
-  const auto& sdp = GetParam();
-  // parameters
-  RankInflateParams params;
-  params.verbose = true;
-  params.delta_init_ac = 1e-7;
-  params.delta_min_ac = 1e-9;
-  params.adapt_factor_ac = 0.5;
-  // generate problem
-  auto problem = sdp.make(params);
-  auto Y = sdp.soln;
-  // Compute Analyic center starting from low rank solution
-  auto X0 = Y * Y.transpose();
-  auto X = problem.get_analytic_center_adaptive(X0);
-  // Compute analytic center objecive value
-  double obj_0 = problem.get_analytic_center_objective(X0, 1e-8);
-  double obj_star = problem.get_analytic_center_objective(X, 1e-8);
-  // check that the center is PSD
-  Eigen::SelfAdjointEigenSolver<Matrix> es(X);
-  for (int i = 0; i < es.eigenvalues().size(); ++i) {
-    EXPECT_GE(es.eigenvalues()(i), -params.delta_min_ac) << "Analytic center is not PSD";
-  }
-  // Check objective decrease
-  std::cout << "Analytic Center Objective initially: " << obj_0 << std::endl;
-  std::cout << "Analytic Center Objective at Low Rank Init: " << obj_star
-            << std::endl;
-  EXPECT_LT(obj_star, obj_0) << "Analytic center objective did not improve";
-  // Check for rank increase
-  auto rank_0 = get_rank(X0, 1e-6);
-  auto rank_star = get_rank(X, 1e-6);
-  std::cout << "Rank at Init: " << rank_0 << ", Rank at Center: " << rank_star
-            << std::endl;
-  EXPECT_GE(rank_star, rank_0) << "Rank did not increase at analytic center";
 
-  // Recover low rank solution
-  Matrix Y_hr = recover_lowrank_factor(X, 1e-10);
-  auto Jac = Matrix(problem.m, Y_hr.cols() * sdp.dim);
-  auto violation = problem.retraction(Y_hr, Jac);
-  std::cout << "Violation After Retraction: " << violation.norm()
-            << std::endl;
-  std::cout << "rank of recovered solution: " << get_rank(Y_hr, 1e-5) << std::endl;
+TEST_P(InflationParamTest, MosekSolve) {
+  const auto& sdp = GetParam();
+  // solve sdp using Mosek to get dual solution
+  
+  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b);
+  //print objective value
+  std::cout << "Mosek Primal Objective: " << mosek_soln.obj_value << std::endl;
+  // print the solution rank
+  Eigen::SelfAdjointEigenSolver<Matrix> es(mosek_soln.X);
+  std::cout << "Mosek Solution Eigenvalues: " << std::endl << es.eigenvalues() << std::endl;
+  std::cout << "Mosek Solution Rank: " << get_rank(mosek_soln.X, 1e-6) << std::endl;
+  // Check that objective matches rho 
+  EXPECT_NEAR(mosek_soln.obj_value, sdp.rho, 1e-6) << "Mosek objective does not match expected value at analytic center"; 
 }
 
 TEST(AnalyticCenter, LineSearchFunctions) {
@@ -655,6 +428,8 @@ TEST(InflationParamTest, LowRankRecovery) {
   EXPECT_NEAR(diff, 0.0, tol);
   EXPECT_TRUE(Y.cols() == Y0.cols());
 }
+
+
 
 INSTANTIATE_TEST_SUITE_P(
     RankInflationSuite, InflationParamTest,

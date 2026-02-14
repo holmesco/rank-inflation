@@ -59,7 +59,8 @@ mosek::fusion::Matrix::t eigenToMosekDense(const Eigen::MatrixXd& eigenMat) {
 // Solve and return primal and duals
 SDPResult solve_sdp_mosek(const Eigen::MatrixXd& C,
                           const std::vector<Eigen::SparseMatrix<double>>& As,
-                          const Eigen::VectorXd& b) {
+                          const std::vector<double>& b,
+                        bool verbose) {
   const int n = static_cast<int>(C.rows());
   if (C.cols() != n) throw std::runtime_error("C must be square");
   if (static_cast<int>(As.size()) != b.size())
@@ -83,12 +84,15 @@ SDPResult solve_sdp_mosek(const Eigen::MatrixXd& C,
   for (int k = 0; k < m; ++k) {
     auto Amat = eigenToMosekSparse(As[k]);
     Constraint::t c = M->constraint("c" + std::to_string(k), Expr::dot(Amat, X),
-                                    Domain::equalsTo(b(k)));
+                                    Domain::equalsTo(b[k]));
     cons.push_back(c);
   }
   // Enable verbose logging to stdout
-  M->setLogHandler(
-      [](const std::string& msg) { std::cout << msg << std::flush; });
+  if (verbose){
+    M->setLogHandler(
+        [](const std::string& msg) { std::cout << msg << std::flush; });
+  }
+  
   // Solve
   M->solve();
 
@@ -126,6 +130,7 @@ SDPResult solve_sdp_mosek(const Eigen::MatrixXd& C,
   res.X = std::move(Xsym);
   res.y = std::move(y);
   res.S = std::move(Ssym);
+  res.obj_value = M->primalObjValue();
   return res;
 }
 }  // namespace SDPTools
