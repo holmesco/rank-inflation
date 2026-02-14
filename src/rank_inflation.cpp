@@ -241,8 +241,7 @@ double RankInflation::backtrack_line_search(const Matrix& Y, const Matrix& dY,
   return alpha;
 }
 
-SpMatrix RankInflation::build_wt_sum_constraints(const Vector& coeffs,
-                                                 double tol) const {
+SpMatrix RankInflation::build_adjoint(const Vector& coeffs, double tol) const {
   // 1. Calculate the weighted sum of the upper-triangular parts
   SpMatrix upperSum = coeffs[0] * A_[0];
   for (size_t i = 1; i < A_.size(); ++i) {
@@ -293,7 +292,7 @@ std::pair<Matrix, Matrix> RankInflation::get_geodesic_step(
 Matrix RankInflation::build_sec_ord_corr_hessian(
     const Vector& violation) const {
   // build weighted sum of constraint matrices with violation values
-  auto f_A = build_wt_sum_constraints(violation, params_.tol_viol_hess);
+  auto f_A = build_adjoint(violation, params_.tol_viol_hess);
   // add cost term if required
   Matrix hess_corr;
   hess_corr = C_ * violation(violation.size() - 1) + f_A;
@@ -323,7 +322,17 @@ std::pair<Matrix, Vector> RankInflation::build_proj_corr_grad_hess(
   return {hess, grad};
 }
 
-Matrix RankInflation::build_certificate(const Matrix& Jac,
+Matrix RankInflation::build_certificate_from_dual(const Vector& multipliers) const {
+  // build weighted sum of constraint matrices with multiplier values
+  auto f_A = build_adjoint(multipliers, params_.tol_viol_hess);
+  // add cost term if required
+  Matrix H;
+  H = C_ + f_A;
+
+  return H;
+}
+
+Matrix RankInflation::build_certificate_from_primal(const Matrix& Jac,
                                         const Matrix& Y) const {
   // Get components of stationarity condition
   // vec(C*Y) is last row of jacobian, split it off
@@ -338,11 +347,9 @@ Matrix RankInflation::build_certificate(const Matrix& Jac,
             << std::endl;
   std::cout << "R diagonal: " << result.R_diagonal.transpose() << std::endl;
 
-  Vector lagrange = result.solution;
-  // Build the certificate matrix
-  auto H_sp = build_wt_sum_constraints(lagrange);
-  // Add cost matrix and store as dense
-  Matrix H = C_ + H_sp;
+  Vector multipliers = result.solution;
+  // build certificate matrix
+  auto H = build_certificate_from_dual(multipliers);
 
   return H;
 }
@@ -358,6 +365,5 @@ std::pair<double, double> RankInflation::check_certificate(
 
   return {min_eig, first_order_norm};
 }
-
 
 }  // namespace SDPTools

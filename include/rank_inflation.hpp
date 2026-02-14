@@ -78,14 +78,18 @@ struct RankInflateParams {
   bool reduce_violation_ac = true;
   // max number of iterations for centering
   int max_iter_ac = 50;
-  
+
   // max number of iterations for adaptive centering
   int max_iter_adaptive_ac = 20;
-  // initial delta for centering (should be large enough to ensure good convergence even for low rank solutions, but not too large to cause slow convergence)
+  // initial delta for centering (should be large enough to ensure good
+  // convergence even for low rank solutions, but not too large to cause slow
+  // convergence)
   double delta_init_ac = 1e-7;
-  // final delta for centering (should be small to get close to boundary, but not too small to cause numerical issues)
+  // final delta for centering (should be small to get close to boundary, but
+  // not too small to cause numerical issues)
   double delta_min_ac = 1e-9;
-  // update factor for adjusting delta in adaptive centering (should be between zero and one, smaller values lead to more conservative updates)
+  // update factor for adjusting delta in adaptive centering (should be between
+  // zero and one, smaller values lead to more conservative updates)
   double adapt_factor_ac = 0.5;
 
   // line search enable for analytic center
@@ -148,7 +152,10 @@ class RankInflation {
 
   // Build the optimality certificate for the problem using the KKT Jacobian
   // and the (high rank) solution
-  Matrix build_certificate(const Matrix& Jac, const Matrix& Y) const;
+  Matrix build_certificate_from_primal(const Matrix& Jac, const Matrix& Y) const;
+
+  // Build the optimality certificate for the problem using the optimal multipliers
+  Matrix build_certificate_from_dual(const Vector& multipliers) const;
 
   // Check global optimality of a solution
   // Returns the minimum eigenvalue of the certificate matrix and the evaluation
@@ -169,8 +176,7 @@ class RankInflation {
   // Build weighted sum of constraint matrices: sum_i A_i * lambda_i
   // If the coefficient falls below `tol` then the corresponding constraint is
   // not added to the sum
-  SpMatrix build_wt_sum_constraints(const Vector& coeffs,
-                                    double tol = 0.0) const;
+  SpMatrix build_adjoint(const Vector& coeffs, double tol = 0.0) const;
 
   // Compute the second order correction Hessian projected into a given basis
   std::pair<Matrix, Vector> build_proj_corr_grad_hess(
@@ -198,12 +204,13 @@ class RankInflation {
   // Delta represents a perturbation parameter to ensure we stay in the interior
   // of the PSD cone even when the solution is low rank. If delta is zero then
   // no perturbation is applied.
-  Matrix get_analytic_center(const Matrix& X_0, double delta = 0.0) const;
+  std::pair<Matrix,Vector> get_analytic_center(const Matrix& X_0, double delta_obj = 0.0,
+                             double delta_constraint = 0.0) const;
 
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
-  std::pair<Vector, Vector> solve_analytic_center_system(const Matrix& Z,
-                                                         const Matrix& X) const;
+  std::pair<Vector, Vector> solve_analytic_center_system(
+      const Matrix& Z, const Matrix& X, double delta_constraint) const;
 
   double get_analytic_center_objective(const Matrix& X, double delta) const {
     auto I = Matrix::Identity(X.rows(), X.cols());

@@ -5,9 +5,10 @@ namespace SDPTools {
 Matrix RankInflation::get_analytic_center_adaptive(const Matrix& X_0) const {
   double delta = params_.delta_init_ac;
   auto X = X_0;
+  Vector multipliers(m);
   while (delta >= params_.delta_min_ac) {
     // Compute analytic center for current delta
-    X = get_analytic_center(X, delta);
+    std::tie(X, multipliers) = get_analytic_center(X, delta);
     // Update delta
     delta *= params_.adapt_factor_ac;
     if (params_.verbose) {
@@ -19,21 +20,24 @@ Matrix RankInflation::get_analytic_center_adaptive(const Matrix& X_0) const {
   return X;
 }
 
-Matrix RankInflation::get_analytic_center(const Matrix& X_0,
-                                          double delta) const {
+std::pair<Matrix, Vector> RankInflation::get_analytic_center(
+    const Matrix& X_0, double delta_obj, double delta_constraint) const {
   // Initialize
   int n_iter = 0;
   Matrix X = X_0;
-  double f_val = get_analytic_center_objective(X, delta);
+  double f_val = get_analytic_center_objective(X, delta_obj);
+  Vector violation(m);
+  Vector multipliers(m);
   // Main loop
   while (n_iter < params_.max_iter_ac) {
     // Define perturbed version of X
-    Matrix Z = X + Matrix::Identity(dim, dim) * delta;
+    Matrix Z = X + Matrix::Identity(dim, dim) * delta_obj;
     // Get system of equations
-    auto [multipliers, violation] = solve_analytic_center_system(Z, X);
+    std::tie(multipliers, violation) =
+        solve_analytic_center_system(Z, X, delta_constraint);
 
     // Get step direction
-    auto Aw_sp = build_wt_sum_constraints(multipliers);
+    auto Aw_sp = build_adjoint(multipliers);
     Matrix Aw = C_ * multipliers(m - 1) + Aw_sp;
     // Line search to find optimal step size
     double alpha = 1.0;
@@ -50,7 +54,7 @@ Matrix RankInflation::get_analytic_center(const Matrix& X_0,
       // Objective value
       if (!params_.enable_line_search_ac) {
         // Evaluate objective at new solution
-        f_val = get_analytic_center_objective(X, delta);
+        f_val = get_analytic_center_objective(X, delta_obj);
       }
       // get rank of solution
       int sol_rank = get_rank(X, params_.tol_rank_sol);
@@ -66,32 +70,46 @@ Matrix RankInflation::get_analytic_center(const Matrix& X_0,
     // Stopping Condition
     if (deltaX.norm() < params_.tol_step_norm_ac) break;
   }
-  return X;
+
+  // get the multipliers for the original SDP at the analytic center solution
+  auto mult_scaled = multipliers.segment(0, m - 1);
+  if (std::abs(multipliers(m - 1)) > 0) {
+    mult_scaled /= multipliers(m - 1);
+  }
+  
+  return {X, mult_scaled};
 }
 
 std::pair<Vector, Vector> RankInflation::solve_analytic_center_system(
-    const Matrix& Z, const Matrix& X) const {
+    const Matrix& Z, const Matrix& X, double delta_constraint) const {
   // Construct AZ matrices, violation vector and d vector
   Vector d(m);
   Vector violation(m);
   std::vector<Matrix> AZ;
+  std::vector<double> A_trace;
   for (int i = 0; i < m; i++) {
     // compute violation
     if (i < A_.size()) {
       AZ.push_back(A_[i].selfadjointView<Eigen::Upper>() * Z);
       violation(i) =
           (A_[i].selfadjointView<Eigen::Upper>() * X).trace() - b_[i];
+      A_trace.push_back(A_[i].diagonal().sum());
     } else {
       AZ.push_back(C_ * Z);
       violation(i) = (C_ * X).trace() - rho_;
+      A_trace.push_back(C_.diagonal().sum());
     }
     d(i) = AZ.back().trace();
+    // add constraint perturbation
+    if (delta_constraint > 0.0) {
+      d(i) -= delta_constraint * A_trace.back();
+    }
   }
   // Construct the LHS matrix
-  Matrix C(m, m);
+  Matrix H(m, m);
   for (int i = 0; i < m; i++) {
     for (int j = i; j < m; j++) {
-      C(i, j) = (AZ[i] * AZ[j]).trace();
+      H(i, j) = (AZ[i] * AZ[j]).trace();
     }
   }
 
@@ -105,7 +123,7 @@ std::pair<Vector, Vector> RankInflation::solve_analytic_center_system(
   // Solve the linear equation with LDLT decomposition (includes pivoting by
   // default) Note: This method is preferred because the system is PSD, but
   // can be ill-conditioned, especially in early iterations
-  Eigen::LDLT<Eigen::MatrixXd> ldlt(C.selfadjointView<Eigen::Upper>());
+  Eigen::LDLT<Eigen::MatrixXd> ldlt(H.selfadjointView<Eigen::Upper>());
   // Check for success (critical for rank-deficient cases)
   if (ldlt.info() == Eigen::NumericalIssue || !ldlt.isPositive()) {
     std::cout << "The matrix is not PSD or has severe numerical issues."

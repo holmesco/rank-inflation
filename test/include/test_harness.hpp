@@ -1,7 +1,5 @@
 #pragma once
 
-#include "rank_inflation.hpp"
-
 #include <gtest/gtest.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,6 +8,8 @@
 #include <algorithm>
 #include <iostream>
 #include <utility>
+
+#include "rank_inflation.hpp"
 
 using namespace SDPTools;
 
@@ -35,7 +35,6 @@ struct SDPTestProblem {
     return RankInflation(C, rho, A, b, params);
   }
 };
-
 
 // ----------- Lovasc Theta Helper Functions ----------------
 
@@ -141,7 +140,6 @@ static Matrix clique4_adj = (Eigen::MatrixXd(5, 5) << 0, 1, 1, 0, 0, 1, 0, 1, 0,
                              0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0)
                                 .finished();
 
-
 // ----------- Two Sphere Helper Functions --------------
 
 // Get factorized solution to two sphere problem
@@ -175,8 +173,10 @@ SDPTestProblem make_two_sphere_sdp(int n, double r1, double r2, double d) {
 
   SDPTestProblem sdp;
   sdp.dim = dim;
-
-  auto make_Q = [dim, n](const Eigen::VectorXd& c, double r) {
+  
+  // Make the sphere constraint. Sphere centered at c with radius r is defined by the quadratic constraint:
+  // A . X == r^2, where A is [I, -c; -c^T, c^T c]
+  auto make_constraint = [dim, n](const Eigen::VectorXd& c) {
     Eigen::SparseMatrix<double> A(dim, dim);
     std::vector<Eigen::Triplet<double>> T;
     for (int i = 0; i < n; ++i) T.emplace_back(i, i, 1.0);  // x^T x
@@ -184,19 +184,18 @@ SDPTestProblem make_two_sphere_sdp(int n, double r1, double r2, double d) {
       T.emplace_back(i, n, -c(i));
       T.emplace_back(n, i, -c(i));
     }
-    T.emplace_back(n, n, c.squaredNorm() - r * r);
+    T.emplace_back(n, n, c.squaredNorm());
     A.setFromTriplets(T.begin(), T.end());
     return A;
   };
 
-  sdp.A.push_back(make_Q(c1, r1));
-  sdp.b.push_back(0.0);
-  sdp.A.push_back(make_Q(c2, r2));
-  sdp.b.push_back(0.0);
-
-  sdp.C = Matrix::Zero(dim, dim);
-  sdp.rho = 0.0;
-
+  sdp.A.push_back(make_constraint(c1));
+  sdp.b.push_back(r1 * r1);
+  // sdp.A.push_back(make_constraint(c2));
+  // sdp.b.push_back(r2*r2);
+  // Set cost to second constraint.
+  sdp.C = make_constraint(c2);
+  sdp.rho = r2 * r2;
 
   // t^2 = 1
   Eigen::SparseMatrix<double> At(dim, dim);

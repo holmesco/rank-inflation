@@ -229,8 +229,8 @@ TEST_P(InflationParamTest, GeodesicStep) {
       << "Norm of violation was worse with second order geodesic step";
 }
 
-// Test Certificate
-TEST_P(InflationParamTest, Certificate) {
+// CERTIFICATE TESTS
+TEST_P(InflationParamTest, CertWithInteriorPointSolution) {
   const auto& sdp = GetParam();
   // parameters
   RankInflateParams params;
@@ -238,28 +238,52 @@ TEST_P(InflationParamTest, Certificate) {
   params.max_sol_rank = sdp.dim;
   // generate problem
   RankInflation problem = sdp.make(params);
-  // get current solution
-  Matrix Y_0 = sdp.make_solution(params.max_sol_rank);
-  // Run rank inflation, without inflation (target rank is 1)
-  auto [Y, Jac] = problem.inflate_solution(Y_0);
+  // Get interior point solution
+  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b, false);
+  // Show eigenvalues of primal and dual solutions
+  std::cout << "Eigenvalues of Primal Solution: " << std::endl
+            << Eigen::SelfAdjointEigenSolver<Matrix>(mosek_soln.X).eigenvalues().transpose()
+            << std::endl;
+  std::cout << "Eigenvalues of Dual Solution: " << std::endl
+            << Eigen::SelfAdjointEigenSolver<Matrix>(mosek_soln.S).eigenvalues().transpose()
+            << std::endl;
+  // Low rank approximation of primal and dual solutions
+  auto Y_mosek = get_positive_eigspace(mosek_soln.X, 1e-5);
+  auto Y_dual = get_positive_eigspace(mosek_soln.S, 1e-5);
+  int r = Y_mosek.cols();
+  int s = Y_dual.cols();
+  // check strict complementarity
+  std::cout << "r: " << r << ", s: " << s << std::endl;
+  EXPECT_EQ(r + s, sdp.dim) << "Strict complementarity does not hold";
+  // check objective value
+  std::cout << "Primal objective at Mosek solution: " << std::endl
+            << (Y_mosek.transpose() * sdp.C * Y_mosek).trace() << std::endl;
+  EXPECT_NEAR((Y_mosek.transpose() * sdp.C * Y_mosek).trace(), sdp.rho, 1e-5)
+      << "SDP not Tight";
+  // Get jacobian and violation
+  auto Jac = Matrix(problem.m, Y_mosek.cols() * sdp.dim); 
+  auto violation = problem.eval_constraints(Y_mosek, Jac);
+  std::cout << "Violation at IP : " << violation.norm()
+            << std::endl;
   // Build certificate
-  auto H = problem.build_certificate(Jac, Y);
+  auto H = problem.build_certificate_from_primal(Jac, Y_mosek);
+  // Compare certificate with optimal dual variable from Mosek
+  std::cout << "Norm of difference between certificate and Mosek dual: " << std::endl
+            << (H - mosek_soln.S).norm() << std::endl;
   // std::cout << "Certificate Matrix: " << std::endl << H << std::endl;
   // check certificate on high rank solution
-  auto [min_eig_hr, first_ord_cond_hr] = problem.check_certificate(H, Y);
+  auto [min_eig_hr, first_ord_cond_hr] = problem.check_certificate(H, Y_mosek);
   std::cout << "Certificate on High Rank Solution: " << std::endl;
   std::cout << "Minimum Eigenvalue of Certificate: " << min_eig_hr << std::endl;
   std::cout << "First Order Condition Norm: " << first_ord_cond_hr << std::endl;
-  std::cout << "Cost at High Rank Solution: " << std::endl
-            << (Y.transpose() * sdp.C * Y).trace() << std::endl;
   // check certificate on initial solution
-  auto [min_eig, first_ord_cond] = problem.check_certificate(H, Y_0);
+  auto [min_eig, first_ord_cond] = problem.check_certificate(H, sdp.make_solution(params.max_sol_rank));
   std::cout << "Certificate on Initial Solution: " << std::endl;
   std::cout << "Minimum Eigenvalue of Certificate: " << min_eig << std::endl;
   std::cout << "First Order Condition Norm: " << first_ord_cond << std::endl;
 }
 
-TEST_P(InflationParamTest, CertWithCenter) {
+TEST_P(InflationParamTest, CertWithAnalyticCenter) {
   const auto& sdp = GetParam();
   // parameters
   RankInflateParams params;
@@ -271,34 +295,30 @@ TEST_P(InflationParamTest, CertWithCenter) {
   // get current solution
   Matrix Y_0 = sdp.make_solution(params.max_sol_rank);
   // Run rank inflation, without inflation (target rank is 1)
-  auto X = problem.get_analytic_center(Y_0 * Y_0.transpose(), delta);
+  auto [X, multipliers] = problem.get_analytic_center(Y_0 * Y_0.transpose(), delta);
   std::cout << "Eigenvalues of Center: " << std::endl
-            << Eigen::SelfAdjointEigenSolver<Matrix>(X).eigenvalues()
+            << Eigen::SelfAdjointEigenSolver<Matrix>(X).eigenvalues().transpose()
             << std::endl;
   // Recover low rank solution
   Matrix Y = get_positive_eigspace(X, params.tol_rank_sol);
   auto Jac = Matrix(problem.m, Y.cols() * sdp.dim);
-  auto violation = problem.retraction(Y, Jac);
+  auto violation = problem.eval_constraints(Y, Jac);
+  std::cout << "rank of recovered solution: " << get_rank(Y, 1e-5) << std::endl;
   std::cout << "Violation at Analytic Center: " << violation.norm()
             << std::endl;
-  std::cout << "rank of recovered solution: " << get_rank(Y, 1e-5) << std::endl;
-  // Build certificate
-  auto H = problem.build_certificate(Jac, Y);
-  // std::cout << "Certificate Matrix: " << std::endl << H << std::endl;
+  // Build the certificate matrix
+  auto H = problem.build_certificate_from_dual(multipliers);
   // check certificate on high rank solution
   auto [min_eig_hr, first_ord_cond_hr] = problem.check_certificate(H, Y);
-  std::cout << "Certificate on High Rank Solution: " << std::endl;
+  std::cout << "Cost at High Rank Solution: " << (sdp.C * X).trace() << std::endl;
   std::cout << "Minimum Eigenvalue of Certificate: " << min_eig_hr << std::endl;
-  std::cout << "First Order Condition Norm: " << first_ord_cond_hr << std::endl;
-  std::cout << "Cost at High Rank Solution: " << std::endl
-            << (Y.transpose() * sdp.C * Y).trace() << std::endl;
+  std::cout << "First Order Condition Norm at High Rank Solution: " << first_ord_cond_hr << std::endl;
   // check certificate on initial solution
   auto [min_eig, first_ord_cond] = problem.check_certificate(H, Y_0);
-  std::cout << "Certificate on Initial Solution: " << std::endl;
-  std::cout << "Minimum Eigenvalue of Certificate: " << min_eig << std::endl;
-  std::cout << "First Order Condition Norm: " << first_ord_cond << std::endl;
+  std::cout << "First Order Condition Norm at Rank 1 Solution: " << first_ord_cond << std::endl;
 }
 
+//  ANALYTIC CENTER TESTS
 TEST_P(InflationParamTest, AnalyticCenter) {
   const auto& sdp = GetParam();
   // parameters
@@ -310,7 +330,7 @@ TEST_P(InflationParamTest, AnalyticCenter) {
   auto Y = sdp.soln;
   // Compute Analyic center starting from low rank solution
   auto X0 = Y * Y.transpose();
-  auto X = problem.get_analytic_center(X0, delta);
+  auto [X, multipliers] = problem.get_analytic_center(X0, delta);
   // Compute analytic center objecive value
   double obj_0 = problem.get_analytic_center_objective(X0, delta);
   double obj_star = problem.get_analytic_center_objective(X, delta);
