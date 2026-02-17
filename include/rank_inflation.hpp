@@ -91,12 +91,24 @@ struct RankInflateParams {
   // update factor for adjusting delta in adaptive centering (should be between
   // zero and one, smaller values lead to more conservative updates)
   double adapt_factor_ac = 0.5;
+  // enable for certificate check during centering
+  // NOTE: can be used to terminate centering early if the certificate is PSD
+  // within tolerance, which can be a good heuristic to avoid unnecessary
+  // centering steps when the solution is already close to optimal
+  bool check_cert_ac = true;
 
   // line search enable for analytic center
   bool enable_line_search_ac = false;
   // line search (bisection) parameters for centering
   // NOTE: line search param will be certain to 1/2^k for k = ls_iter_ac
   double tol_bisect_ac = 1e-6;
+
+  // Certificate parameters
+  // -------------------------
+  // tolerance for checking PSDness of certificate matrix
+  double tol_cert_psd = 1e-5;
+  // tolerance for checking first order condition of certificate matrix
+  double tol_cert_first_order = 1e-5;
 };
 
 class RankInflation {
@@ -152,9 +164,11 @@ class RankInflation {
 
   // Build the optimality certificate for the problem using the KKT Jacobian
   // and the (high rank) solution
-  Matrix build_certificate_from_primal(const Matrix& Jac, const Matrix& Y) const;
+  Matrix build_certificate_from_primal(const Matrix& Jac,
+                                       const Matrix& Y) const;
 
-  // Build the optimality certificate for the problem using the optimal multipliers
+  // Build the optimality certificate for the problem using the optimal
+  // multipliers
   Matrix build_certificate_from_dual(const Vector& multipliers) const;
 
   // Check global optimality of a solution
@@ -204,8 +218,9 @@ class RankInflation {
   // Delta represents a perturbation parameter to ensure we stay in the interior
   // of the PSD cone even when the solution is low rank. If delta is zero then
   // no perturbation is applied.
-  std::pair<Matrix,Vector> get_analytic_center(const Matrix& X_0, double delta_obj = 0.0,
-                             double delta_constraint = 0.0) const;
+  std::pair<Matrix, Vector> get_analytic_center(
+      const Matrix& X_0, double delta_obj = 0.0,
+      double delta_constraint = 0.0) const;
 
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
@@ -231,5 +246,7 @@ class RankInflation {
   std::pair<ScalarFunc, ScalarFunc> analytic_center_line_search_func(
       const Matrix& Z, const Matrix& Aw) const;
 };
+
+
 
 }  // namespace SDPTools

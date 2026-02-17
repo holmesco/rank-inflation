@@ -301,8 +301,7 @@ TEST_P(InflationParamTest, CertWithAnalyticCenter) {
             << std::endl;
   // Recover low rank solution
   Matrix Y = get_positive_eigspace(X, params.tol_rank_sol);
-  auto Jac = Matrix(problem.m, Y.cols() * sdp.dim);
-  auto violation = problem.eval_constraints(Y, Jac);
+  auto violation = problem.eval_constraints(Y);
   std::cout << "rank of recovered solution: " << get_rank(Y, 1e-5) << std::endl;
   std::cout << "Violation at Analytic Center: " << violation.norm()
             << std::endl;

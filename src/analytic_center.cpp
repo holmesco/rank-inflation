@@ -26,19 +26,25 @@ std::pair<Matrix, Vector> RankInflation::get_analytic_center(
   int n_iter = 0;
   Matrix X = X_0;
   double f_val = get_analytic_center_objective(X, delta_obj);
-  Vector violation(m);
-  Vector multipliers(m);
+  Vector mult_scaled(m - 1);
   // Main loop
   while (n_iter < params_.max_iter_ac) {
     // Define perturbed version of X
     Matrix Z = X + Matrix::Identity(dim, dim) * delta_obj;
     // Get system of equations
+    Vector multipliers(m);
+    Vector violation(m);
     std::tie(multipliers, violation) =
         solve_analytic_center_system(Z, X, delta_constraint);
-
+    // compute scaled multipliers for certificate checking
+    mult_scaled = multipliers.segment(0, m - 1);
+    if (std::abs(multipliers(m - 1)) > 0) {
+      mult_scaled /= multipliers(m - 1);
+    }
     // Get step direction
     auto Aw_sp = build_adjoint(multipliers);
     Matrix Aw = C_ * multipliers(m - 1) + Aw_sp;
+
     // Line search to find optimal step size
     double alpha = 1.0;
     double f_val_dec = 0.0;
@@ -49,6 +55,26 @@ std::pair<Matrix, Vector> RankInflation::get_analytic_center(
     // Update step
     auto deltaX = Z - Z * Aw * Z;
     X.noalias() = X + alpha * deltaX;
+    // Certificate Checking (Early stopping condition if the certificate is PSD)
+    if (params_.check_cert_ac) {
+      auto H = build_certificate_from_dual(mult_scaled);
+      auto [min_eig, first_ord_cond] = check_certificate(H, X);
+      if (params_.verbose) {
+        std::cout << "Minimum Eigenvalue of Certificate: " << min_eig
+                  << std::endl;
+        std::cout << "First Order Condition Norm: " << first_ord_cond
+                  << std::endl;
+      }
+      if (min_eig >= -params_.tol_cert_psd &&
+          first_ord_cond <= params_.tol_cert_first_order) {
+        if (params_.verbose) {
+          std::cout
+              << "Certificate Found! Stopping centering."
+              << std::endl;
+        }
+        break;
+      }
+    }
     // Print results
     if (params_.verbose) {
       // Objective value
@@ -71,12 +97,6 @@ std::pair<Matrix, Vector> RankInflation::get_analytic_center(
     if (deltaX.norm() < params_.tol_step_norm_ac) break;
   }
 
-  // get the multipliers for the original SDP at the analytic center solution
-  auto mult_scaled = multipliers.segment(0, m - 1);
-  if (std::abs(multipliers(m - 1)) > 0) {
-    mult_scaled /= multipliers(m - 1);
-  }
-  
   return {X, mult_scaled};
 }
 
