@@ -14,6 +14,20 @@
 
 using namespace SDPTools;
 
+// Subclass that promotes every protected method to public so that unit tests
+// can exercise internal logic without friend declarations in production code.
+class AnalyticCenterTestable : public AnalyticCenter {
+ public:
+  using AnalyticCenter::AnalyticCenter;  // inherit all constructors
+  using AnalyticCenter::build_adjoint;
+  using AnalyticCenter::get_analytic_center_adaptive;
+  using AnalyticCenter::solve_analytic_center_system;
+  using AnalyticCenter::get_analytic_center_objective;
+  using AnalyticCenter::analytic_center_backtrack;
+  using AnalyticCenter::analytic_center_bisect;
+  using AnalyticCenter::analytic_center_line_search_func;
+};
+
 // Test case data structure
 struct SDPTestProblem {
   int dim;     // matrix dimension
@@ -36,10 +50,18 @@ struct SDPTestProblem {
     return AnalyticCenter(C, rho, A, b, params);
   }
 
-  RankInflation make(const RankInflateParams& params) const {
+  inline RankInflation make(const RankInflateParams& params) const {
     return RankInflation(C, rho, A, b, params);
   }
+
+  // Returns a testable subclass that exposes protected methods as public.
+  inline auto make_testable(const AnalyticCenterParams& params) const{
+    return AnalyticCenterTestable(C, rho, A, b, params);
+  }
 };
+
+
+
 
 // ----------- Lovasc Theta Helper Functions ----------------
 

@@ -46,7 +46,7 @@ TEST(AnalyticCenter, LineSearchFunctions) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  AnalyticCenter problem(Matrix::Zero(dim, dim), 0.0, {}, {}, params);
+  AnalyticCenterTestable problem(Matrix::Zero(dim, dim), 0.0, {}, {}, params);
   double delta = 1e-6;
   // Generate functions
   auto [f, df] = problem.analytic_center_line_search_func(Z, Aw);
@@ -105,7 +105,7 @@ TEST_P(AnalyticCentParamTest, PrimalSolution) {
   params.check_cert_ac = false; // Turn off early stopping based on certificate for testing purposes
   double delta = 1e-7;
   // generate problem
-  auto problem = sdp.make(params);
+  auto problem = sdp.make_testable(params);
   auto Y = sdp.soln;
   // Compute Analyic center starting from low rank solution
   auto X0 = Y * Y.transpose();
@@ -225,6 +225,29 @@ TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
   auto [min_eig, first_ord_cond] = problem.check_certificate(H, Y_0);
   std::cout << "First Order Condition Norm at Rank 1 Solution: "
             << first_ord_cond << std::endl;
+}
+
+TEST_P(AnalyticCentParamTest, Certify) {
+  const auto& sdp = GetParam();
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.check_cert_ac = true; // Turn off early stopping based on certificate for testing purposes
+  auto delta = 1e-7;
+  // generate problem
+  AnalyticCenter problem = sdp.make(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  // Run certification method
+  auto result = problem.certify(Y_0, delta);
+  // check that the solution is certified
+  EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
+  if (!result.certified) {
+    std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
+              << std::endl;
+    std::cout << "Complementarity (First Order Condition): "
+              << result.complementarity << std::endl;
+  }
 }
 
 

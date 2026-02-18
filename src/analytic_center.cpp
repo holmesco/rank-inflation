@@ -59,9 +59,9 @@ Matrix AnalyticCenter::build_certificate_from_dual(
 }
 
 std::pair<double, double> AnalyticCenter::check_certificate(
-    const Matrix& H, const Matrix& X) const {
+    const Matrix& H, const Matrix& Y) const {
   // Evaluate the stationarity condition
-  double first_order_norm = (H * X).norm();
+  double first_order_norm = (Y.transpose() * H * Y).norm();
   // Check Eigenvalues
   // Use SelfAdjointEigenSolver for symmetric matrices
   Eigen::SelfAdjointEigenSolver<Matrix> es(H);
@@ -70,13 +70,13 @@ std::pair<double, double> AnalyticCenter::check_certificate(
   return {min_eig, first_order_norm};
 }
 
-AnalyticCenterResult AnalyticCenter::certify(const Matrix& X_0,
+AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0,
                                              double delta) const {
   // Run analtyic center solve
-  auto [X, mult_scaled] = get_analytic_center(X_0, delta, 0.0);
+  auto [X, mult_scaled] = get_analytic_center(Y_0, delta, 0.0);
   auto H = build_certificate_from_dual(mult_scaled);
   // Check certificate at the final solution
-  auto [min_eig, complementarity] = check_certificate(H, X_0);
+  auto [min_eig, complementarity] = check_certificate(H, Y_0);
   // Return the final solution, multipliers and certificate information
   AnalyticCenterResult result;
   result.X = X;
@@ -85,6 +85,8 @@ AnalyticCenterResult AnalyticCenter::certify(const Matrix& X_0,
   result.violation = eval_constraints(X);
   result.certified = (min_eig >= -params_.tol_cert_psd) &&
                      (complementarity <= params_.tol_cert_first_order);
+  result.min_eig = min_eig;
+  result.complementarity = complementarity;
   return result;
 }
 
@@ -107,10 +109,10 @@ Matrix AnalyticCenter::get_analytic_center_adaptive(const Matrix& X_0) const {
 }
 
 std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
-    const Matrix& X_0, double delta_obj, double delta_constraint) const {
+    const Matrix& Y_0, double delta_obj, double delta_constraint) const {
   // Initialize
   int n_iter = 0;
-  Matrix X = X_0;
+  Matrix X = Y_0 * Y_0.transpose();
   // Define perturbed version of X
   Matrix Z = X + Matrix::Identity(dim, dim) * delta_obj;
   double f_val = get_analytic_center_objective(X, delta_obj);
@@ -148,7 +150,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       // Build certificate matrix
       H = build_certificate_from_dual(mult_scaled);
       // Check complementarity condition for first order optimality
-      complementarity = (H * Z).norm();
+      complementarity = (Y_0.transpose() * H * Y_0).norm();
       if (complementarity <= params_.tol_cert_first_order) {
         // if first order condition is satisfied, check eigenvalues of
         // certificate matrix

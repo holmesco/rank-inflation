@@ -100,9 +100,6 @@ class AnalyticCenter {
   const std::vector<double>& b_;
   // parameters
   AnalyticCenterParams params_;
-  // Store QR decomposition results
-  mutable QRResult qr_jacobian;
-  mutable QRResult qr_hessian;
 
   // Constructor
   AnalyticCenter(const Matrix& C, double rho,
@@ -117,6 +114,15 @@ class AnalyticCenter {
   // certificate matrix, the optimal multipliers, and the certificate
   // information (minimum eigenvalue and complementarity).
   AnalyticCenterResult certify(const Matrix& Y_0, double delta) const;
+  
+  // Centering method to compute the analytic center of the current
+  // feasible region starting from X_0.
+  // Delta represents a perturbation parameter to ensure we stay in the interior
+  // of the PSD cone even when the solution is low rank. If delta is zero then
+  // no perturbation is applied.
+  std::pair<Matrix, Vector> get_analytic_center(
+      const Matrix& Y_0, double delta_obj = 0.0,
+      double delta_constraint = 0.0) const;
 
   // Build the optimality certificate for the problem using the optimal
   // multipliers
@@ -128,6 +134,8 @@ class AnalyticCenter {
   std::pair<double, double> check_certificate(const Matrix& H,
                                               const Matrix& Y) const;
 
+
+ protected:
   // Build weighted sum of constraint matrices: sum_i A_i * lambda_i
   // If the coefficient falls below `tol` then the corresponding constraint is
   // not added to the sum
@@ -138,15 +146,6 @@ class AnalyticCenter {
   // even for low rank solutions, and then reduces delta adaptively until it
   // reaches the desired value.
   Matrix get_analytic_center_adaptive(const Matrix& X_0) const;
-
-  // Centering method to compute the analytic center of the current
-  // feasible region starting from X_0.
-  // Delta represents a perturbation parameter to ensure we stay in the interior
-  // of the PSD cone even when the solution is low rank. If delta is zero then
-  // no perturbation is applied.
-  AnalyticCenterResult get_analytic_center(const Matrix& X_0,
-                                           double delta_obj = 0.0,
-                                           double delta_constraint = 0.0) const;
 
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
