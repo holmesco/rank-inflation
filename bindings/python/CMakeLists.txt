@@ -51,7 +51,9 @@ if(_STUBGEN_CHECK EQUAL 0)
       "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}:$ENV{PYTHONPATH}"
       ${Python3_EXECUTABLE} -m pybind11_stubgen
         sdptools
-        --output-dir "${CMAKE_CURRENT_SOURCE_DIR}"
+        --numpy-array-remove-parameters # remove problematic array dimensions
+        -o "${CMAKE_CURRENT_SOURCE_DIR}"
+        --ignore-all-errors
     COMMENT "Generating Python stubs for sdptools with pybind11-stubgen"
     VERBATIM
   )
