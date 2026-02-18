@@ -1,8 +1,78 @@
-#include "rank_inflation.hpp"
+#include "analytic_center.hpp"
 
 namespace SDPTools {
 
-Matrix RankInflation::get_analytic_center_adaptive(const Matrix& X_0) const {
+AnalyticCenter::AnalyticCenter(
+    const Matrix& C, double rho,
+    const std::vector<Eigen::SparseMatrix<double>>& A,
+    const std::vector<double>& b, AnalyticCenterParams params)
+    : C_(C), A_(A), rho_(rho), b_(b), params_(params) {
+  // dimension of the SDP
+  dim = C.rows();
+  // number of constraints to enforce during inflation
+  m = A.size() + 1;
+}
+
+Vector AnalyticCenter::eval_constraints(const Matrix& X) const {
+  // Loop through constraints, evaluating gradient and constraint value
+  Vector result(m);
+  for (int i = 0; i < m; i++) {
+    if (i < A_.size()) {
+      // Constraints
+      // NOTE: Converting to DENSE here. Optimize this later
+      result(i) = (A_[i].selfadjointView<Eigen::Upper>() * X).trace() - b_[i];
+    } else {
+      // Cost "constraint"
+      result(i) = (C_ * X).trace() - rho_;
+    }
+  }
+  return result;
+}
+
+SpMatrix AnalyticCenter::build_adjoint(const Vector& coeffs, double tol) const {
+  // 1. Calculate the weighted sum of the upper-triangular parts
+  SpMatrix upperSum = coeffs[0] * A_[0];
+  for (size_t i = 1; i < A_.size(); ++i) {
+    if (std::abs(coeffs(i)) > tol) {
+      upperSum += coeffs[i] * A_[i];
+    }
+  }
+
+  // 2. Reflect the upper triangle into the lower triangle to get the full
+  // matrix .selfadjointView<Eigen::Upper>() treats the matrix as symmetric and
+  // the assignment to a SparseMatrix fills in the missing entries.
+  SpMatrix fullMatrix = upperSum.selfadjointView<Eigen::Upper>();
+
+  fullMatrix.makeCompressed();
+  return fullMatrix;
+}
+
+Matrix AnalyticCenter::build_certificate_from_dual(
+    const Vector& multipliers) const {
+  // build weighted sum of constraint matrices with multiplier values
+  auto f_A = build_adjoint(multipliers, 0.0);
+  // add cost term if required
+  Matrix H;
+  H = C_ + f_A;
+
+  return H;
+}
+
+std::pair<double, double> AnalyticCenter::check_certificate(
+    const Matrix& H, const Matrix& X) const {
+  // Evaluate the stationarity condition
+  double first_order_norm = (H * X).norm();
+  // Check Eigenvalues
+  // Use SelfAdjointEigenSolver for symmetric matrices
+  Eigen::SelfAdjointEigenSolver<Matrix> es(H);
+  double min_eig = es.eigenvalues().minCoeff();
+
+  return {min_eig, first_order_norm};
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+Matrix AnalyticCenter::get_analytic_center_adaptive(const Matrix& X_0) const {
   double delta = params_.delta_init_ac;
   auto X = X_0;
   Vector multipliers(m);
@@ -20,21 +90,19 @@ Matrix RankInflation::get_analytic_center_adaptive(const Matrix& X_0) const {
   return X;
 }
 
-std::pair<Matrix, Vector> RankInflation::get_analytic_center(
+std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     const Matrix& X_0, double delta_obj, double delta_constraint) const {
   // Initialize
   int n_iter = 0;
   Matrix X = X_0;
+  // Define perturbed version of X
+  Matrix Z = X + Matrix::Identity(dim, dim) * delta_obj;
   double f_val = get_analytic_center_objective(X, delta_obj);
   Vector mult_scaled(m - 1);
   // Main loop
   while (n_iter < params_.max_iter_ac) {
-    // Define perturbed version of X
-    Matrix Z = X + Matrix::Identity(dim, dim) * delta_obj;
     // Get system of equations
-    Vector multipliers(m);
-    Vector violation(m);
-    std::tie(multipliers, violation) =
+    auto [multipliers, violation] =
         solve_analytic_center_system(Z, X, delta_constraint);
     // compute scaled multipliers for certificate checking
     mult_scaled = multipliers.segment(0, m - 1);
@@ -44,7 +112,6 @@ std::pair<Matrix, Vector> RankInflation::get_analytic_center(
     // Get step direction
     auto Aw_sp = build_adjoint(multipliers);
     Matrix Aw = C_ * multipliers(m - 1) + Aw_sp;
-
     // Line search to find optimal step size
     double alpha = 1.0;
     double f_val_dec = 0.0;
@@ -54,25 +121,27 @@ std::pair<Matrix, Vector> RankInflation::get_analytic_center(
     }
     // Update step
     auto deltaX = Z - Z * Aw * Z;
-    X.noalias() = X + alpha * deltaX;
+    X.noalias() += alpha * deltaX;
+    Z.noalias() += alpha * deltaX;
     // Certificate Checking (Early stopping condition if the certificate is PSD)
+    double complementarity = std::nan("");
+    double min_eig = std::nan("");
     if (params_.check_cert_ac) {
+      // Build certificate matrix
       auto H = build_certificate_from_dual(mult_scaled);
-      auto [min_eig, first_ord_cond] = check_certificate(H, X);
-      if (params_.verbose) {
-        std::cout << "Minimum Eigenvalue of Certificate: " << min_eig
-                  << std::endl;
-        std::cout << "First Order Condition Norm: " << first_ord_cond
-                  << std::endl;
-      }
-      if (min_eig >= -params_.tol_cert_psd &&
-          first_ord_cond <= params_.tol_cert_first_order) {
-        if (params_.verbose) {
-          std::cout
-              << "Certificate Found! Stopping centering."
-              << std::endl;
+      // Check complementarity condition for first order optimality
+      complementarity = (H * Z).norm();
+      if (complementarity <= params_.tol_cert_first_order) {
+        // if first order condition is satisfied, check eigenvalues of
+        // certificate matrix
+        Eigen::SelfAdjointEigenSolver<Matrix> es(H);
+        min_eig = es.eigenvalues().minCoeff();
+        if (min_eig >= -params_.tol_cert_psd) {
+          if (params_.verbose) {
+            std::cout << "Certificate Found! Stopping centering." << std::endl;
+          }
+          break;
         }
-        break;
       }
     }
     // Print results
@@ -85,22 +154,24 @@ std::pair<Matrix, Vector> RankInflation::get_analytic_center(
       // get rank of solution
       int sol_rank = get_rank(X, params_.tol_rank_sol);
       if (n_iter % 10 == 0) {
-        std::printf("%6s %6s %18s %10s %8s %8s\n", "Iter", "SolRank",
-                    "ViolationNorm", "StepNorm", "Alpha", "Obj Val.");
+        std::printf("%6s %6s %12s %12s %12s %12s %8s\n", "Iter", "SolRank",
+            "ViolNorm", "StepNorm", "Complement.", "MinEig", "Obj Val.");
       }
-      std::printf("%6d %6d %18.6e %10.6e %8.3e %8.3e\n", n_iter, sol_rank,
-                  violation.norm(), deltaX.norm(), alpha, f_val);
+      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %8.3e\n", n_iter, sol_rank,
+          violation.norm(), deltaX.norm(), complementarity, min_eig, f_val);
     }
     // Increment
     n_iter++;
     // Stopping Condition
     if (deltaX.norm() < params_.tol_step_norm_ac) break;
   }
-
+  // TODO: check the certificate first order condition on the initial solution.
+  // TODO: Change return so that we get the full result, including the
+  // certificate, and whether the solution is certified
   return {X, mult_scaled};
 }
 
-std::pair<Vector, Vector> RankInflation::solve_analytic_center_system(
+std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
     const Matrix& Z, const Matrix& X, double delta_constraint) const {
   // Construct AZ matrices, violation vector and d vector
   Vector d(m);
@@ -154,7 +225,7 @@ std::pair<Vector, Vector> RankInflation::solve_analytic_center_system(
   return {multipliers, violation};
 }
 
-std::pair<double, double> RankInflation::analytic_center_backtrack(
+std::pair<double, double> AnalyticCenter::analytic_center_backtrack(
     const Matrix& Z, const Matrix& Aw) const {
   // NOTE: Should make this function generic for any line search function
   //  Initial step size
@@ -186,8 +257,8 @@ std::pair<double, double> RankInflation::analytic_center_backtrack(
   return {alpha, f(alpha)};
 }
 
-double RankInflation::analytic_center_bisect(const Matrix& Z,
-                                             const Matrix& Aw) const {
+double AnalyticCenter::analytic_center_bisect(const Matrix& Z,
+                                              const Matrix& Aw) const {
   // Create the objective function and deriviative
   auto [f, df] = analytic_center_line_search_func(Z, Aw);
   // Bisection parameters
@@ -199,8 +270,8 @@ double RankInflation::analytic_center_bisect(const Matrix& Z,
 }
 
 std::pair<ScalarFunc, ScalarFunc>
-RankInflation::analytic_center_line_search_func(const Matrix& Z,
-                                                const Matrix& Aw) const {
+AnalyticCenter::analytic_center_line_search_func(const Matrix& Z,
+                                                 const Matrix& Aw) const {
   // Cholesky decomposition of augmented solution
   Eigen::LLT<Matrix> cholZ(Z);
   if (cholZ.info() == Eigen::NumericalIssue) {

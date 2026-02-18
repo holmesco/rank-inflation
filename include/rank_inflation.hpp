@@ -70,39 +70,7 @@ struct RankInflateParams {
   // Tangent space/geodesic step size (wrt Frobenius norm)
   double eps_geodesic = 1.0E-2;
 
-  // Analytic Center parameters
-  // -------------------------
-  // tolerance for step size (terminate if below)
-  double tol_step_norm_ac = 1e-8;
-  // reduce violation in centering step
-  bool reduce_violation_ac = true;
-  // max number of iterations for centering
-  int max_iter_ac = 50;
-
-  // max number of iterations for adaptive centering
-  int max_iter_adaptive_ac = 20;
-  // initial delta for centering (should be large enough to ensure good
-  // convergence even for low rank solutions, but not too large to cause slow
-  // convergence)
-  double delta_init_ac = 1e-7;
-  // final delta for centering (should be small to get close to boundary, but
-  // not too small to cause numerical issues)
-  double delta_min_ac = 1e-9;
-  // update factor for adjusting delta in adaptive centering (should be between
-  // zero and one, smaller values lead to more conservative updates)
-  double adapt_factor_ac = 0.5;
-  // enable for certificate check during centering
-  // NOTE: can be used to terminate centering early if the certificate is PSD
-  // within tolerance, which can be a good heuristic to avoid unnecessary
-  // centering steps when the solution is already close to optimal
-  bool check_cert_ac = true;
-
-  // line search enable for analytic center
-  bool enable_line_search_ac = false;
-  // line search (bisection) parameters for centering
-  // NOTE: line search param will be certain to 1/2^k for k = ls_iter_ac
-  double tol_bisect_ac = 1e-6;
-
+  
   // Certificate parameters
   // -------------------------
   // tolerance for checking PSDness of certificate matrix
@@ -205,48 +173,7 @@ class RankInflation {
   std::pair<Matrix, Matrix> get_geodesic_step(int rank,
                                               bool second_order = true) const;
 
-  // ----------- ANALYTIC CENTERING METHODS ------------
-
-  // Adaptive centering method to compute the analytic center of the SDP.
-  // The method starts with a large delta parameter to ensure good convergence
-  // even for low rank solutions, and then reduces delta adaptively until it
-  // reaches the desired value.
-  Matrix get_analytic_center_adaptive(const Matrix& X_0) const;
-
-  // Centering method to compute the analytic center of the current
-  // feasible region starting from X_0.
-  // Delta represents a perturbation parameter to ensure we stay in the interior
-  // of the PSD cone even when the solution is low rank. If delta is zero then
-  // no perturbation is applied.
-  std::pair<Matrix, Vector> get_analytic_center(
-      const Matrix& X_0, double delta_obj = 0.0,
-      double delta_constraint = 0.0) const;
-
-  // Builds and solves the system of equations for the analytic center step,
-  // returning the optimal multipliers and the current violation of constraints
-  std::pair<Vector, Vector> solve_analytic_center_system(
-      const Matrix& Z, const Matrix& X, double delta_constraint) const;
-
-  double get_analytic_center_objective(const Matrix& X, double delta) const {
-    auto I = Matrix::Identity(X.rows(), X.cols());
-    return -logdet(X + I * delta);
-  }
-
-  // Analytic center backtracking line search
-  std::pair<double, double> analytic_center_backtrack(const Matrix& Z,
-                                                      const Matrix& Aw) const;
-
-  // Perform bisection line search to find optimal step size for analytic
-  // center
-  double analytic_center_bisect(const Matrix& Z, const Matrix& Aw) const;
-
-  // Line search function and derivative for analytic center
-  // NOTE: it was shown in Boyd that this function is convex, so simple
-  // bisection on the derivative is sufficient
-  std::pair<ScalarFunc, ScalarFunc> analytic_center_line_search_func(
-      const Matrix& Z, const Matrix& Aw) const;
 };
-
 
 
 }  // namespace SDPTools

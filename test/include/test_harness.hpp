@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "rank_inflation.hpp"
+#include "analytic_center.hpp"
 
 using namespace SDPTools;
 
@@ -29,6 +30,10 @@ struct SDPTestProblem {
     Matrix Y(dim, rank);
     Y << soln, zpad;
     return Y;
+  }
+
+  AnalyticCenter make(const AnalyticCenterParams& params) const {
+    return AnalyticCenter(C, rho, A, b, params);
   }
 
   RankInflation make(const RankInflateParams& params) const {
