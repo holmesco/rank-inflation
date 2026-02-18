@@ -70,7 +70,23 @@ std::pair<double, double> AnalyticCenter::check_certificate(
   return {min_eig, first_order_norm};
 }
 
-///////////////////////////////////////////////////////////////////////////////
+AnalyticCenterResult AnalyticCenter::certify(const Matrix& X_0,
+                                             double delta) const {
+  // Run analtyic center solve
+  auto [X, mult_scaled] = get_analytic_center(X_0, delta, 0.0);
+  auto H = build_certificate_from_dual(mult_scaled);
+  // Check certificate at the final solution
+  auto [min_eig, complementarity] = check_certificate(H, X_0);
+  // Return the final solution, multipliers and certificate information
+  AnalyticCenterResult result;
+  result.X = X;
+  result.multipliers = mult_scaled;
+  result.H = H;
+  result.violation = eval_constraints(X);
+  result.certified = (min_eig >= -params_.tol_cert_psd) &&
+                     (complementarity <= params_.tol_cert_first_order);
+  return result;
+}
 
 Matrix AnalyticCenter::get_analytic_center_adaptive(const Matrix& X_0) const {
   double delta = params_.delta_init_ac;
@@ -99,6 +115,10 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   Matrix Z = X + Matrix::Identity(dim, dim) * delta_obj;
   double f_val = get_analytic_center_objective(X, delta_obj);
   Vector mult_scaled(m - 1);
+  // Optimality certificate
+  Matrix H;
+  double complementarity = std::nan("");
+  double min_eig = std::nan("");
   // Main loop
   while (n_iter < params_.max_iter_ac) {
     // Get system of equations
@@ -124,11 +144,9 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     X.noalias() += alpha * deltaX;
     Z.noalias() += alpha * deltaX;
     // Certificate Checking (Early stopping condition if the certificate is PSD)
-    double complementarity = std::nan("");
-    double min_eig = std::nan("");
     if (params_.check_cert_ac) {
       // Build certificate matrix
-      auto H = build_certificate_from_dual(mult_scaled);
+      H = build_certificate_from_dual(mult_scaled);
       // Check complementarity condition for first order optimality
       complementarity = (H * Z).norm();
       if (complementarity <= params_.tol_cert_first_order) {
@@ -155,19 +173,19 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       int sol_rank = get_rank(X, params_.tol_rank_sol);
       if (n_iter % 10 == 0) {
         std::printf("%6s %6s %12s %12s %12s %12s %8s\n", "Iter", "SolRank",
-            "ViolNorm", "StepNorm", "Complement.", "MinEig", "Obj Val.");
+                    "ViolNorm", "StepNorm", "Complement.", "MinEig",
+                    "Obj Val.");
       }
-      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %8.3e\n", n_iter, sol_rank,
-          violation.norm(), deltaX.norm(), complementarity, min_eig, f_val);
+      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %8.3e\n", n_iter,
+                  sol_rank, violation.norm(), deltaX.norm(), complementarity,
+                  min_eig, f_val);
     }
     // Increment
     n_iter++;
     // Stopping Condition
     if (deltaX.norm() < params_.tol_step_norm_ac) break;
   }
-  // TODO: check the certificate first order condition on the initial solution.
-  // TODO: Change return so that we get the full result, including the
-  // certificate, and whether the solution is certified
+
   return {X, mult_scaled};
 }
 

@@ -3,6 +3,23 @@
 
 namespace SDPTools {
 
+struct AnalyticCenterResult {
+  // Analytic center solution
+  Matrix X;
+  // Certificate matrix at the solution
+  Matrix H;
+  // Optimal multipliers for the constraints at the solution
+  Vector multipliers;
+  // Constraint violation at the solution
+  Vector violation;
+  // Whether the solution is certified by the certificate matrix
+  bool certified;
+  // Minimum eigenvalue of the certificate matrix
+  double min_eig;
+  // Complementarity condition (first order condition)
+  double complementarity;
+};
+
 struct AnalyticCenterParams {
   // NOTE: for tolerances on rank and nullspace: pivot added to rank if R_ii >
   // tol * R_max
@@ -95,6 +112,12 @@ class AnalyticCenter {
   // Evaluate constraints (and cost if enabled) and compute the gradients
   Vector eval_constraints(const Matrix& Y) const;
 
+  // Run analytic centering algorithm starting to certify local solution Y_0.
+  // Returns the final result, including the centered primal solution, the
+  // certificate matrix, the optimal multipliers, and the certificate
+  // information (minimum eigenvalue and complementarity).
+  AnalyticCenterResult certify(const Matrix& Y_0, double delta) const;
+
   // Build the optimality certificate for the problem using the optimal
   // multipliers
   Matrix build_certificate_from_dual(const Vector& multipliers) const;
@@ -121,9 +144,9 @@ class AnalyticCenter {
   // Delta represents a perturbation parameter to ensure we stay in the interior
   // of the PSD cone even when the solution is low rank. If delta is zero then
   // no perturbation is applied.
-  std::pair<Matrix, Vector> get_analytic_center(
-      const Matrix& X_0, double delta_obj = 0.0,
-      double delta_constraint = 0.0) const;
+  AnalyticCenterResult get_analytic_center(const Matrix& X_0,
+                                           double delta_obj = 0.0,
+                                           double delta_constraint = 0.0) const;
 
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
@@ -150,4 +173,4 @@ class AnalyticCenter {
       const Matrix& Z, const Matrix& Aw) const;
 };
 
-}
+}  // namespace SDPTools
