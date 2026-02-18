@@ -1,5 +1,6 @@
 scipy
 matplotlib
 pandas
-open3d
+pybind11
 pybind11-stubgen
+scikit-build-core

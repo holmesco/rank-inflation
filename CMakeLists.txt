@@ -16,6 +16,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 ###############################################################################
 
 option(BUILD_TESTS "Build testsuite" ON)
+option(BUILD_PYTHON_BINDINGS "Build pybind11 Python bindings" OFF)
 
 
 ###############################################################################
@@ -46,11 +47,10 @@ if(BUILD_TESTS)
     googletest
     URL https://github.com/google/googletest/archive/e4fdb87e76b9fc4b01c54ad81aea19d6e994b994.zip
   )
+  # For Windows: Prevent overriding the parent project's compiler/linker settings
+  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(googletest)
 endif()
-
-# For Windows: Prevent overriding the parent project's compiler/linker settings
-set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(googletest)
 
 
 ###############################################################################
@@ -95,4 +95,8 @@ target_compile_definitions(rank_inflation PUBLIC RANK_INF_VERSION="${PROJECT_VER
 if(BUILD_TESTS)
     enable_testing()
     add_subdirectory(test)
+endif()
+
+if(BUILD_PYTHON_BINDINGS)
+    add_subdirectory(bindings/python)
 endif()

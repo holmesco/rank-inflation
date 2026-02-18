@@ -12,3 +12,5 @@ venv/
 *.pyc
 *.png
 *.csv
+*.so
+*.pyi
