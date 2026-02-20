@@ -121,16 +121,21 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   Matrix H;
   double complementarity = std::nan("");
   double min_eig = std::nan("");
+  double barrier_param = std::nan("");
   // Main loop
   while (n_iter < params_.max_iter_ac) {
     // Get system of equations
     auto [multipliers, violation] =
         solve_analytic_center_system(Z, X, delta_constraint);
-    // compute scaled multipliers for certificate checking
-    mult_scaled = multipliers.segment(0, m - 1);
-    if (std::abs(multipliers(m - 1)) > 0) {
-      mult_scaled /= multipliers(m - 1);
+
+    // get the barrier parameter value
+    barrier_param = multipliers(m - 1);
+    if (barrier_param <= 0) {
+      throw std::runtime_error("Barrier parameter is non-positive.");
     }
+    // compute scaled multipliers for certificate checking
+    mult_scaled = multipliers.segment(0, m - 1) / barrier_param;
+
     // Get step direction
     auto Aw_sp = build_adjoint(multipliers);
     Matrix Aw = C_ * multipliers(m - 1) + Aw_sp;
@@ -144,11 +149,13 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     // Update step
     auto deltaX = Z - Z * Aw * Z;
     X.noalias() += alpha * deltaX;
+    Matrix Z_prev = Z;
     Z.noalias() += alpha * deltaX;
     // Certificate Checking (Early stopping condition if the certificate is PSD)
     if (params_.check_cert_ac) {
       // Build certificate matrix
       H = build_certificate_from_dual(mult_scaled);
+
       // Check complementarity condition for first order optimality
       complementarity = (Y_0.transpose() * H * Y_0).norm();
       if (complementarity <= params_.tol_cert_first_order) {
@@ -174,13 +181,14 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       // get rank of solution
       int sol_rank = get_rank(X, params_.tol_rank_sol);
       if (n_iter % 10 == 0) {
-        std::printf("%6s %6s %12s %12s %12s %12s %8s\n", "Iter", "SolRank",
-                    "ViolNorm", "StepNorm", "Complement.", "MinEig",
-                    "Obj Val.");
+        std::printf("%6s %6s %12s %12s %12s %12s %12s %8s\n", "Iter", "SolRank",
+            "ViolNorm", "StepNorm", "Complement.", "MinEig", "BarrParam",
+            "Obj Val.");
       }
-      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %8.3e\n", n_iter,
-                  sol_rank, violation.norm(), deltaX.norm(), complementarity,
-                  min_eig, f_val);
+      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n", n_iter,
+          sol_rank, violation.norm(), deltaX.norm(), complementarity,
+          min_eig, barrier_param, f_val);
+      
     }
     // Increment
     n_iter++;
@@ -233,9 +241,11 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
   }
   // Solve the linear equation with LDLT decomposition (includes pivoting by
   // default) Note: This method is preferred because the system is PSD, but
-  // can be ill-conditioned, especially in early iterations
+  // can be ill-conditioned, especially in early iterations.
+
   Eigen::LDLT<Eigen::MatrixXd> ldlt(H.selfadjointView<Eigen::Upper>());
   // Check for success (critical for rank-deficient cases)
+  // TODO - print eigen values of H when numerical issues occur.
   if (ldlt.info() == Eigen::NumericalIssue || !ldlt.isPositive()) {
     std::cout << "The matrix is not PSD or has severe numerical issues."
               << std::endl;
