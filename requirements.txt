@@ -1,4 +1,8 @@
+numpy
 scipy
+casadi
+cvxpy
+mosek
 matplotlib
 pandas
 pybind11
