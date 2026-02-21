@@ -17,7 +17,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(BUILD_TESTS "Build testsuite" ON)
 option(BUILD_PYTHON_BINDINGS "Build pybind11 Python bindings" OFF)
-
+option(DEBUG_FLAG "Print additional debugging information" OFF)
 
 ###############################################################################
 # Dependencies
