@@ -80,34 +80,33 @@ PYBIND11_MODULE(sdptools, m) {
       .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
       .def_readwrite("tol_rank_sol", &AnalyticCenterParams::tol_rank_sol)
       // Analytic Center
-      .def_readwrite("tol_step_norm_ac",
-                     &AnalyticCenterParams::tol_step_norm_ac)
-      .def_readwrite("reduce_violation_ac",
-                     &AnalyticCenterParams::reduce_violation_ac)
-      .def_readwrite("max_iter_ac", &AnalyticCenterParams::max_iter_ac)
-      .def_readwrite("max_iter_adaptive_ac",
-                     &AnalyticCenterParams::max_iter_adaptive_ac)
-      .def_readwrite("delta_init_ac", &AnalyticCenterParams::delta_init_ac)
-      .def_readwrite("delta_min_ac", &AnalyticCenterParams::delta_min_ac)
-      .def_readwrite("adapt_factor_ac", &AnalyticCenterParams::adapt_factor_ac)
-      .def_readwrite("check_cert_ac", &AnalyticCenterParams::check_cert_ac)
+      .def_readwrite("tol_step_norm", &AnalyticCenterParams::tol_step_norm)
+      .def_readwrite("reduce_violation",
+                     &AnalyticCenterParams::reduce_violation)
+      .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
+      .def_readwrite("max_iter_adaptive",
+                     &AnalyticCenterParams::max_iter_adaptive)
+      .def_readwrite("lin_sys_reg", &AnalyticCenterParams::lin_sys_reg)
+      .def_readwrite("delta_init", &AnalyticCenterParams::delta_init)
+      .def_readwrite("delta_min", &AnalyticCenterParams::delta_min)
+      .def_readwrite("adapt_factor", &AnalyticCenterParams::adapt_factor)
+      .def_readwrite("check_cert", &AnalyticCenterParams::check_cert)
       // Line search
-      .def_readwrite("enable_line_search_ac",
-                     &AnalyticCenterParams::enable_line_search_ac)
+      .def_readwrite("enable_line_search",
+                     &AnalyticCenterParams::enable_line_search)
       .def_readwrite("ln_search_suff_dec",
                      &AnalyticCenterParams::ln_search_suff_dec)
       .def_readwrite("ln_search_red_factor",
                      &AnalyticCenterParams::ln_search_red_factor)
       .def_readwrite("alpha_init", &AnalyticCenterParams::alpha_init)
       .def_readwrite("alpha_min", &AnalyticCenterParams::alpha_min)
-      .def_readwrite("tol_bisect_ac", &AnalyticCenterParams::tol_bisect_ac)
+      .def_readwrite("tol_bisect", &AnalyticCenterParams::tol_bisect)
       // Certificate
       .def_readwrite("tol_cert_psd", &AnalyticCenterParams::tol_cert_psd)
       .def_readwrite("tol_cert_first_order",
                      &AnalyticCenterParams::tol_cert_first_order)
       .def("__repr__", [](const AnalyticCenterParams& p) {
-        return "<AnalyticCenterParams max_iter_ac=" +
-               std::to_string(p.max_iter_ac) +
+        return "<AnalyticCenterParams max_iter=" + std::to_string(p.max_iter) +
                " verbose=" + (p.verbose ? "True" : "False") + ">";
       });
 

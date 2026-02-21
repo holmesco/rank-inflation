@@ -10,7 +10,6 @@ using namespace SDPTools;
 class AnalyticCentParamTest : public ::testing::TestWithParam<SDPTestProblem> {
 };
 
-
 TEST_P(AnalyticCentParamTest, MosekSolve) {
   const auto& sdp = GetParam();
   // solve sdp using Mosek to get dual solution
@@ -102,7 +101,8 @@ TEST_P(AnalyticCentParamTest, PrimalSolution) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert_ac = false; // Turn off early stopping based on certificate for testing purposes
+  params.check_cert = false;  // Turn off early stopping based on certificate
+                              // for testing purposes
   double delta = 1e-7;
   // generate problem
   auto problem = sdp.make_testable(params);
@@ -154,7 +154,8 @@ TEST_P(AnalyticCentParamTest, CertAtCenter) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert_ac = false; // Turn off early stopping based on certificate for testing purposes
+  params.check_cert = false;  // Turn off early stopping based on certificate
+                              // for testing purposes
   auto delta = 1e-7;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
@@ -193,7 +194,8 @@ TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert_ac = true; // Turn off early stopping based on certificate for testing purposes
+  params.check_cert = true;  // Turn off early stopping based on certificate for
+                             // testing purposes
   auto delta = 1e-7;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
@@ -232,7 +234,8 @@ TEST_P(AnalyticCentParamTest, Certify) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert_ac = true; // Turn off early stopping based on certificate for testing purposes
+  params.check_cert = true;  // Turn off early stopping based on certificate for
+                             // testing purposes
   auto delta = 1e-7;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
@@ -250,7 +253,6 @@ TEST_P(AnalyticCentParamTest, Certify) {
   }
 }
 
-
 INSTANTIATE_TEST_SUITE_P(
     AnalyticCenterSuite, AnalyticCentParamTest,
     ::testing::Values(
@@ -263,8 +265,8 @@ INSTANTIATE_TEST_SUITE_P(
                               "Clique3_Large20x20"),
         // CASE 4
         make_lovasz_test_case(clique4_adj, {0, 1, 2}, "Clique4_Disconnected")),
-        // // CASE 5: Two Sphere Intersection (removed because not tight)
-        // make_two_sphere_sdp(5, 1.0, 1.0, 1.5)),
+    // // CASE 5: Two Sphere Intersection (removed because not tight)
+    // make_two_sphere_sdp(5, 1.0, 1.0, 1.5)),
     // This helper function names the tests based on the 'test_name'
     // field
     [](const ::testing::TestParamInfo<AnalyticCentParamTest::ParamType>& info) {

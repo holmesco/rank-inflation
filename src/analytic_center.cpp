@@ -91,14 +91,14 @@ AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0,
 }
 
 Matrix AnalyticCenter::get_analytic_center_adaptive(const Matrix& X_0) const {
-  double delta = params_.delta_init_ac;
+  double delta = params_.delta_init;
   auto X = X_0;
   Vector multipliers(m);
-  while (delta >= params_.delta_min_ac) {
+  while (delta >= params_.delta_min) {
     // Compute analytic center for current delta
     std::tie(X, multipliers) = get_analytic_center(X, delta);
     // Update delta
-    delta *= params_.adapt_factor_ac;
+    delta *= params_.adapt_factor;
     if (params_.verbose) {
       std::cout << "-------------------------------- " << std::endl;
       std::cout << "Adapting Delta: " << delta << std::endl;
@@ -123,7 +123,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   double min_eig = std::nan("");
   double barrier_param = std::nan("");
   // Main loop
-  while (n_iter < params_.max_iter_ac) {
+  while (n_iter < params_.max_iter) {
     // Get system of equations
     auto [multipliers, violation] =
         solve_analytic_center_system(Z, X, delta_constraint);
@@ -131,7 +131,9 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     // get the barrier parameter value
     barrier_param = multipliers(m - 1);
     if (barrier_param <= 0) {
-      throw std::runtime_error("Barrier parameter is non-positive.");
+      std::cerr << "Warning: Barrier parameter is non-positive: " +
+                       std::to_string(barrier_param)
+                << std::endl;
     }
     // compute scaled multipliers for certificate checking
     mult_scaled = multipliers.segment(0, m - 1) / barrier_param;
@@ -142,7 +144,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     // Line search to find optimal step size
     double alpha = 1.0;
     double f_val_dec = 0.0;
-    if (params_.enable_line_search_ac) {
+    if (params_.enable_line_search) {
       std::tie(alpha, f_val_dec) = analytic_center_backtrack(Z, Aw);
       f_val -= f_val_dec;
     }
@@ -152,7 +154,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     Matrix Z_prev = Z;
     Z.noalias() += alpha * deltaX;
     // Certificate Checking (Early stopping condition if the certificate is PSD)
-    if (params_.check_cert_ac) {
+    if (params_.check_cert) {
       // Build certificate matrix
       H = build_certificate_from_dual(mult_scaled);
 
@@ -174,7 +176,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     // Print results
     if (params_.verbose) {
       // Objective value
-      if (!params_.enable_line_search_ac) {
+      if (!params_.enable_line_search) {
         // Evaluate objective at new solution
         f_val = get_analytic_center_objective(X, delta_obj);
       }
@@ -182,18 +184,17 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       int sol_rank = get_rank(X, params_.tol_rank_sol);
       if (n_iter % 10 == 0) {
         std::printf("%6s %6s %12s %12s %12s %12s %12s %8s\n", "Iter", "SolRank",
-            "ViolNorm", "StepNorm", "Complement.", "MinEig", "BarrParam",
-            "Obj Val.");
+                    "ViolNorm", "StepNorm", "Complement.", "MinEig",
+                    "BarrParam", "Obj Val.");
       }
       std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n", n_iter,
-          sol_rank, violation.norm(), deltaX.norm(), complementarity,
-          min_eig, barrier_param, f_val);
-      
+                  sol_rank, violation.norm(), deltaX.norm(), complementarity,
+                  min_eig, barrier_param, f_val);
     }
     // Increment
     n_iter++;
     // Stopping Condition
-    if (deltaX.norm() < params_.tol_step_norm_ac) break;
+    if (deltaX.norm() < params_.tol_step_norm) break;
   }
 
   return {X, mult_scaled};
@@ -229,12 +230,15 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
   for (int i = 0; i < m; i++) {
     for (int j = i; j < m; j++) {
       H(i, j) = (AZ[i] * AZ[j]).trace();
+      if (i == j) {
+        H(i, j) += params_.lin_sys_reg;
+      }
     }
   }
 
   // Construct the RHS vector
   Vector rhs;
-  if (params_.reduce_violation_ac) {
+  if (params_.reduce_violation) {
     rhs = d + violation;
   } else {
     rhs = d;
@@ -242,14 +246,24 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
   // Solve the linear equation with LDLT decomposition (includes pivoting by
   // default) Note: This method is preferred because the system is PSD, but
   // can be ill-conditioned, especially in early iterations.
-
   Eigen::LDLT<Eigen::MatrixXd> ldlt(H.selfadjointView<Eigen::Upper>());
   // Check for success (critical for rank-deficient cases)
-  // TODO - print eigen values of H when numerical issues occur.
-  if (ldlt.info() == Eigen::NumericalIssue || !ldlt.isPositive()) {
-    std::cout << "The matrix is not PSD or has severe numerical issues."
-              << std::endl;
+  if (ldlt.info() == Eigen::NumericalIssue) {
+    std::cout << "The matrix is has severe numerical issues." << std::endl;
   }
+#ifdef DEBUG
+  // print information about the linear system
+  Eigen::SelfAdjointEigenSolver<Matrix> es_Z(Z);
+  double min_eig_Z = es_Z.eigenvalues().minCoeff();
+  std::cout << "Minimum eigenvalue of Z: " << min_eig_Z << std::endl;
+  Eigen::SelfAdjointEigenSolver<Matrix> es(H.selfadjointView<Eigen::Upper>());
+  double min_eig_H = es.eigenvalues().minCoeff();
+  std::cout << "Minimum eigenvalue of linear sys: " << min_eig_H << std::endl;
+  double cond_H =
+      es.eigenvalues().maxCoeff() / std::abs(es.eigenvalues().minCoeff());
+  std::cout << "Condition number of linear sys: " << cond_H << std::endl;
+#endif
+
   Vector multipliers = ldlt.solve(rhs);
 
   return {multipliers, violation};
@@ -294,7 +308,7 @@ double AnalyticCenter::analytic_center_bisect(const Matrix& Z,
   // Bisection parameters
   double alpha_low = 0.0;
   double alpha_high = 1.0;
-  double tol = params_.tol_bisect_ac;
+  double tol = params_.tol_bisect;
   // Perform bisection line search
   return bisection_line_search(df, alpha_low, alpha_high, tol);
 }

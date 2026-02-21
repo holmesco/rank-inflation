@@ -21,48 +21,42 @@ struct AnalyticCenterResult {
 };
 
 struct AnalyticCenterParams {
-  // NOTE: for tolerances on rank and nullspace: pivot added to rank if R_ii >
-  // tol * R_max
-
   // Verbosity
   bool verbose = true;
-  // Max number of iterations
-  int max_iter = 10;
   // threshold for checking rank of the solution
   // (does not affect convergence, just for display)
   double tol_rank_sol = 1.0E-6;
-
-  // Analytic Center parameters
-  // -------------------------
   // tolerance for step size (terminate if below)
-  double tol_step_norm_ac = 1e-8;
+  double tol_step_norm = 1e-8;
   // reduce violation in centering step
-  bool reduce_violation_ac = true;
+  bool reduce_violation = true;
   // max number of iterations for centering
-  int max_iter_ac = 50;
-
+  int max_iter = 50;
+  // linear system regularization parameter for centering (added to diagonal of
+  // system matrix)
+  double lin_sys_reg = 1e-9;
   // max number of iterations for adaptive centering
-  int max_iter_adaptive_ac = 20;
+  int max_iter_adaptive = 20;
   // initial delta for centering (should be large enough to ensure good
   // convergence even for low rank solutions, but not too large to cause slow
   // convergence)
-  double delta_init_ac = 1e-7;
+  double delta_init = 1e-7;
   // final delta for centering (should be small to get close to boundary, but
   // not too small to cause numerical issues)
-  double delta_min_ac = 1e-9;
+  double delta_min = 1e-9;
   // update factor for adjusting delta in adaptive centering (should be between
   // zero and one, smaller values lead to more conservative updates)
-  double adapt_factor_ac = 0.5;
+  double adapt_factor = 0.5;
   // enable for certificate check during centering
   // NOTE: can be used to terminate centering early if the certificate is PSD
   // within tolerance, which can be a good heuristic to avoid unnecessary
   // centering steps when the solution is already close to optimal
-  bool check_cert_ac = true;
+  bool check_cert = true;
 
   // Line search
   // ----------------
   // line search enable for analytic center
-  bool enable_line_search_ac = false;
+  bool enable_line_search = false;
   // Line search sufficient decrease parameter (should be between zero and one)
   double ln_search_suff_dec = 1e-4;
   // Line search reduction factor (should be between zero and one)
@@ -73,7 +67,7 @@ struct AnalyticCenterParams {
   double alpha_min = 1e-14;
   // line search (bisection) parameters for centering
   // NOTE: line search param will be certain to 1/2^k for k = ls_iter_ac
-  double tol_bisect_ac = 1e-6;
+  double tol_bisect = 1e-6;
 
   // Certificate parameters
   // -------------------------
@@ -114,7 +108,7 @@ class AnalyticCenter {
   // certificate matrix, the optimal multipliers, and the certificate
   // information (minimum eigenvalue and complementarity).
   AnalyticCenterResult certify(const Matrix& Y_0, double delta) const;
-  
+
   // Centering method to compute the analytic center of the current
   // feasible region starting from X_0.
   // Delta represents a perturbation parameter to ensure we stay in the interior
@@ -133,7 +127,6 @@ class AnalyticCenter {
   // of the certificate matrix at the solution (first order condition)
   std::pair<double, double> check_certificate(const Matrix& H,
                                               const Matrix& Y) const;
-
 
  protected:
   // Build weighted sum of constraint matrices: sum_i A_i * lambda_i
