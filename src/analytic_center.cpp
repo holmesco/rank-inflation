@@ -71,9 +71,9 @@ std::pair<double, double> AnalyticCenter::check_certificate(
 }
 
 AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0,
-                                             double delta) const {
+                                             double delta_init) const {
   // Run analtyic center solve
-  auto [X, mult_scaled] = get_analytic_center(Y_0, delta, 0.0);
+  auto [X, mult_scaled] = get_analytic_center(Y_0, delta_init);
   auto H = build_certificate_from_dual(mult_scaled);
   // Check certificate at the final solution
   auto [min_eig, complementarity] = check_certificate(H, Y_0);
@@ -109,13 +109,12 @@ Matrix AnalyticCenter::get_analytic_center_adaptive(const Matrix& X_0) const {
 }
 
 std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
-    const Matrix& Y_0, double delta_obj, double delta_constraint) const {
+    const Matrix& Y_0, double delta_init) const {
   // Initialize
   int n_iter = 0;
-  Matrix X = Y_0 * Y_0.transpose();
-  // Define perturbed version of X
-  Matrix Z = X + Matrix::Identity(dim, dim) * delta_obj;
-  double f_val = get_analytic_center_objective(X, delta_obj);
+  double delta = delta_init;
+  Matrix Z = Y_0 * Y_0.transpose() + Matrix::Identity(dim, dim) * delta;
+  double f_val = logdet(Z);
   Vector mult_scaled(m - 1);
   // Optimality certificate
   Matrix H;
@@ -126,7 +125,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   while (n_iter < params_.max_iter) {
     // Get system of equations
     auto [multipliers, violation] =
-        solve_analytic_center_system(Z, X, delta_constraint);
+        solve_analytic_center_system(Z, delta);
 
     // get the barrier parameter value
     barrier_param = multipliers(m - 1);
@@ -141,7 +140,9 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     // Get step direction
     auto Aw_sp = build_adjoint(multipliers);
     Matrix Aw = C_ * multipliers(m - 1) + Aw_sp;
+    
     // Line search to find optimal step size
+    //TODO - line search should just ensure that Z is PSD
     double alpha = 1.0;
     double f_val_dec = 0.0;
     if (params_.enable_line_search) {
@@ -149,15 +150,13 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       f_val -= f_val_dec;
     }
     // Update step
-    auto deltaX = Z - Z * Aw * Z;
-    X.noalias() += alpha * deltaX;
-    Matrix Z_prev = Z;
-    Z.noalias() += alpha * deltaX;
+    // TODO combine with backtrack
+    auto deltaZ = Z - Z * Aw * Z;
+    Z.noalias() += alpha * deltaZ;
     // Certificate Checking (Early stopping condition if the certificate is PSD)
     if (params_.check_cert) {
       // Build certificate matrix
       H = build_certificate_from_dual(mult_scaled);
-
       // Check complementarity condition for first order optimality
       complementarity = (Y_0.transpose() * H * Y_0).norm();
       if (complementarity <= params_.tol_cert_first_order) {
@@ -176,73 +175,64 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     // Print results
     if (params_.verbose) {
       // Objective value
-      if (!params_.enable_line_search) {
-        // Evaluate objective at new solution
-        f_val = get_analytic_center_objective(X, delta_obj);
-      }
+      f_val = logdet(Z);
       // get rank of solution
-      int sol_rank = get_rank(X, params_.tol_rank_sol);
+      int sol_rank = get_rank(Z, params_.tol_rank_sol);
       if (n_iter % 10 == 0) {
         std::printf("%6s %6s %12s %12s %12s %12s %12s %8s\n", "Iter", "SolRank",
                     "ViolNorm", "StepNorm", "Complement.", "MinEig",
                     "BarrParam", "Obj Val.");
       }
       std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n", n_iter,
-                  sol_rank, violation.norm(), deltaX.norm(), complementarity,
+                  sol_rank, violation.norm(), deltaZ.norm(), complementarity,
                   min_eig, barrier_param, f_val);
     }
+    // TODO - adapt delta based on progress (e.g. if violation is not decreasing sufficiently, increase delta to encourage more central steps)
     // Increment
     n_iter++;
     // Stopping Condition
-    if (deltaX.norm() < params_.tol_step_norm) break;
+    if (deltaZ.norm() < params_.tol_step_norm) break;
+
   }
 
-  return {X, mult_scaled};
+  return {Z, mult_scaled};
 }
 
 std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
-    const Matrix& Z, const Matrix& X, double delta_constraint) const {
+    const Matrix& Z, double delta) const {
   // Construct AZ matrices, violation vector and d vector
   Vector d(m);
   Vector violation(m);
   std::vector<Matrix> AZ;
+  // TODO trace value should be precomputed for efficiency
   std::vector<double> A_trace;
   for (int i = 0; i < m; i++) {
     // compute violation
     if (i < A_.size()) {
       AZ.push_back(A_[i].selfadjointView<Eigen::Upper>() * Z);
-      violation(i) =
-          (A_[i].selfadjointView<Eigen::Upper>() * X).trace() - b_[i];
       A_trace.push_back(A_[i].diagonal().sum());
+      violation(i) =
+          (A_[i].selfadjointView<Eigen::Upper>() * Z).trace() - b_[i] - delta * A_trace[i];
     } else {
       AZ.push_back(C_ * Z);
-      violation(i) = (C_ * X).trace() - rho_;
       A_trace.push_back(C_.diagonal().sum());
+      violation(i) = (C_ * Z).trace() - rho_ - delta * A_trace[i];
     }
-    d(i) = AZ.back().trace();
-    // add constraint perturbation
-    if (delta_constraint > 0.0) {
-      d(i) -= delta_constraint * A_trace.back();
+    // "perturbed" RHS of the linera system
+    d(i) = AZ[i].trace();
+    if (params_.reduce_violation) {
+      d(i) += violation(i);
     }
   }
+
   // Construct the LHS matrix
   Matrix H(m, m);
   for (int i = 0; i < m; i++) {
     for (int j = i; j < m; j++) {
       H(i, j) = (AZ[i] * AZ[j]).trace();
-      if (i == j) {
-        H(i, j) += params_.lin_sys_reg;
-      }
     }
   }
 
-  // Construct the RHS vector
-  Vector rhs;
-  if (params_.reduce_violation) {
-    rhs = d + violation;
-  } else {
-    rhs = d;
-  }
   // Solve the linear equation with LDLT decomposition (includes pivoting by
   // default) Note: This method is preferred because the system is PSD, but
   // can be ill-conditioned, especially in early iterations.
@@ -250,6 +240,9 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
   // Check for success (critical for rank-deficient cases)
   if (ldlt.info() == Eigen::NumericalIssue) {
     std::cout << "The matrix is has severe numerical issues." << std::endl;
+  }
+  if (ldlt.isPositive() == false) {
+    std::cout << "The matrix is not positive semidefinite." << std::endl;
   }
 #ifdef DEBUG
   // print information about the linear system
@@ -263,8 +256,8 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
       es.eigenvalues().maxCoeff() / std::abs(es.eigenvalues().minCoeff());
   std::cout << "Condition number of linear sys: " << cond_H << std::endl;
 #endif
-
-  Vector multipliers = ldlt.solve(rhs);
+  // Solve the linear system.
+  Vector multipliers = ldlt.solve(d);
 
   return {multipliers, violation};
 }

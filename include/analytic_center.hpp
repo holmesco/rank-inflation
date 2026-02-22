@@ -33,8 +33,8 @@ struct AnalyticCenterParams {
   // max number of iterations for centering
   int max_iter = 50;
   // linear system regularization parameter for centering (added to diagonal of
-  // system matrix)
-  double lin_sys_reg = 1e-9;
+  // system matrix) - DEPRECATED
+  double lin_sys_reg = 0.0;
   // max number of iterations for adaptive centering
   int max_iter_adaptive = 20;
   // initial delta for centering (should be large enough to ensure good
@@ -107,16 +107,15 @@ class AnalyticCenter {
   // Returns the final result, including the centered primal solution, the
   // certificate matrix, the optimal multipliers, and the certificate
   // information (minimum eigenvalue and complementarity).
-  AnalyticCenterResult certify(const Matrix& Y_0, double delta) const;
+  AnalyticCenterResult certify(const Matrix& Y_0, double delta_init) const;
 
   // Centering method to compute the analytic center of the current
   // feasible region starting from X_0.
   // Delta represents a perturbation parameter to ensure we stay in the interior
   // of the PSD cone even when the solution is low rank. If delta is zero then
   // no perturbation is applied.
-  std::pair<Matrix, Vector> get_analytic_center(
-      const Matrix& Y_0, double delta_obj = 0.0,
-      double delta_constraint = 0.0) const;
+  std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0,
+                                                double delta_init) const;
 
   // Build the optimality certificate for the problem using the optimal
   // multipliers
@@ -142,8 +141,8 @@ class AnalyticCenter {
 
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
-  std::pair<Vector, Vector> solve_analytic_center_system(
-      const Matrix& Z, const Matrix& X, double delta_constraint) const;
+  std::pair<Vector, Vector> solve_analytic_center_system(const Matrix& Z,
+                                                         double delta) const;
 
   double get_analytic_center_objective(const Matrix& X, double delta) const {
     auto I = Matrix::Identity(X.rows(), X.cols());
