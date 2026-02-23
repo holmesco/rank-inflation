@@ -14,7 +14,7 @@
 
 #include "fusion.h"  // MOSEK Fusion C++ header
 
-namespace SDPTools {
+namespace RankTools {
 
 // New API: returns primal X, equality constraint multipliers y, and PSD dual
 // matrix S.
@@ -47,4 +47,4 @@ SDPResult solve_sdp_mosek(const Eigen::MatrixXd& C,
                           const std::vector<Eigen::SparseMatrix<double>>& As,
                           const std::vector<double>& b, bool verbose = true);
 
-}  // namespace SDPTools
+}  // namespace RankTools

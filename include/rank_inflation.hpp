@@ -1,7 +1,7 @@
 #pragma once
 #include "utils.hpp"
 
-namespace SDPTools {
+namespace RankTools {
 
 enum class RetractionMethod {
   GradientDescent,
@@ -70,7 +70,6 @@ struct RankInflateParams {
   // Tangent space/geodesic step size (wrt Frobenius norm)
   double eps_geodesic = 1.0E-2;
 
-  
   // Certificate parameters
   // -------------------------
   // tolerance for checking PSDness of certificate matrix
@@ -172,8 +171,6 @@ class RankInflation {
   // used
   std::pair<Matrix, Matrix> get_geodesic_step(int rank,
                                               bool second_order = true) const;
-
 };
 
-
-}  // namespace SDPTools
+}  // namespace RankTools

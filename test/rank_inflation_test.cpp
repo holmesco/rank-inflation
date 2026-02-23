@@ -1,15 +1,13 @@
 /*
 c++ tests for rank inflation
 */
-#include "test_harness.hpp"
 #include "interior_point_sdp.hpp"
+#include "test_harness.hpp"
 
-
-using namespace SDPTools;
+using namespace RankTools;
 
 // Fixture Class
 class InflationParamTest : public ::testing::TestWithParam<SDPTestProblem> {};
-
 
 // ------------------  TESTS -----------------------
 // Test constraint evaluation and gradient function

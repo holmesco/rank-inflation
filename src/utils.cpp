@@ -1,6 +1,6 @@
 #include "utils.hpp"
 
-namespace SDPTools {
+namespace RankTools {
 
 double bisection_line_search(const ScalarFunc& df, double alpha_low,
                              double alpha_high, double tol) {
@@ -144,4 +144,4 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
   return result;
 }
 
-}  // namespace SDPTools
+}  // namespace RankTools

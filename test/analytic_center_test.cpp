@@ -4,7 +4,7 @@ c++ tests for rank inflation
 #include "interior_point_sdp.hpp"
 #include "test_harness.hpp"
 
-using namespace SDPTools;
+using namespace RankTools;
 
 // Fixture Class
 class AnalyticCentParamTest : public ::testing::TestWithParam<SDPTestProblem> {
@@ -251,7 +251,6 @@ TEST_P(AnalyticCentParamTest, CertifyFixedPerturb) {
             << std::endl;
   std::cout << "Complementarity (First Order Condition): "
             << result.complementarity << std::endl;
-  
 }
 
 TEST_P(AnalyticCentParamTest, CertifyAdaptivePerturb) {

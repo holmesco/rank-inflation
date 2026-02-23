@@ -3,64 +3,61 @@
 using namespace mosek::fusion;
 using namespace monty;  // Fusion uses monty for Matrix types
 using SpMat = Eigen::SparseMatrix<double, Eigen::ColMajor>;
-namespace SDPTools {
+namespace RankTools {
 
 Matrix::t eigenToMosekSparse(const SpMat& eigenMat) {
-    // 1. Ensure the matrix is in compressed format (CCS)
-    if (!eigenMat.isCompressed()) {
-        throw std::runtime_error("Input Eigen sparse matrix must be in compressed column format (CCS).");
+  // 1. Ensure the matrix is in compressed format (CCS)
+  if (!eigenMat.isCompressed()) {
+    throw std::runtime_error(
+        "Input Eigen sparse matrix must be in compressed column format (CCS).");
+  }
+
+  // 2. Extract dimensions
+  int nrows = (int)eigenMat.rows();
+  int ncols = (int)eigenMat.cols();
+  int nnz = (int)eigenMat.nonZeros();
+
+  // Get triplet data from Eigen
+  std::vector<double> values(nnz);
+  std::vector<int> rows(nnz);  // row indices for ColMajor
+  std::vector<int> cols(nnz);  // column pointers for ColMajor
+  for (int k = 0; k < eigenMat.outerSize(); ++k) {
+    // k is the column index for ColMajor (default)
+    for (SpMat::InnerIterator it(eigenMat, k); it; ++it) {
+      rows.push_back(it.row());      // Row index
+      cols.push_back(it.col());      // Row index
+      values.push_back(it.value());  // Row index
     }
+  }
+  // 4. Create MOSEK ndarrays from Eigen's raw pointers
+  // Note: Fusion uses shared_ptr style ndarrays for memory management
+  auto m_vals = new_array_ptr<double>(values);
+  auto m_rows = new_array_ptr<int>(rows);
+  auto m_cols = new_array_ptr<int>(cols);
 
-    // 2. Extract dimensions
-    int nrows = (int)eigenMat.rows();
-    int ncols = (int)eigenMat.cols();
-    int nnz  = (int)eigenMat.nonZeros();
-
-    // Get triplet data from Eigen
-    std::vector<double> values(nnz);
-    std::vector<int> rows(nnz);  // row indices for ColMajor 
-    std::vector<int> cols(nnz); // column pointers for ColMajor
-    for (int k = 0; k < eigenMat.outerSize(); ++k) {
-        // k is the column index for ColMajor (default)
-        for (SpMat::InnerIterator it(eigenMat, k); it; ++it) {
-            rows.push_back(it.row());    // Row index
-            cols.push_back(it.col());    // Row index
-            values.push_back(it.value());    // Row index
-        }
-    }
-    // 4. Create MOSEK ndarrays from Eigen's raw pointers
-    // Note: Fusion uses shared_ptr style ndarrays for memory management
-    auto m_vals  = new_array_ptr<double>(values);
-    auto m_rows  = new_array_ptr<int>(rows);
-    auto m_cols  = new_array_ptr<int>(cols);
-
-    // 5. Construct the Fusion Sparse Matrix (Compressed Column Format)
-    return Matrix::sparse(nrows, ncols, m_rows, m_cols, m_vals);
+  // 5. Construct the Fusion Sparse Matrix (Compressed Column Format)
+  return Matrix::sparse(nrows, ncols, m_rows, m_cols, m_vals);
 }
 
- 
 mosek::fusion::Matrix::t eigenToMosekDense(const Eigen::MatrixXd& eigenMat) {
-    int rows = (int)eigenMat.rows();
-    int cols = (int)eigenMat.cols();
-    // Column-major storage: element (i,j) at index j*rows + i
-    std::vector<double> data(rows * cols, 0.0);
-    for (int j = 0; j < cols; ++j)
-      for (int i = 0; i < rows; ++i)
-        data[j * rows + i] = eigenMat(i, j);
-    // Create a contiguous array for MOSEK (column-major order)
-    auto m_data = new_array_ptr<double>(data);
+  int rows = (int)eigenMat.rows();
+  int cols = (int)eigenMat.cols();
+  // Column-major storage: element (i,j) at index j*rows + i
+  std::vector<double> data(rows * cols, 0.0);
+  for (int j = 0; j < cols; ++j)
+    for (int i = 0; i < rows; ++i) data[j * rows + i] = eigenMat(i, j);
+  // Create a contiguous array for MOSEK (column-major order)
+  auto m_data = new_array_ptr<double>(data);
 
-    // 3. Construct the Fusion Dense Matrix.
-    // This overload takes (rows, cols, data_array).
-    return Matrix::dense(rows, cols, m_data);
+  // 3. Construct the Fusion Dense Matrix.
+  // This overload takes (rows, cols, data_array).
+  return Matrix::dense(rows, cols, m_data);
 }
-
 
 // Solve and return primal and duals
 SDPResult solve_sdp_mosek(const Eigen::MatrixXd& C,
                           const std::vector<Eigen::SparseMatrix<double>>& As,
-                          const std::vector<double>& b,
-                        bool verbose) {
+                          const std::vector<double>& b, bool verbose) {
   const int n = static_cast<int>(C.rows());
   if (C.cols() != n) throw std::runtime_error("C must be square");
   if (static_cast<int>(As.size()) != b.size())
@@ -88,11 +85,11 @@ SDPResult solve_sdp_mosek(const Eigen::MatrixXd& C,
     cons.push_back(c);
   }
   // Enable verbose logging to stdout
-  if (verbose){
+  if (verbose) {
     M->setLogHandler(
         [](const std::string& msg) { std::cout << msg << std::flush; });
   }
-  
+
   // Solve
   M->solve();
 
@@ -133,4 +130,4 @@ SDPResult solve_sdp_mosek(const Eigen::MatrixXd& C,
   res.obj_value = M->primalObjValue();
   return res;
 }
-}  // namespace SDPTools
+}  // namespace RankTools

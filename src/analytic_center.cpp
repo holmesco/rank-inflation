@@ -1,6 +1,6 @@
 #include "analytic_center.hpp"
 
-namespace SDPTools {
+namespace RankTools {
 
 AnalyticCenter::AnalyticCenter(
     const Matrix& C, double rho,
@@ -160,7 +160,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       // Ensure delta does not go below minimum threshold
       delta = std::max(delta, params_.delta_min);
     }
-    
+
     n_iter++;
     // Print results
     if (params_.verbose) {
@@ -169,26 +169,30 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       // get rank of solution
       int sol_rank = get_rank(Z, params_.tol_rank_sol);
       if (n_iter % 10 == 1) {
-      std::printf("%6s %6s %12s %12s %12s %12s %12s %12s %12s %8s\n", "Iter", "SolRank",
-            "ViolNorm", "StepNorm", "Complement.", "MinEig",
-            "BarrParam", "Alpha", "Delta", "Obj Val.");
+        std::printf("%6s %6s %12s %12s %12s %12s %12s %12s %12s %8s\n", "Iter",
+                    "SolRank", "ViolNorm", "StepNorm", "Complement.", "MinEig",
+                    "BarrParam", "Alpha", "Delta", "Obj Val.");
       }
-      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n", n_iter,
-            sol_rank, violation.norm(), deltaZ.norm(), complementarity,
-            min_eig, barrier_param, alpha, delta, f_val);
+      std::printf(
+          "%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n",
+          n_iter, sol_rank, violation.norm(), deltaZ.norm(), complementarity,
+          min_eig, barrier_param, alpha, delta, f_val);
     }
     // Check final stopping condition
-    if (deltaZ.norm() < params_.tol_step_norm) 
-      if (params_.adaptive_perturb){
+    if (deltaZ.norm() < params_.tol_step_norm)
+      if (params_.adaptive_perturb) {
         if (delta <= params_.delta_min) {
           if (params_.verbose) {
-            std::cout << "Step norm below threshold and minimum perturbation reached. Stopping centering." << std::endl;
+            std::cout << "Step norm below threshold and minimum perturbation "
+                         "reached. Stopping centering."
+                      << std::endl;
           }
           break;
         }
-      }else{
+      } else {
         if (params_.verbose) {
-          std::cout << "Step norm below threshold. Stopping centering." << std::endl;
+          std::cout << "Step norm below threshold. Stopping centering."
+                    << std::endl;
         }
         break;
       }
@@ -374,4 +378,4 @@ AnalyticCenter::analytic_center_line_search_func(const Matrix& Z,
 
   return {f, df};
 }
-}  // namespace SDPTools
+}  // namespace RankTools

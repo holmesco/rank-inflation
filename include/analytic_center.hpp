@@ -1,7 +1,7 @@
 #pragma once
 #include "utils.hpp"
 
-namespace SDPTools {
+namespace RankTools {
 
 struct AnalyticCenterResult {
   // Analytic center solution
@@ -32,7 +32,7 @@ struct AnalyticCenterParams {
   bool reduce_violation = true;
   // max number of iterations for centering
   int max_iter = 50;
-  
+
   // Adaptive Perturbation Parameters
   // -------------------------
   // enable adaptive perturbation for centering
@@ -40,15 +40,20 @@ struct AnalyticCenterParams {
   // final delta for centering (should be small to get close to boundary, but
   // not too small to cause numerical issues)
   double delta_min = 1e-9;
-  // Max step size for increasing perturbation. If the step size is above this threshold, then we consider that the step size is too large and we increase the perturbation parameter to encourage more central steps.
+  // Max step size for increasing perturbation. If the step size is above this
+  // threshold, then we consider that the step size is too large and we increase
+  // the perturbation parameter to encourage more central steps.
   double delta_inc_step_max = 0.1;
   // update factor for adjusting delta in adaptive centering
   double delta_inc = 2.0;
-  // Min step size for decreasing perturbation. If the step size is below this threshold, then we consider that the step size is sufficiently small and we decrease the perturbation parameter to allow for more aggressive steps towards the boundary.
+  // Min step size for decreasing perturbation. If the step size is below this
+  // threshold, then we consider that the step size is sufficiently small and we
+  // decrease the perturbation parameter to allow for more aggressive steps
+  // towards the boundary.
   double delta_dec_step_min = 0.9;
   // update factor for adjusting delta in adaptive centering
   double delta_dec = 0.6;
-  
+
   // Line search
   // ----------------
   // line search enable for analytic center
@@ -64,7 +69,7 @@ struct AnalyticCenterParams {
   // line search (bisection) parameters for centering
   // NOTE: line search param will be certain to 1/2^k for k = ls_iter_ac
   double tol_bisect = 1e-6;
-  
+
   // Certificate parameters
   // -------------------------
   // enable for certificate check during centering
@@ -148,8 +153,8 @@ class AnalyticCenter {
   double line_search_psd(Matrix& Z, const Matrix& dZ) const;
 
   // Line search based on determinant increase for analytic center
-  std::pair<double, double> line_search_det(
-    const Matrix& Z, const Matrix& Aw) const;
+  std::pair<double, double> line_search_det(const Matrix& Z,
+                                            const Matrix& Aw) const;
 
   // Perform bisection line search to find optimal step size for analytic
   // center
@@ -162,4 +167,4 @@ class AnalyticCenter {
       const Matrix& Z, const Matrix& Aw) const;
 };
 
-}  // namespace SDPTools
+}  // namespace RankTools

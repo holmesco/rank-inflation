@@ -9,21 +9,21 @@
 #include <iostream>
 #include <utility>
 
-#include "rank_inflation.hpp"
 #include "analytic_center.hpp"
+#include "rank_inflation.hpp"
 
-using namespace SDPTools;
+using namespace RankTools;
 
 // Subclass that promotes every protected method to public so that unit tests
 // can exercise internal logic without friend declarations in production code.
 class AnalyticCenterTestable : public AnalyticCenter {
  public:
-  using AnalyticCenter::AnalyticCenter;  // inherit all constructors
-  using AnalyticCenter::build_adjoint;
-  using AnalyticCenter::solve_analytic_center_system;
-  using AnalyticCenter::get_analytic_center_objective;
   using AnalyticCenter::analytic_center_bisect;
   using AnalyticCenter::analytic_center_line_search_func;
+  using AnalyticCenter::AnalyticCenter;  // inherit all constructors
+  using AnalyticCenter::build_adjoint;
+  using AnalyticCenter::get_analytic_center_objective;
+  using AnalyticCenter::solve_analytic_center_system;
 };
 
 // Test case data structure
@@ -53,13 +53,10 @@ struct SDPTestProblem {
   }
 
   // Returns a testable subclass that exposes protected methods as public.
-  inline auto make_testable(const AnalyticCenterParams& params) const{
+  inline auto make_testable(const AnalyticCenterParams& params) const {
     return AnalyticCenterTestable(C, rho, A, b, params);
   }
 };
-
-
-
 
 // ----------- Lovasc Theta Helper Functions ----------------
 
@@ -198,9 +195,9 @@ SDPTestProblem make_two_sphere_sdp(int n, double r1, double r2, double d) {
 
   SDPTestProblem sdp;
   sdp.dim = dim;
-  
-  // Make the sphere constraint. Sphere centered at c with radius r is defined by the quadratic constraint:
-  // A . X == r^2, where A is [I, -c; -c^T, c^T c]
+
+  // Make the sphere constraint. Sphere centered at c with radius r is defined
+  // by the quadratic constraint: A . X == r^2, where A is [I, -c; -c^T, c^T c]
   auto make_constraint = [dim, n](const Eigen::VectorXd& c) {
     Eigen::SparseMatrix<double> A(dim, dim);
     std::vector<Eigen::Triplet<double>> T;

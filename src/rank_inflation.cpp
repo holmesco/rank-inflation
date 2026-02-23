@@ -1,6 +1,6 @@
 #include "rank_inflation.hpp"
 
-namespace SDPTools {
+namespace RankTools {
 
 RankInflation::RankInflation(const Matrix& C, double rho,
                              const std::vector<Eigen::SparseMatrix<double>>& A,
@@ -322,7 +322,8 @@ std::pair<Matrix, Vector> RankInflation::build_proj_corr_grad_hess(
   return {hess, grad};
 }
 
-Matrix RankInflation::build_certificate_from_dual(const Vector& multipliers) const {
+Matrix RankInflation::build_certificate_from_dual(
+    const Vector& multipliers) const {
   // build weighted sum of constraint matrices with multiplier values
   auto f_A = build_adjoint(multipliers, params_.tol_viol_hess);
   // add cost term if required
@@ -333,7 +334,7 @@ Matrix RankInflation::build_certificate_from_dual(const Vector& multipliers) con
 }
 
 Matrix RankInflation::build_certificate_from_primal(const Matrix& Jac,
-                                        const Matrix& Y) const {
+                                                    const Matrix& Y) const {
   // Get components of stationarity condition
   // vec(C*Y) is last row of jacobian, split it off
   Vector vecCY = Jac.bottomRows(1).transpose();
@@ -366,4 +367,4 @@ std::pair<double, double> RankInflation::check_certificate(
   return {min_eig, first_order_norm};
 }
 
-}  // namespace SDPTools
+}  // namespace RankTools

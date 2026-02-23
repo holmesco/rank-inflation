@@ -1,5 +1,5 @@
 // --------------------------------------------------------------------------
-// pybind11 bindings for SDPTools::AnalyticCenter and supporting types
+// pybind11 bindings for RankTools::AnalyticCenter and supporting types
 // --------------------------------------------------------------------------
 //
 // The C++ AnalyticCenter class stores *references* to the constraint matrices
@@ -15,7 +15,7 @@
 #include "analytic_center.hpp"
 
 namespace py = pybind11;
-using namespace SDPTools;
+using namespace RankTools;
 
 // ---------------------------------------------------------------------------
 // Wrapper: owns copies of A and b so Python GC can't pull the rug out.
@@ -67,7 +67,7 @@ class PyAnalyticCenter {
 // Module definition
 // ---------------------------------------------------------------------------
 PYBIND11_MODULE(sdptools, m) {
-  m.doc() = "Python bindings for the SDPTools AnalyticCenter solver";
+  m.doc() = "Python bindings for the RankTools AnalyticCenter solver";
 
   // ---- AnalyticCenterParams ----
   py::class_<AnalyticCenterParams>(m, "AnalyticCenterParams")
@@ -200,5 +200,3 @@ Returns
 tuple(min_eig, first_order_cond)
 )pbdoc");
 }
-
-

@@ -6,7 +6,7 @@
 #include <memory>
 #include <vector>
 
-namespace SDPTools {
+namespace RankTools {
 // Simplifying declarations for commonly used Eigen types in this project. This
 // also allows us to easily change the underlying types if needed.
 using Matrix = Eigen::MatrixXd;
@@ -62,4 +62,4 @@ inline double logdet(const Matrix& X) {
   double val = 2.0 * L.diagonal().array().log().sum();
   return val;
 }
-}  // namespace SDPTools
+}  // namespace RankTools
