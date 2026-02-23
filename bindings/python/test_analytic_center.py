@@ -115,6 +115,51 @@ def test_certify():
     print(f"[PASS] certify  certified={result.certified}  min_eig={result.min_eig:.6e}")
 
 
+def test_solve_sdp_mosek():
+    """Verify solve_sdp_mosek returns a valid primal/dual solution."""
+    n = 4
+    C, rho, A, b = make_simple_sdp(n)
+
+    result = ranktools.solve_sdp_mosek(C, A, b, verbose=False)
+
+    assert isinstance(result, ranktools.SDPResult)
+    assert result.X.shape == (n, n)
+    assert result.y.shape == (len(b),)
+    assert result.S.shape == (n, n)
+
+    # Primal feasibility: trace(A_0 X) == b_0 == 1
+    np.testing.assert_allclose(np.trace(result.X), b[0], atol=1e-4)
+    # Objective value should equal trace(C @ X) = trace(X) ≈ 1
+    np.testing.assert_allclose(result.obj_value, b[0], atol=1e-4)
+    # Dual matrix S should be PSD
+    eigs = np.linalg.eigvalsh(result.S)
+    assert eigs.min() >= -1e-6, f"Dual S not PSD, min eig={eigs.min():.3e}"
+    print(f"[PASS] solve_sdp_mosek  obj={result.obj_value:.6f}")
+
+
+def test_rank_reduction():
+    """Verify that rank_reduction reduces rank while preserving constraints."""
+    n = 4
+    C, rho, A, b = make_simple_sdp(n)
+
+    # Start from a rank-n solution: V = I/sqrt(n)
+    V0 = np.eye(n) / np.sqrt(n)
+
+    params = ranktools.RankReductionParams()
+    params.verbose = False
+    params.targ_rank = 1
+
+    V_red = ranktools.rank_reduction(A, V0, params)
+    assert V_red.ndim == 2
+    assert V_red.shape[0] == n
+    assert V_red.shape[1] <= params.targ_rank
+
+    # Constraint trace(X) = 1 must still hold
+    X_red = V_red @ V_red.T
+    np.testing.assert_allclose(np.trace(X_red), 1.0, atol=1e-6)
+    print(f"[PASS] rank_reduction  output_rank={V_red.shape[1]}")
+
+
 if __name__ == "__main__":
     test_params()
     test_construction()
@@ -122,4 +167,6 @@ if __name__ == "__main__":
     test_get_analytic_center()
     test_build_and_check_certificate()
     test_certify()
+    test_solve_sdp_mosek()
+    test_rank_reduction()
     print("\nAll tests passed!")

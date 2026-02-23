@@ -13,6 +13,8 @@
 #include <pybind11/stl.h>  // std::vector / std::pair conversion
 
 #include "analytic_center.hpp"
+#include "interior_point_sdp.hpp"
+#include "rank_reduction.hpp"
 
 namespace py = pybind11;
 using namespace RankTools;
@@ -67,7 +69,9 @@ class PyAnalyticCenter {
 // Module definition
 // ---------------------------------------------------------------------------
 PYBIND11_MODULE(ranktools, m) {
-  m.doc() = "Python bindings for the RankTools AnalyticCenter solver";
+  m.doc() =
+      "Python bindings for the RankTools library (AnalyticCenter, "
+      "rank_reduction, solve_sdp_mosek)";
 
   // ---- AnalyticCenterParams ----
   py::class_<AnalyticCenterParams>(m, "AnalyticCenterParams")
@@ -198,5 +202,96 @@ Check global optimality of a solution.
 Returns
 -------
 tuple(min_eig, first_order_cond)
+)pbdoc");
+
+  // ---- SDPResult ----
+  py::class_<SDPResult>(m, "SDPResult")
+      .def_readonly("X", &SDPResult::X)
+      .def_readonly("y", &SDPResult::y)
+      .def_readonly("S", &SDPResult::S)
+      .def_readonly("obj_value", &SDPResult::obj_value)
+      .def("__repr__", [](const SDPResult& r) {
+        return "<SDPResult obj_value=" + std::to_string(r.obj_value) + ">";
+      });
+
+  // ---- solve_sdp_mosek ----
+  m.def(
+      "solve_sdp_mosek",
+      [](const Eigen::MatrixXd& C, std::vector<Eigen::SparseMatrix<double>> As,
+         std::vector<double> b,
+         bool verbose) { return solve_sdp_mosek(C, As, b, verbose); },
+      py::arg("C"), py::arg("A"), py::arg("b"), py::arg("verbose") = true,
+      R"pbdoc(
+Solve a semidefinite program using MOSEK.
+
+Solves the primal SDP:
+    min   trace(C @ X)
+    s.t.  trace(A_i @ X) = b_i  for i = 0 ... m-1
+          X >= 0  (positive semidefinite)
+
+Parameters
+----------
+C : numpy.ndarray (n, n)
+    Cost matrix.
+A : list of scipy.sparse matrices
+    Constraint matrices (each n x n).
+b : list of float
+    Right-hand side values.
+verbose : bool, optional
+    Enable MOSEK solver output (default True).
+
+Returns
+-------
+SDPResult
+    Struct with fields:
+      X         : numpy.ndarray (n, n) — primal solution.
+      y         : numpy.ndarray (m,)   — dual multipliers for equality constraints.
+      S         : numpy.ndarray (n, n) — dual PSD matrix C - sum_i y_i A_i.
+      obj_value : float                — objective value trace(C @ X).
+)pbdoc");
+
+  // ---- RankReductionParams ----
+  py::class_<RankReductionParams>(m, "RankReductionParams")
+      .def(py::init<>())
+      .def_readwrite("targ_rank", &RankReductionParams::targ_rank)
+      .def_readwrite("null_tol", &RankReductionParams::null_tol)
+      .def_readwrite("eig_tol", &RankReductionParams::eig_tol)
+      .def_readwrite("max_iter", &RankReductionParams::max_iter)
+      .def_readwrite("verbose", &RankReductionParams::verbose)
+      .def("__repr__", [](const RankReductionParams& p) {
+        return "<RankReductionParams targ_rank=" + std::to_string(p.targ_rank) +
+               " verbose=" + (p.verbose ? "True" : "False") + ">";
+      });
+
+  // ---- rank_reduction ----
+  m.def(
+      "rank_reduction",
+      [](std::vector<Eigen::SparseMatrix<double>> A, const Matrix& V_init,
+         RankReductionParams params) {
+        return rank_reduction(A, V_init, std::move(params));
+      },
+      py::arg("A"), py::arg("V_init"),
+      py::arg("params") = RankReductionParams(),
+      R"pbdoc(
+Reduce the rank of an SDP solution.
+
+Implements the rank reduction algorithm from:
+  Lemon, So & Ye, "Low-rank semidefinite programming: Theory and
+  applications", Foundations and Trends in Optimization, 2016.
+
+Parameters
+----------
+A : list of scipy.sparse matrices
+    Constraint matrices (each n×n, upper-triangular storage).
+V_init : numpy.ndarray (n, r)
+    Initial low-rank factor; the SDP solution is X = V_init @ V_init.T.
+params : RankReductionParams, optional
+    Algorithm parameters.
+
+Returns
+-------
+numpy.ndarray (n, r')
+    Reduced low-rank factor V such that V @ V.T satisfies all constraints
+    with rank r' <= r.
 )pbdoc");
 }
