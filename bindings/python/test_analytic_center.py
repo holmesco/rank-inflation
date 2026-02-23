@@ -1,5 +1,5 @@
 """
-Smoke-test / usage example for the sdptools Python bindings.
+Smoke-test / usage example for the ranktools Python bindings.
 
 Run after building:
     cd /workspace
@@ -13,7 +13,7 @@ import numpy as np
 import scipy.sparse as sp
 
 # The compiled module is placed next to this file by CMake
-import sdptools
+import ranktools
 
 
 def make_simple_sdp(n: int):
@@ -36,7 +36,7 @@ def make_simple_sdp(n: int):
 
 def test_params():
     """Verify default parameter construction and mutation."""
-    p = sdptools.AnalyticCenterParams()
+    p = ranktools.AnalyticCenterParams()
     assert p.verbose is True
     p.verbose = False
     assert p.verbose is False
@@ -47,7 +47,7 @@ def test_construction():
     """Construct an AnalyticCenter and verify dimensions."""
     n = 4
     C, rho, A, b = make_simple_sdp(n)
-    ac = sdptools.AnalyticCenter(C, rho, A, b)
+    ac = ranktools.AnalyticCenter(C, rho, A, b)
     assert ac.dim == n
     assert ac.m == len(b) + 1  # constraints + cost
     print(f"[PASS] AnalyticCenter construction  dim={ac.dim}  m={ac.m}")
@@ -56,7 +56,7 @@ def test_construction():
 def test_eval_constraints():
     n = 4
     C, rho, A, b = make_simple_sdp(n)
-    ac = sdptools.AnalyticCenter(C, rho, A, b)
+    ac = ranktools.AnalyticCenter(C, rho, A, b)
 
     X = np.eye(n) / n
     v = ac.eval_constraints(X)
@@ -69,10 +69,10 @@ def test_eval_constraints():
 def test_get_analytic_center():
     n = 4
     C, rho, A, b = make_simple_sdp(n)
-    params = sdptools.AnalyticCenterParams()
+    params = ranktools.AnalyticCenterParams()
     params.verbose = False
     params.max_iter_ac = 100
-    ac = sdptools.AnalyticCenter(C, rho, A, b, params)
+    ac = ranktools.AnalyticCenter(C, rho, A, b, params)
 
     # Start from identity (feasible)
     Y0 = np.eye(n) / np.sqrt(n)
@@ -86,9 +86,9 @@ def test_get_analytic_center():
 def test_build_and_check_certificate():
     n = 4
     C, rho, A, b = make_simple_sdp(n)
-    params = sdptools.AnalyticCenterParams()
+    params = ranktools.AnalyticCenterParams()
     params.verbose = False
-    ac = sdptools.AnalyticCenter(C, rho, A, b, params)
+    ac = ranktools.AnalyticCenter(C, rho, A, b, params)
 
     Y0 = np.eye(n) / np.sqrt(n)
     X, mult = ac.get_analytic_center(Y0, delta_obj=1e-7)
@@ -103,14 +103,14 @@ def test_build_and_check_certificate():
 def test_certify():
     n = 4
     C, rho, A, b = make_simple_sdp(n)
-    params = sdptools.AnalyticCenterParams()
+    params = ranktools.AnalyticCenterParams()
     params.verbose = False
-    ac = sdptools.AnalyticCenter(C, rho, A, b, params)
+    ac = ranktools.AnalyticCenter(C, rho, A, b, params)
 
     Y0 = np.eye(n) / np.sqrt(n)
     result = ac.certify(Y0, delta=1e-7)
 
-    assert isinstance(result, sdptools.AnalyticCenterResult)
+    assert isinstance(result, ranktools.AnalyticCenterResult)
     assert result.X.shape == (n, n)
     print(f"[PASS] certify  certified={result.certified}  min_eig={result.min_eig:.6e}")
 

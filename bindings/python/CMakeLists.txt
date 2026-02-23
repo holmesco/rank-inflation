@@ -11,19 +11,19 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pybind11)
 
-pybind11_add_module(sdptools_py
+pybind11_add_module(ranktools_py
   analytic_center_bindings.cpp
 )
 
-target_link_libraries(sdptools_py PRIVATE rank_tools)
+target_link_libraries(ranktools_py PRIVATE rank_tools)
 
-# Put the .so next to the source so `import sdptools` works from this dir.
+# Put the .so next to the source so `import ranktools` works from this dir.
 # BUILD_RPATH: used when importing directly from the build/source tree.
-# INSTALL_RPATH: $ORIGIN means "same directory as sdptools.so" — used after
-#   pip install, where librank_tools.so is installed alongside sdptools.so.
-set_target_properties(sdptools_py PROPERTIES
+# INSTALL_RPATH: $ORIGIN means "same directory as ranktools.so" — used after
+#   pip install, where librank_tools.so is installed alongside ranktools.so.
+set_target_properties(ranktools_py PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-  OUTPUT_NAME "sdptools"
+  OUTPUT_NAME "ranktools"
   BUILD_RPATH "${CMAKE_BINARY_DIR}"
   INSTALL_RPATH "$ORIGIN"
   BUILD_WITH_INSTALL_RPATH FALSE
@@ -31,10 +31,10 @@ set_target_properties(sdptools_py PROPERTIES
 )
 
 # Install the module into the wheel (used by scikit-build-core)
-install(TARGETS sdptools_py DESTINATION .)
+install(TARGETS ranktools_py DESTINATION .)
 # Bundle librank_tools.so into the wheel so $ORIGIN resolves it
 install(TARGETS rank_tools LIBRARY DESTINATION .)
-install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/sdptools.pyi"
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/ranktools.pyi"
   DESTINATION . OPTIONAL)
 
 ###############################################################################
@@ -59,16 +59,16 @@ execute_process(
 if(_STUBGEN_CHECK EQUAL 0)
   message(STATUS "pybind11-stubgen found (via ${Python3_EXECUTABLE})")
   add_custom_command(
-    TARGET sdptools_py
+    TARGET ranktools_py
     POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E env
       "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}:$ENV{PYTHONPATH}"
       ${Python3_EXECUTABLE} -m pybind11_stubgen
-        sdptools
+        ranktools
         --numpy-array-remove-parameters # remove problematic array dimensions
         -o "${CMAKE_CURRENT_SOURCE_DIR}"
         --ignore-all-errors
-    COMMENT "Generating Python stubs for sdptools with pybind11-stubgen"
+    COMMENT "Generating Python stubs for ranktools with pybind11-stubgen"
     VERBATIM
   )
 else()

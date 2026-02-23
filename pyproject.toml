@@ -3,9 +3,9 @@ requires = ["scikit-build-core>=0.5", "pybind11>=2.12"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "sdptools"
+name = "ranktools"
 version = "0.0.1"
-description = "Python bindings for SDPTools AnalyticCenter solver"
+description = "Python bindings for RankTools AnalyticCenter solver"
 requires-python = ">=3.8"
 dependencies = ["numpy", "scipy"]
 

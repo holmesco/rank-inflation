@@ -66,7 +66,7 @@ class PyAnalyticCenter {
 // ---------------------------------------------------------------------------
 // Module definition
 // ---------------------------------------------------------------------------
-PYBIND11_MODULE(sdptools, m) {
+PYBIND11_MODULE(ranktools, m) {
   m.doc() = "Python bindings for the RankTools AnalyticCenter solver";
 
   // ---- AnalyticCenterParams ----
