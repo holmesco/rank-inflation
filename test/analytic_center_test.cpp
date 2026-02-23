@@ -229,13 +229,15 @@ TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
             << first_ord_cond << std::endl;
 }
 
-TEST_P(AnalyticCentParamTest, Certify) {
+TEST_P(AnalyticCentParamTest, CertifyFixedPerturb) {
   const auto& sdp = GetParam();
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
   params.check_cert = true;  // Turn off early stopping based on certificate for
                              // testing purposes
+  params.adaptive_perturb =
+      false;  // Turn off adaptive perturbation for testing purposes
   auto delta = 1e-7;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
@@ -245,12 +247,35 @@ TEST_P(AnalyticCentParamTest, Certify) {
   auto result = problem.certify(Y_0, delta);
   // check that the solution is certified
   EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
-  if (!result.certified) {
-    std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
-              << std::endl;
-    std::cout << "Complementarity (First Order Condition): "
-              << result.complementarity << std::endl;
-  }
+  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
+            << std::endl;
+  std::cout << "Complementarity (First Order Condition): "
+            << result.complementarity << std::endl;
+  
+}
+
+TEST_P(AnalyticCentParamTest, CertifyAdaptivePerturb) {
+  const auto& sdp = GetParam();
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.check_cert = false;  // Turn off early stopping based on certificate
+                              // for testing purposes
+  params.adaptive_perturb =
+      true;  // Turn on adaptive perturbation for testing purposes
+  auto delta = 1e-4;
+  // generate problem
+  AnalyticCenter problem = sdp.make(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  // Run certification method
+  auto result = problem.certify(Y_0, delta);
+  // check that the solution is certified
+  EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
+  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
+            << std::endl;
+  std::cout << "Complementarity (First Order Condition): "
+            << result.complementarity << std::endl;
 }
 
 INSTANTIATE_TEST_SUITE_P(

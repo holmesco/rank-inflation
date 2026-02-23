@@ -20,10 +20,8 @@ class AnalyticCenterTestable : public AnalyticCenter {
  public:
   using AnalyticCenter::AnalyticCenter;  // inherit all constructors
   using AnalyticCenter::build_adjoint;
-  using AnalyticCenter::get_analytic_center_adaptive;
   using AnalyticCenter::solve_analytic_center_system;
   using AnalyticCenter::get_analytic_center_objective;
-  using AnalyticCenter::analytic_center_backtrack;
   using AnalyticCenter::analytic_center_bisect;
   using AnalyticCenter::analytic_center_line_search_func;
 };

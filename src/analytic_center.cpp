@@ -90,24 +90,6 @@ AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0,
   return result;
 }
 
-Matrix AnalyticCenter::get_analytic_center_adaptive(const Matrix& X_0) const {
-  double delta = params_.delta_init;
-  auto X = X_0;
-  Vector multipliers(m);
-  while (delta >= params_.delta_min) {
-    // Compute analytic center for current delta
-    std::tie(X, multipliers) = get_analytic_center(X, delta);
-    // Update delta
-    delta *= params_.adapt_factor;
-    if (params_.verbose) {
-      std::cout << "-------------------------------- " << std::endl;
-      std::cout << "Adapting Delta: " << delta << std::endl;
-      std::cout << "-------------------------------- " << std::endl;
-    }
-  }
-  return X;
-}
-
 std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     const Matrix& Y_0, double delta_init) const {
   // Initialize
@@ -124,8 +106,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   // Main loop
   while (n_iter < params_.max_iter) {
     // Get system of equations
-    auto [multipliers, violation] =
-        solve_analytic_center_system(Z, delta);
+    auto [multipliers, violation] = solve_analytic_center_system(Z, delta);
 
     // get the barrier parameter value
     barrier_param = multipliers(m - 1);
@@ -140,19 +121,16 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     // Get step direction
     auto Aw_sp = build_adjoint(multipliers);
     Matrix Aw = C_ * multipliers(m - 1) + Aw_sp;
-    
-    // Line search to find optimal step size
-    //TODO - line search should just ensure that Z is PSD
-    double alpha = 1.0;
-    double f_val_dec = 0.0;
-    if (params_.enable_line_search) {
-      std::tie(alpha, f_val_dec) = analytic_center_backtrack(Z, Aw);
-      f_val -= f_val_dec;
-    }
-    // Update step
-    // TODO combine with backtrack
     auto deltaZ = Z - Z * Aw * Z;
-    Z.noalias() += alpha * deltaZ;
+    // Line search to find step that ensures PSDness of the solution
+    // NOTE: Could replace with exact line search based on determinant increase,
+    // but this backtracking
+    double alpha = 1.0;
+    if (params_.enable_line_search) {
+      alpha = line_search_psd(Z, deltaZ);
+    } else {
+      Z.noalias() += alpha * deltaZ;
+    }
     // Certificate Checking (Early stopping condition if the certificate is PSD)
     if (params_.check_cert) {
       // Build certificate matrix
@@ -172,27 +150,48 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
         }
       }
     }
+    // Perturbation update for next iteration (if enabled)
+    if (params_.adaptive_perturb) {
+      if (alpha < params_.delta_inc_step_max) {
+        delta = delta * params_.delta_inc;
+      } else if (alpha > params_.delta_dec_step_min) {
+        delta = delta * params_.delta_dec;
+      }
+      // Ensure delta does not go below minimum threshold
+      delta = std::max(delta, params_.delta_min);
+    }
+    
+    n_iter++;
     // Print results
     if (params_.verbose) {
       // Objective value
       f_val = logdet(Z);
       // get rank of solution
       int sol_rank = get_rank(Z, params_.tol_rank_sol);
-      if (n_iter % 10 == 0) {
-        std::printf("%6s %6s %12s %12s %12s %12s %12s %8s\n", "Iter", "SolRank",
-                    "ViolNorm", "StepNorm", "Complement.", "MinEig",
-                    "BarrParam", "Obj Val.");
+      if (n_iter % 10 == 1) {
+      std::printf("%6s %6s %12s %12s %12s %12s %12s %12s %12s %8s\n", "Iter", "SolRank",
+            "ViolNorm", "StepNorm", "Complement.", "MinEig",
+            "BarrParam", "Alpha", "Delta", "Obj Val.");
       }
-      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n", n_iter,
-                  sol_rank, violation.norm(), deltaZ.norm(), complementarity,
-                  min_eig, barrier_param, f_val);
+      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n", n_iter,
+            sol_rank, violation.norm(), deltaZ.norm(), complementarity,
+            min_eig, barrier_param, alpha, delta, f_val);
     }
-    // TODO - adapt delta based on progress (e.g. if violation is not decreasing sufficiently, increase delta to encourage more central steps)
-    // Increment
-    n_iter++;
-    // Stopping Condition
-    if (deltaZ.norm() < params_.tol_step_norm) break;
-
+    // Check final stopping condition
+    if (deltaZ.norm() < params_.tol_step_norm) 
+      if (params_.adaptive_perturb){
+        if (delta <= params_.delta_min) {
+          if (params_.verbose) {
+            std::cout << "Step norm below threshold and minimum perturbation reached. Stopping centering." << std::endl;
+          }
+          break;
+        }
+      }else{
+        if (params_.verbose) {
+          std::cout << "Step norm below threshold. Stopping centering." << std::endl;
+        }
+        break;
+      }
   }
 
   return {Z, mult_scaled};
@@ -211,8 +210,8 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
     if (i < A_.size()) {
       AZ.push_back(A_[i].selfadjointView<Eigen::Upper>() * Z);
       A_trace.push_back(A_[i].diagonal().sum());
-      violation(i) =
-          (A_[i].selfadjointView<Eigen::Upper>() * Z).trace() - b_[i] - delta * A_trace[i];
+      violation(i) = (A_[i].selfadjointView<Eigen::Upper>() * Z).trace() -
+                     b_[i] - delta * A_trace[i];
     } else {
       AZ.push_back(C_ * Z);
       A_trace.push_back(C_.diagonal().sum());
@@ -262,7 +261,37 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
   return {multipliers, violation};
 }
 
-std::pair<double, double> AnalyticCenter::analytic_center_backtrack(
+double AnalyticCenter::line_search_psd(Matrix& Z, const Matrix& dZ) const {
+  // NOTE: Should make this function generic for any line search function
+  //  Initial step size
+  double alpha = params_.alpha_init;
+  // Backtracking parameters
+  const double beta =
+      params_.ln_search_red_factor;  // step size reduction factor
+  // Backtracking loop
+  Matrix Z_new = Z + alpha * dZ;
+  Eigen::LDLT<Eigen::MatrixXd> ldlt(Z_new);
+  while (!ldlt.isPositive()) {
+    if (ldlt.info() == Eigen::NumericalIssue) {
+      std::cout << "LINESEARCH: The matrix is has severe numerical issues."
+                << std::endl;
+    }
+    // Reduce step size
+    alpha *= beta;
+    // Prevent too small step sizes
+    if (alpha < params_.alpha_min) {
+      alpha = params_.alpha_min;
+      break;  // Stop if step size is too small
+    }
+    Z_new = Z + alpha * dZ;
+    ldlt.compute(Z_new);
+  }
+  // update Z with the new value that ensures PSDness
+  Z = Z_new;
+  return alpha;
+}
+
+std::pair<double, double> AnalyticCenter::line_search_det(
     const Matrix& Z, const Matrix& Aw) const {
   // NOTE: Should make this function generic for any line search function
   //  Initial step size

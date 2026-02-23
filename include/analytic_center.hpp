@@ -32,31 +32,27 @@ struct AnalyticCenterParams {
   bool reduce_violation = true;
   // max number of iterations for centering
   int max_iter = 50;
-  // linear system regularization parameter for centering (added to diagonal of
-  // system matrix) - DEPRECATED
-  double lin_sys_reg = 0.0;
-  // max number of iterations for adaptive centering
-  int max_iter_adaptive = 20;
-  // initial delta for centering (should be large enough to ensure good
-  // convergence even for low rank solutions, but not too large to cause slow
-  // convergence)
-  double delta_init = 1e-7;
+  
+  // Adaptive Perturbation Parameters
+  // -------------------------
+  // enable adaptive perturbation for centering
+  bool adaptive_perturb = true;
   // final delta for centering (should be small to get close to boundary, but
   // not too small to cause numerical issues)
   double delta_min = 1e-9;
-  // update factor for adjusting delta in adaptive centering (should be between
-  // zero and one, smaller values lead to more conservative updates)
-  double adapt_factor = 0.5;
-  // enable for certificate check during centering
-  // NOTE: can be used to terminate centering early if the certificate is PSD
-  // within tolerance, which can be a good heuristic to avoid unnecessary
-  // centering steps when the solution is already close to optimal
-  bool check_cert = true;
-
+  // Max step size for increasing perturbation. If the step size is above this threshold, then we consider that the step size is too large and we increase the perturbation parameter to encourage more central steps.
+  double delta_inc_step_max = 0.1;
+  // update factor for adjusting delta in adaptive centering
+  double delta_inc = 2.0;
+  // Min step size for decreasing perturbation. If the step size is below this threshold, then we consider that the step size is sufficiently small and we decrease the perturbation parameter to allow for more aggressive steps towards the boundary.
+  double delta_dec_step_min = 0.9;
+  // update factor for adjusting delta in adaptive centering
+  double delta_dec = 0.6;
+  
   // Line search
   // ----------------
   // line search enable for analytic center
-  bool enable_line_search = false;
+  bool enable_line_search = true;
   // Line search sufficient decrease parameter (should be between zero and one)
   double ln_search_suff_dec = 1e-4;
   // Line search reduction factor (should be between zero and one)
@@ -64,13 +60,18 @@ struct AnalyticCenterParams {
   // Line search initialization
   double alpha_init = 1.0;
   // Line search lower bound
-  double alpha_min = 1e-14;
+  double alpha_min = 1e-10;
   // line search (bisection) parameters for centering
   // NOTE: line search param will be certain to 1/2^k for k = ls_iter_ac
   double tol_bisect = 1e-6;
-
+  
   // Certificate parameters
   // -------------------------
+  // enable for certificate check during centering
+  // NOTE: can be used to terminate centering early if the certificate is PSD
+  // within tolerance, which can be a good heuristic to avoid unnecessary
+  // centering steps when the solution is already close to optimal
+  bool check_cert = true;
   // tolerance for checking PSDness of certificate matrix
   double tol_cert_psd = 1e-5;
   // tolerance for checking first order condition of certificate matrix
@@ -133,12 +134,6 @@ class AnalyticCenter {
   // not added to the sum
   SpMatrix build_adjoint(const Vector& coeffs, double tol = 0.0) const;
 
-  // Adaptive centering method to compute the analytic center of the SDP.
-  // The method starts with a large delta parameter to ensure good convergence
-  // even for low rank solutions, and then reduces delta adaptively until it
-  // reaches the desired value.
-  Matrix get_analytic_center_adaptive(const Matrix& X_0) const;
-
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
   std::pair<Vector, Vector> solve_analytic_center_system(const Matrix& Z,
@@ -149,9 +144,12 @@ class AnalyticCenter {
     return -logdet(X + I * delta);
   }
 
-  // Analytic center backtracking line search
-  std::pair<double, double> analytic_center_backtrack(const Matrix& Z,
-                                                      const Matrix& Aw) const;
+  // Line search to ensure PSDness of the solution for the analytic center step
+  double line_search_psd(Matrix& Z, const Matrix& dZ) const;
+
+  // Line search based on determinant increase for analytic center
+  std::pair<double, double> line_search_det(
+    const Matrix& Z, const Matrix& Aw) const;
 
   // Perform bisection line search to find optimal step size for analytic
   // center
