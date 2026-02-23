@@ -1,8 +1,10 @@
+// Tests for rank reduction
+
 #include "rank_reduction.hpp"
 
-namespace RankReduction {
+namespace RankTools {
 
-Vector vec_symm(const Matrix &A) {
+Vector vec_symm(const Matrix& A) {
   int n = A.rows();
   Vector v(n * (n + 1) / 2);
   int k = 0;
@@ -11,13 +13,13 @@ Vector vec_symm(const Matrix &A) {
       if (i == j)
         v(k++) = A(i, j);
       else
-        v(k++) = std::sqrt(2.0) * A(i, j); // Standard scaling for isometry
+        v(k++) = std::sqrt(2.0) * A(i, j);  // Standard scaling for isometry
     }
   }
   return v;
 }
 
-Matrix unvec_symm(const Vector &v, int dim) {
+Matrix unvec_symm(const Vector& v, int dim) {
   Matrix A = Matrix::Zero(dim, dim);
   int k = 0;
   for (int j = 0; j < dim; ++j) {
@@ -34,27 +36,23 @@ Matrix unvec_symm(const Vector &v, int dim) {
   return A;
 }
 
-Matrix get_constraint_op(const std::vector<Edge> &absent_edges,
-                         const Matrix &V) {
-  // Get solution space null space operator. Specialized to the Lovasz-theta
-  // problem.
-  int m = absent_edges.size() + 1;
+Matrix get_constraint_op(const std::vector<SpMatrix>& As, const Matrix& V) {
+  // Get solution space null space operator.
+  int m = As.size();
   int r = V.cols();
   int vec_dim = r * (r + 1) / 2;
   Matrix vAv(m, vec_dim);
   // add edge constraints
-  for (int i = 0; i < m - 1; ++i) {
-    auto [u, v] = absent_edges[i];
-    Matrix A_sol_space = 0.5 * (V.row(u).transpose() * V.row(v) +
-                                V.row(v).transpose() * V.row(u));
+  for (int i = 0; i < m; ++i) {
+    Matrix A_sol_space =
+        V.transpose() * As[i].selfadjointView<Eigen::Upper>() * V;
     vAv.row(i) = vec_symm(A_sol_space);
   }
-  // add trace constraint
-  vAv.row(m - 1) = vec_symm(V.transpose() * V);
+
   return vAv;
 }
 
-std::pair<Vector, double> get_min_sing_vec(const Matrix &A) {
+std::pair<Vector, double> get_min_sing_vec(const Matrix& A) {
   // Note: ComputeFullV should not be necessary since A should be a skinny
   // matrix
   Eigen::JacobiSVD<Matrix> svd(A, Eigen::ComputeFullV);
@@ -66,7 +64,7 @@ std::pair<Vector, double> get_min_sing_vec(const Matrix &A) {
   return {vec, s_min};
 }
 
-Matrix update_constraint_op(const Matrix &vAv, const Matrix &Q_tilde, int dim) {
+Matrix update_constraint_op(const Matrix& vAv, const Matrix& Q_tilde, int dim) {
   int m = vAv.rows();
   int r_new = Q_tilde.cols();
   int vec_dim_new = r_new * (r_new + 1) / 2;
@@ -79,9 +77,8 @@ Matrix update_constraint_op(const Matrix &vAv, const Matrix &Q_tilde, int dim) {
   return vAv_updated;
 }
 
-Matrix rank_reduction(const std::vector<Edge> &absent_edges,
-                      const Matrix &V_init, RankRedParams params) {
-
+Matrix rank_reduction(const std::vector<SpMatrix>& As, const Matrix& V_init,
+                      RankReductionParams params) {
   // Unpack parameters
   int targ_rank = params.targ_rank;
   double null_tol = params.null_tol;
@@ -97,7 +94,7 @@ Matrix rank_reduction(const std::vector<Edge> &absent_edges,
     std::cout << "Initial rank: " << r << std::endl;
   }
 
-  Matrix A_v = get_constraint_op(absent_edges, V);
+  Matrix A_v = get_constraint_op(As, V);
   int n_iter = 0;
 
   while ((max_iter == -1 || n_iter < max_iter) &&
@@ -125,8 +122,7 @@ Matrix rank_reduction(const std::vector<Edge> &absent_edges,
 
     std::vector<int> inds;
     for (int i = 0; i < lambdas_red.size(); ++i) {
-      if (lambdas_red(i) > eig_tol)
-        inds.push_back(i);
+      if (lambdas_red(i) > eig_tol) inds.push_back(i);
     }
 
     Matrix Q_tilde(Q.rows(), inds.size());
@@ -150,4 +146,4 @@ Matrix rank_reduction(const std::vector<Edge> &absent_edges,
   return V;
 }
 
-} // namespace RankReduction
+}  // namespace RankTools
