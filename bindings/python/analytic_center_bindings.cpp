@@ -4,8 +4,8 @@
 //
 // The C++ AnalyticCenter class stores *references* to the constraint matrices
 // (A) and RHS vector (b).  To make that safe from Python we introduce a small
-// prevent wrapper (PyAnalyticCenter) that *owns* copies of A and b and
-// forwards every public method to the real object.
+// wrapper (PyAnalyticCenter) that *owns* copies of A and b and forwards every
+// public method to the real object.
 // --------------------------------------------------------------------------
 
 #include <pybind11/eigen.h>  // automatic Eigen <-> numpy conversion
@@ -18,7 +18,7 @@ namespace py = pybind11;
 using namespace SDPTools;
 
 // ---------------------------------------------------------------------------
-// Prevent: prevent the reference-to-temporary problem.
+// Wrapper: owns copies of A and b so Python GC can't pull the rug out.
 // ---------------------------------------------------------------------------
 class PyAnalyticCenter {
  public:
@@ -33,19 +33,19 @@ class PyAnalyticCenter {
 
   int dim() const { return ac_.dim; }
   int m() const { return ac_.m; }
+  const AnalyticCenterParams& params() const { return ac_.params_; }
 
   Vector eval_constraints(const Matrix& X) const {
     return ac_.eval_constraints(X);
   }
 
-  AnalyticCenterResult certify(const Matrix& Y_0, double delta) const {
-    return ac_.certify(Y_0, delta);
+  AnalyticCenterResult certify(const Matrix& Y_0, double delta_init) const {
+    return ac_.certify(Y_0, delta_init);
   }
 
-  std::pair<Matrix, Vector> get_analytic_center(
-      const Matrix& Y_0, double delta_obj = 0.0,
-      double delta_constraint = 0.0) const {
-    return ac_.get_analytic_center(Y_0, delta_obj, delta_constraint);
+  std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0,
+                                                double delta_init) const {
+    return ac_.get_analytic_center(Y_0, delta_init);
   }
 
   Matrix build_certificate_from_dual(const Vector& multipliers) const {
@@ -57,11 +57,7 @@ class PyAnalyticCenter {
     return ac_.check_certificate(H, Y);
   }
 
-  // Expose the stored params so users can inspect them.
-  const AnalyticCenterParams& params() const { return ac_.params_; }
-
  private:
-  // Owned copies — these outlive the AnalyticCenter reference members.
   std::vector<Eigen::SparseMatrix<double>> A_;
   std::vector<double> b_;
   AnalyticCenter ac_;
@@ -76,21 +72,23 @@ PYBIND11_MODULE(sdptools, m) {
   // ---- AnalyticCenterParams ----
   py::class_<AnalyticCenterParams>(m, "AnalyticCenterParams")
       .def(py::init<>())
+      // General
       .def_readwrite("verbose", &AnalyticCenterParams::verbose)
-      .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
       .def_readwrite("tol_rank_sol", &AnalyticCenterParams::tol_rank_sol)
-      // Analytic Center
       .def_readwrite("tol_step_norm", &AnalyticCenterParams::tol_step_norm)
       .def_readwrite("reduce_violation",
                      &AnalyticCenterParams::reduce_violation)
       .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
-      .def_readwrite("max_iter_adaptive",
-                     &AnalyticCenterParams::max_iter_adaptive)
-      .def_readwrite("lin_sys_reg", &AnalyticCenterParams::lin_sys_reg)
-      .def_readwrite("delta_init", &AnalyticCenterParams::delta_init)
+      // Adaptive perturbation
+      .def_readwrite("adaptive_perturb",
+                     &AnalyticCenterParams::adaptive_perturb)
       .def_readwrite("delta_min", &AnalyticCenterParams::delta_min)
-      .def_readwrite("adapt_factor", &AnalyticCenterParams::adapt_factor)
-      .def_readwrite("check_cert", &AnalyticCenterParams::check_cert)
+      .def_readwrite("delta_inc_step_max",
+                     &AnalyticCenterParams::delta_inc_step_max)
+      .def_readwrite("delta_inc", &AnalyticCenterParams::delta_inc)
+      .def_readwrite("delta_dec_step_min",
+                     &AnalyticCenterParams::delta_dec_step_min)
+      .def_readwrite("delta_dec", &AnalyticCenterParams::delta_dec)
       // Line search
       .def_readwrite("enable_line_search",
                      &AnalyticCenterParams::enable_line_search)
@@ -102,6 +100,7 @@ PYBIND11_MODULE(sdptools, m) {
       .def_readwrite("alpha_min", &AnalyticCenterParams::alpha_min)
       .def_readwrite("tol_bisect", &AnalyticCenterParams::tol_bisect)
       // Certificate
+      .def_readwrite("check_cert", &AnalyticCenterParams::check_cert)
       .def_readwrite("tol_cert_psd", &AnalyticCenterParams::tol_cert_psd)
       .def_readwrite("tol_cert_first_order",
                      &AnalyticCenterParams::tol_cert_first_order)
@@ -154,7 +153,7 @@ params : AnalyticCenterParams, optional
       .def("eval_constraints", &PyAnalyticCenter::eval_constraints,
            py::arg("X"), "Evaluate constraint violations at X.")
       .def("certify", &PyAnalyticCenter::certify, py::arg("Y_0"),
-           py::arg("delta"),
+           py::arg("delta_init"),
            R"pbdoc(
 Run analytic centering to certify the local solution Y_0.
 
@@ -162,16 +161,15 @@ Parameters
 ----------
 Y_0 : numpy.ndarray (n, r)
     Initial low-rank factor.
-delta : float
-    Perturbation parameter.
+delta_init : float
+    Initial perturbation parameter.
 
 Returns
 -------
 AnalyticCenterResult
 )pbdoc")
       .def("get_analytic_center", &PyAnalyticCenter::get_analytic_center,
-           py::arg("Y_0"), py::arg("delta_obj") = 0.0,
-           py::arg("delta_constraint") = 0.0,
+           py::arg("Y_0"), py::arg("delta_init"),
            R"pbdoc(
 Compute the analytic center starting from Y_0.
 
@@ -179,10 +177,8 @@ Parameters
 ----------
 Y_0 : numpy.ndarray (n, r)
     Initial point (low-rank factor; X_0 = Y_0 @ Y_0.T).
-delta_obj : float, optional
-    Perturbation added to objective (default 0).
-delta_constraint : float, optional
-    Perturbation added to constraints (default 0).
+delta_init : float
+    Initial perturbation parameter.
 
 Returns
 -------
@@ -204,3 +200,5 @@ Returns
 tuple(min_eig, first_order_cond)
 )pbdoc");
 }
+
+
