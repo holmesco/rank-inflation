@@ -1,11 +1,10 @@
 build/
 .vscode/
-clipper-main/
-pmc-master/
-examples/data/
 tmp/
 extern/
 venv/
+results/
+python/examples/
 
 # files
 *.asv

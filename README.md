@@ -1,5 +1,12 @@
-# A Repository for Exploring Certification by Rank Inflation
+# A Repository for Exploring SDP Solution Rank Changing Tools
 
 # Requirements
 
-- SuiteSparse...eventually
+See `.devcontainer/Dockerfile` for required tools.
+
+# Python install instructions
+
+Run 
+```bash
+pip install -v .
+```
