@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(rank_inflation VERSION 0.0.0)
+project(rank_tools VERSION 0.0.0)
 
 # set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD 17)
@@ -59,33 +59,33 @@ endif()
 
 
 # source files
-file(GLOB RANK_INF_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
-add_library(rank_inflation SHARED)
-target_sources(rank_inflation PRIVATE ${RANK_INF_SOURCE_FILES})
+file(GLOB RANK_TOOLS_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+add_library(rank_tools SHARED)
+target_sources(rank_tools PRIVATE ${RANK_TOOLS_SOURCE_FILES})
 
 # headers:
-target_include_directories(rank_inflation PUBLIC
+target_include_directories(rank_tools PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>)
 
 # link external libraries:
-target_link_libraries(rank_inflation PRIVATE
+target_link_libraries(rank_tools PRIVATE
     Boost::filesystem 
     Boost::system)
-target_link_libraries(rank_inflation PUBLIC Eigen3::Eigen)
-target_link_libraries(rank_inflation PUBLIC OpenMP::OpenMP_CXX)
-target_link_libraries(rank_inflation PUBLIC ${FUSION_LIB} ${MOSEK_LIB})
+target_link_libraries(rank_tools PUBLIC Eigen3::Eigen)
+target_link_libraries(rank_tools PUBLIC OpenMP::OpenMP_CXX)
+target_link_libraries(rank_tools PUBLIC ${FUSION_LIB} ${MOSEK_LIB})
 
 # debug flag  
 if(DEBUG_FLAG)
         message(STATUS "Enabling debug flag")
-        target_compile_definitions(rank_inflation PRIVATE DEBUG)
+        target_compile_definitions(rank_tools PRIVATE DEBUG)
 endif()
 
 # version
-set_target_properties(rank_inflation PROPERTIES
+set_target_properties(rank_tools PROPERTIES
   VERSION ${PROJECT_VERSION})
-target_compile_definitions(rank_inflation PUBLIC RANK_INF_VERSION="${PROJECT_VERSION}")
+target_compile_definitions(rank_tools PUBLIC RANK_TOOLS_VERSION="${PROJECT_VERSION}")
 
 
 ###############################################################################

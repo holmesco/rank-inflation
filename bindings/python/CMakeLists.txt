@@ -15,12 +15,12 @@ pybind11_add_module(sdptools_py
   analytic_center_bindings.cpp
 )
 
-target_link_libraries(sdptools_py PRIVATE rank_inflation)
+target_link_libraries(sdptools_py PRIVATE rank_tools)
 
 # Put the .so next to the source so `import sdptools` works from this dir.
 # BUILD_RPATH: used when importing directly from the build/source tree.
 # INSTALL_RPATH: $ORIGIN means "same directory as sdptools.so" — used after
-#   pip install, where librank_inflation.so is installed alongside sdptools.so.
+#   pip install, where librank_tools.so is installed alongside sdptools.so.
 set_target_properties(sdptools_py PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
   OUTPUT_NAME "sdptools"
@@ -32,8 +32,8 @@ set_target_properties(sdptools_py PROPERTIES
 
 # Install the module into the wheel (used by scikit-build-core)
 install(TARGETS sdptools_py DESTINATION .)
-# Bundle librank_inflation.so into the wheel so $ORIGIN resolves it
-install(TARGETS rank_inflation LIBRARY DESTINATION .)
+# Bundle librank_tools.so into the wheel so $ORIGIN resolves it
+install(TARGETS rank_tools LIBRARY DESTINATION .)
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/sdptools.pyi"
   DESTINATION . OPTIONAL)
 
