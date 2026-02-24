@@ -247,20 +247,23 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
   if (ldlt.isPositive() == false) {
     std::cout << "The matrix is not positive semidefinite." << std::endl;
   }
+  // Solve the linear system.
+  Vector multipliers = ldlt.solve(d);
 #ifdef DEBUG
   // print information about the linear system
   Eigen::SelfAdjointEigenSolver<Matrix> es_Z(Z);
   double min_eig_Z = es_Z.eigenvalues().minCoeff();
   std::cout << "Minimum eigenvalue of Z: " << min_eig_Z << std::endl;
-  Eigen::SelfAdjointEigenSolver<Matrix> es(H.selfadjointView<Eigen::Upper>());
-  double min_eig_H = es.eigenvalues().minCoeff();
-  std::cout << "Minimum eigenvalue of linear sys: " << min_eig_H << std::endl;
-  double cond_H =
-      es.eigenvalues().maxCoeff() / std::abs(es.eigenvalues().minCoeff());
-  std::cout << "Condition number of linear sys: " << cond_H << std::endl;
+  // Print the diagonal of the LDLT decomposition to check for small or negative
+  // pivots
+  Vector D = ldlt.vectorD();
+  std::cout << "Diagonal of D in LDLT decomposition: " << D.transpose()
+            << std::endl;
+  // print residual of the linear system solution
+  Vector residual = H.selfadjointView<Eigen::Upper>() * multipliers - d;
+  std::cout << "Residual norm of linear system solution: " << residual.norm()
+            << std::endl;
 #endif
-  // Solve the linear system.
-  Vector multipliers = ldlt.solve(d);
 
   return {multipliers, violation};
 }

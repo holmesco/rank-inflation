@@ -6,39 +6,28 @@ import matplotlib.pylab as plt
 import pickle
 import pandas as pd
 
-from cert_tools.sdp_solvers import solve_sdp_fusion
+from cert_tools.sdp_solvers import solve_sdp_fusion, adjust_Q
 from ranktools import AnalyticCenterParams, AnalyticCenter, solve_sdp_mosek, AnalyticCenterResult
 
 np.set_printoptions(precision=2)
 
 root_dir = os.path.abspath(os.path.dirname(__file__) + "/../")
 
-def save_all(figname):
-    from matplotlib.backends.backend_pdf import PdfPages
-    import matplotlib.pyplot as plt
-
-    def multipage(filename, figs=None, dpi=200):
-        pp = PdfPages(filename)
-        figs = [plt.figure(n) for n in plt.get_fignums()]
-        for fig in figs:
-            fig.tight_layout()
-            fig.savefig(pp, format="pdf")
-        pp.close()
-
-    multipage(figname)
 
 def run_analytic_center(
     Q,
     Constraints,
     x_cand,
+    X_ip,
     **kwargs
     ):
     # Set parameters
     params = AnalyticCenterParams()
     params.verbose = True
     params.check_cert= True
-    params.delta_min = 1e-9
-    delta = 1e-4
+    params.delta_min = 1e-7
+    params.max_iter = 50
+    delta = 1e-5
     As, bs = [], []
     for constraint in Constraints:
         A, b = constraint
@@ -47,13 +36,22 @@ def run_analytic_center(
     cost  = (x_cand.T @ Q @ x_cand).item()
     if hasattr(Q, 'todense'):
         Q = np.array(Q.todense())
-    ac = AnalyticCenter(C=Q, rho=cost, A=As, b=bs, params=params)
+    # Adjust cost matrix to improve numerical conditioning (as we do for SDP)
+    Q_adj, scale, offset = adjust_Q(Q)
+    cost_adj = (x_cand.T @ Q_adj @ x_cand).item()
+    
+    ac = AnalyticCenter(C=Q_adj, rho=cost_adj, A=As, b=bs, params=params)
     # Run certifier
     t1 = time.time()
     result = ac.certify(x_cand, delta)
     time_ac = (time.time() - t1)
     print(f"------- time for AC: {time_ac*1e3:.0f} ms")
     print(f"AC Result: certified={result.certified}  min_eig={result.min_eig:.6e}  complementarity={result.complementarity:.6e}")
+    
+    # DEBUG
+    # check complementarity of inflated solution
+    print(f"Complementarity of inflated solution: {np.trace(result.H @ result.X)}")
+    print(f"Cost of inflated solution: {np.trace(Q_adj @ result.X)}, Actual cost: {cost_adj}")
     
     return result, time_ac
 
@@ -81,11 +79,13 @@ def compare_solvers(data : dict):
     )
     time_ip = info["time"]
     print(f"------- time for SDP: {time_ip*1e3:.0f} ms")
-    
+    optimal_cost = np.trace(data["Q"] @ X)
+    print(f"SDP optimal cost: {optimal_cost}")
+        
     # Check if SDP certifies the candidate solution
     certified_ip = check_candidate(info["H"], data["x_cand"])
     # Run centering certifier
-    res_ac, time_ac = run_analytic_center(**data)
+    res_ac, time_ac = run_analytic_center(**data, X_ip=X)
     result = dict(cert_ip=certified_ip, 
                   cert_ac=res_ac.certified,
                   time_ip=info["time"],
@@ -138,11 +138,9 @@ def run_all_probs():
         "test_prob_9L1.pkl",
         "test_prob_9Lc.pkl",
         "test_prob_9L.pkl",
-        "test_prob_9.pkl",
+        # "test_prob_9.pkl", remove because solution accuracy too low
     ]
-    
-    fnames = ["test_prob_9.pkl"]
-    
+        
     results = []
     for fname in fnames:
         print(f"Running on {fname}...")
@@ -164,8 +162,9 @@ def plot_results(df):
     df_filtered = df[df["cert_ip"] == df["cert_ac"]]
 
     fig, ax = plt.subplots(figsize=(8, 5))
-    ax.scatter(df_filtered["n_iters_ac"], df_filtered["time_ip"] * 1e3, label="SDP", marker="o")
-    ax.scatter(df_filtered["n_iters_ac"], df_filtered["time_ac"] * 1e3, label="Analytic Center", marker="x")
+    colors = df_filtered["cert_ip"].map({True: "green", False: "red"})
+    ax.scatter(df_filtered["n_iters_ac"], df_filtered["time_ip"] * 1e3, label="Interior Point", marker="o", c=colors)
+    ax.scatter(df_filtered["n_iters_ac"], df_filtered["time_ac"] * 1e3, label="Analytic Center", marker="x",c=colors)
     ax.set_xlabel("Number of Constraints")
     ax.set_ylabel("Time (ms)")
     ax.set_yscale("log")
@@ -181,11 +180,4 @@ def plot_results(df):
 
 if __name__ == "__main__":
     df = run_all_probs()
-    
-    
-
-    
-
-
-    
-    
+    plot_results(df)
