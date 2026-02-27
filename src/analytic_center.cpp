@@ -84,7 +84,7 @@ AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0,
   result.H = H;
   result.violation = eval_constraints(X);
   result.certified = (min_eig >= -params_.tol_cert_psd) &&
-                     (complementarity <= params_.tol_cert_first_order);
+                     (complementarity <= params_.tol_cert_complementarity);
   result.min_eig = min_eig;
   result.complementarity = complementarity;
   return result;
@@ -134,13 +134,32 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     } else {
       Z.noalias() += alpha * deltaZ;
     }
+    // Print update
+    n_iter++;
+    if (params_.verbose) {
+      // Objective value
+      f_val = logdet(Z);
+      // get rank of solution
+      int sol_rank = get_rank(Z, params_.tol_rank_sol);
+      if (n_iter % 10 == 1) {
+        std::printf("%6s %6s %12s %12s %12s %12s %12s %12s %12s %8s\n", "Iter",
+                    "SolRank", "ViolNorm", "StepNorm", "Complement.", "MinEig",
+                    "BarrParam", "Alpha", "Delta", "Obj Val.");
+      }
+      std::printf(
+          "%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n",
+          n_iter, sol_rank, violation.norm(), deltaZ.norm(), complementarity,
+          min_eig, barrier_param, alpha, delta, f_val);
+    }
+
     // Certificate Checking (Early stopping condition if the certificate is PSD)
     if (params_.check_cert) {
       // Build certificate matrix
       H = build_certificate_from_dual(mult_scaled);
       // Check complementarity condition for first order optimality
       complementarity = (Y_0.transpose() * H * Y_0).norm();
-      if (complementarity <= params_.tol_cert_first_order) {
+      if (complementarity <= params_.tol_cert_complementarity &&
+          violation.norm() <= params_.tol_cert_primal_feas) {
         // if first order condition is satisfied, check eigenvalues of
         // certificate matrix
         Eigen::SelfAdjointEigenSolver<Matrix> es(H);
@@ -164,23 +183,6 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       delta = std::max(delta, params_.delta_min);
     }
 
-    n_iter++;
-    // Print results
-    if (params_.verbose) {
-      // Objective value
-      f_val = logdet(Z);
-      // get rank of solution
-      int sol_rank = get_rank(Z, params_.tol_rank_sol);
-      if (n_iter % 10 == 1) {
-        std::printf("%6s %6s %12s %12s %12s %12s %12s %12s %12s %8s\n", "Iter",
-                    "SolRank", "ViolNorm", "StepNorm", "Complement.", "MinEig",
-                    "BarrParam", "Alpha", "Delta", "Obj Val.");
-      }
-      std::printf(
-          "%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n",
-          n_iter, sol_rank, violation.norm(), deltaZ.norm(), complementarity,
-          min_eig, barrier_param, alpha, delta, f_val);
-    }
     // Check final stopping condition
     if (deltaZ.norm() < params_.tol_step_norm)
       if (params_.adaptive_perturb) {

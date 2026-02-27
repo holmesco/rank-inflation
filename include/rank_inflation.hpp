@@ -75,7 +75,7 @@ struct RankInflateParams {
   // tolerance for checking PSDness of certificate matrix
   double tol_cert_psd = 1e-5;
   // tolerance for checking first order condition of certificate matrix
-  double tol_cert_first_order = 1e-5;
+  double tol_cert_complementarity = 1e-5;
 };
 
 class RankInflation {
