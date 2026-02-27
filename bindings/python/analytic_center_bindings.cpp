@@ -83,6 +83,8 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("reduce_violation",
                      &AnalyticCenterParams::reduce_violation)
       .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
+      .def_readwrite("rescale_lin_sys",
+                     &AnalyticCenterParams::rescale_lin_sys)
       // Adaptive perturbation
       .def_readwrite("adaptive_perturb",
                      &AnalyticCenterParams::adaptive_perturb)
@@ -106,8 +108,10 @@ PYBIND11_MODULE(ranktools, m) {
       // Certificate
       .def_readwrite("check_cert", &AnalyticCenterParams::check_cert)
       .def_readwrite("tol_cert_psd", &AnalyticCenterParams::tol_cert_psd)
-      .def_readwrite("tol_cert_first_order",
-                     &AnalyticCenterParams::tol_cert_first_order)
+      .def_readwrite("tol_cert_complementarity",
+                     &AnalyticCenterParams::tol_cert_complementarity)
+      .def_readwrite("tol_cert_primal_feas",
+                     &AnalyticCenterParams::tol_cert_primal_feas)
       .def("__repr__", [](const AnalyticCenterParams& p) {
         return "<AnalyticCenterParams max_iter=" + std::to_string(p.max_iter) +
                " verbose=" + (p.verbose ? "True" : "False") + ">";
