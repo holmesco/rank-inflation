@@ -32,7 +32,9 @@ struct AnalyticCenterParams {
   bool reduce_violation = true;
   // max number of iterations for centering
   int max_iter = 50;
-
+  // Rescale linear system for centering 
+  // This rescaling is consistent with the system in Sremac 2021
+  bool rescale_lin_sys = true;
   // Adaptive Perturbation Parameters
   // -------------------------
   // enable adaptive perturbation for centering

@@ -110,18 +110,21 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
 
     // get the barrier parameter value
     barrier_param = multipliers(m - 1);
-    if (barrier_param <= 0) {
-      std::cerr << "Warning: Barrier parameter is non-positive: " +
-                       std::to_string(barrier_param)
-                << std::endl;
-    }
+    // if (barrier_param <= 0) {
+    //   std::cerr << "Warning: Barrier parameter is non-positive: " +
+    //                    std::to_string(barrier_param)
+    //             << std::endl;
+    // }
     // compute scaled multipliers for certificate checking
     mult_scaled = multipliers.segment(0, m - 1) / barrier_param;
 
     // Get step direction
-    auto Aw_sp = build_adjoint(multipliers);
-    Matrix Aw = C_ * multipliers(m - 1) + Aw_sp;
-    auto deltaZ = Z - Z * Aw * Z;
+    auto adjoint_sp = build_adjoint(multipliers);
+    Matrix adjoint = C_ * multipliers(m - 1) + adjoint_sp;
+    if (params_.rescale_lin_sys) {
+      adjoint = adjoint / delta;
+    }
+    auto deltaZ = Z - Z * adjoint * Z;
     // Line search to find step that ensures PSDness of the solution
     // NOTE: Could replace with exact line search based on determinant increase,
     // but this backtracking
@@ -232,7 +235,11 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
   Matrix H(m, m);
   for (int i = 0; i < m; i++) {
     for (int j = i; j < m; j++) {
-      H(i, j) = (AZ[i] * AZ[j]).trace();
+      if (params_.rescale_lin_sys) {
+        H(i, j) = (AZ[i] * AZ[j]).trace() / delta;
+      } else {
+        H(i, j) = (AZ[i] * AZ[j]).trace();
+      }
     }
   }
 
