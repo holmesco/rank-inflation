@@ -24,8 +24,8 @@ class AnalyticCenterTestable : public AnalyticCenter {
   using AnalyticCenter::build_ac_system;
   using AnalyticCenter::build_adjoint;
   using AnalyticCenter::get_analytic_center_objective;
+  using AnalyticCenter::get_multipliers;
   using AnalyticCenter::solve_ac_system;
-  using AnalyticCenter::solve_analytic_center_system;
 };
 
 // Test case data structure

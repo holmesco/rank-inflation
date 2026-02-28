@@ -6,7 +6,7 @@ from scipy.special import gammainc
 from scipy.sparse import csc_array
 
 import clipperpy
-from ranktools import AnalyticCenter, AnalyticCenterParams, AnalyticCenterResult
+from ranktools import AnalyticCenter, AnalyticCenterParams, AnalyticCenterResult, LinearSolverType
 
 
 def randsphere(m,n,r):
@@ -133,6 +133,7 @@ class MaxCliqueProblem:
         self.params.check_cert= True
         self.params.delta_min = 1e-7
         self.params.max_iter = 50
+        self.params.lin_solver = LinearSolverType.LDLT
         
 
     def get_constraints(self):

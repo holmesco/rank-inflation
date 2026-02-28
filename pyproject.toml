@@ -14,7 +14,16 @@ test = ["pytest"]
 
 [tool.scikit-build]
 # Tell scikit-build-core to pass the flag that enables the pybind11 target
-cmake.args = ["-DBUILD_PYTHON_BINDINGS=ON", "-DBUILD_TESTS=OFF", "-DDEBUG_FLAG=OFF"]
+cmake.args = ["-DBUILD_PYTHON_BINDINGS=ON", "-DBUILD_TESTS=OFF"]
 cmake.minimum-version = "3.15"
 # The compiled module and its stub are installed to the wheel root
 wheel.install-dir = "."
+
+# ---------------------------------------------------------------------------
+# Optional install-time flags (passed via pip's -C / --config-settings)
+# ---------------------------------------------------------------------------
+# Usage examples:
+#   pip install .                                       # Release, no debug
+#   pip install . -C cmake.define.DEBUG_FLAG=ON         # Release + debug prints
+#   pip install . -C cmake.define.CMAKE_BUILD_TYPE=Debug                     # Debug build
+#   pip install . -C cmake.define.CMAKE_BUILD_TYPE=Debug -C cmake.define.DEBUG_FLAG=ON  # both

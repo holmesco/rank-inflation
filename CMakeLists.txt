@@ -18,6 +18,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(BUILD_TESTS "Build testsuite" ON)
 option(BUILD_PYTHON_BINDINGS "Build pybind11 Python bindings" OFF)
 option(DEBUG_FLAG "Print additional debugging information" OFF)
+option(TIMING_FLAG "Print out timing data" OFF)
 
 ###############################################################################
 # Dependencies
@@ -80,6 +81,11 @@ target_link_libraries(rank_tools PUBLIC ${FUSION_LIB} ${MOSEK_LIB})
 if(DEBUG_FLAG)
         message(STATUS "Enabling debug flag")
         target_compile_definitions(rank_tools PRIVATE DEBUG)
+endif()
+
+if(TIMING_FLAG)
+  message(STATUS "Enabling timing flag")
+  target_compile_definitions(rank_tools PRIVATE TIMING)
 endif()
 
 # version

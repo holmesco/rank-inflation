@@ -106,7 +106,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   // Main loop
   while (n_iter < params_.max_iter) {
     // Get system of equations
-    auto [multipliers, violation] = solve_analytic_center_system(Z, delta);
+    auto [multipliers, violation] = get_multipliers(Z, delta);
 
     // get the barrier parameter value
     barrier_param = multipliers(m - 1);
@@ -163,8 +163,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       H = build_certificate_from_dual(mult_scaled);
       // Check complementarity condition for first order optimality
       complementarity = (Y_0.transpose() * H * Y_0).norm();
-      if (complementarity <= params_.tol_cert_complementarity &&
-          violation.norm() <= params_.tol_cert_primal_feas) {
+      if (complementarity <= params_.tol_cert_complementarity) {
         // if first order condition is satisfied, check eigenvalues of
         // certificate matrix
         Eigen::SelfAdjointEigenSolver<Matrix> es(H);
@@ -292,14 +291,6 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
     }
     // Solve the linear system.
     multipliers = ldlt.solve(sys.d);
-
-#ifdef DEBUG
-    // Print the diagonal of the LDLT decomposition to check for small or
-    // negative pivots
-    Vector D = ldlt.vectorD();
-    std::cout << "Diagonal of D in LDLT decomposition: " << D.transpose()
-              << std::endl;
-#endif
   }
 #ifdef DEBUG
   // print information about the linear system
@@ -316,11 +307,30 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
   return multipliers;
 }
 
-std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
-    const Matrix& Z, double delta) const {
+std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
+                                                          double delta) const {
+  // Build the system of equations for the current solution
+#ifdef TIMING
+  // start a timer for building the system
+  auto start = std::chrono::high_resolution_clock::now();
+#endif
   auto sys = build_ac_system(Z, delta);
-  Vector multipliers = solve_ac_system(sys);
 
+#ifdef TIMING
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> elapsed = end - start;
+  std::cout << "Time taken to build AC system: " << elapsed.count()
+            << " seconds" << std::endl;
+#endif
+  // solve the system to get the multipliers
+  Vector multipliers = solve_ac_system(sys);
+#ifdef TIMING
+  // print time taken to solve the system
+  auto end_solve = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> elapsed_solve = end_solve - end;
+  std::cout << "Time taken to solve AC system: " << elapsed_solve.count()
+            << " seconds" << std::endl;
+#endif
 #ifdef DEBUG
   // print information about Z
   Eigen::SelfAdjointEigenSolver<Matrix> es_Z(Z);

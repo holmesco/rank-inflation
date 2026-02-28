@@ -1,4 +1,6 @@
 #pragma once
+#include <chrono>
+
 #include "utils.hpp"
 
 namespace RankTools {
@@ -165,8 +167,8 @@ class AnalyticCenter {
 
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
-  std::pair<Vector, Vector> solve_analytic_center_system(const Matrix& Z,
-                                                         double delta) const;
+  std::pair<Vector, Vector> get_multipliers(const Matrix& Z,
+                                            double delta) const;
 
   // Intermediate representation of the analytic center linear system
   struct ACSystem {
