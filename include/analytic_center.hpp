@@ -20,6 +20,11 @@ struct AnalyticCenterResult {
   double complementarity;
 };
 
+enum class LinearSolverType {
+  LDLT,
+  CG
+};
+
 struct AnalyticCenterParams {
   // Verbosity
   bool verbose = true;
@@ -35,6 +40,9 @@ struct AnalyticCenterParams {
   // Rescale linear system for centering 
   // This rescaling is consistent with the system in Sremac 2021
   bool rescale_lin_sys = true;
+  // Select linear solver for centering step
+  LinearSolverType lin_solver = LinearSolverType::LDLT;
+  
   // Adaptive Perturbation Parameters
   // -------------------------
   // enable adaptive perturbation for centering
@@ -138,6 +146,9 @@ class AnalyticCenter {
                                               const Matrix& Y) const;
 
  protected:
+  // Previous multipliers for iterative linear system solvers
+  mutable Vector prev_multipliers_;
+
   // Build weighted sum of constraint matrices: sum_i A_i * lambda_i
   // If the coefficient falls below `tol` then the corresponding constraint is
   // not added to the sum

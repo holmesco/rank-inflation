@@ -245,29 +245,65 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
     }
   }
 
-  // Solve the linear equation with LDLT decomposition (includes pivoting by
-  // default) Note: This method is preferred because the system is PSD, but
-  // can be ill-conditioned, especially in early iterations.
-  Eigen::LDLT<Eigen::MatrixXd> ldlt(H.selfadjointView<Eigen::Upper>());
-  // Check for success (critical for rank-deficient cases)
-  if (ldlt.info() == Eigen::NumericalIssue) {
-    std::cout << "The matrix is has severe numerical issues." << std::endl;
+  // SOLVE THE LINEAR SYSTEM
+  Vector multipliers(m);
+  if (params_.lin_solver == LinearSolverType::CG) {
+    // Solve the linear system with Conjugate Gradient (CG) method
+    // Note: CG is more scalable for large problems, but may require more
+    // careful tuning of parameters and preconditioning for convergence,
+    // especially in early iterations when the system can be ill-conditioned.
+    Eigen::ConjugateGradient<Matrix, Eigen::Upper> cg;
+    cg.compute(H);
+    if (cg.info() != Eigen::Success) {
+      std::cout << "Decomposition failed: " << cg.error() << std::endl;
+    }
+
+    // Use previous multipliers as initial guess if available to speed up convergence
+    if (prev_multipliers_.size() == m) {
+      cg.setMaxIterations(1000);  // Set a maximum number of iterations
+      cg.setTolerance(1e-6);      // Set a convergence tolerance
+      multipliers = cg.solveWithGuess(d, prev_multipliers_);
+    } else {
+      multipliers = cg.solve(d);
+    }
+    prev_multipliers_ = multipliers;  // Store the multipliers for the next
+                                      // iteration's initial guess
+    if (cg.info() != Eigen::Success) {
+      std::cout << "Solving failed: " << cg.error() << std::endl;
+    }
+
+  } else if (params_.lin_solver == LinearSolverType::LDLT) {
+    // Solve the linear equation with LDLT decomposition (includes pivoting by
+    // default) Note: This method is preferred because the system is PSD, but
+    // can be ill-conditioned, especially in early iterations.
+    Eigen::LDLT<Eigen::MatrixXd> ldlt(H.selfadjointView<Eigen::Upper>());
+    // Check for success (critical for rank-deficient cases)
+    if (ldlt.info() == Eigen::NumericalIssue) {
+      std::cout << "The matrix is has severe numerical issues." << std::endl;
+    }
+    if (ldlt.isPositive() == false) {
+      std::cout << "The matrix is not positive semidefinite." << std::endl;
+    }
+    // Solve the linear system.
+    multipliers = ldlt.solve(d);
+
+#ifdef DEBUG
+    // Print the diagonal of the LDLT decomposition to check for small or
+    // negative pivots
+    Vector D = ldlt.vectorD();
+    std::cout << "Diagonal of D in LDLT decomposition: " << D.transpose()
+              << std::endl;
+#endif
   }
-  if (ldlt.isPositive() == false) {
-    std::cout << "The matrix is not positive semidefinite." << std::endl;
-  }
-  // Solve the linear system.
-  Vector multipliers = ldlt.solve(d);
 #ifdef DEBUG
   // print information about the linear system
   Eigen::SelfAdjointEigenSolver<Matrix> es_Z(Z);
   double min_eig_Z = es_Z.eigenvalues().minCoeff();
   std::cout << "Minimum eigenvalue of Z: " << min_eig_Z << std::endl;
-  // Print the diagonal of the LDLT decomposition to check for small or negative
-  // pivots
-  Vector D = ldlt.vectorD();
-  std::cout << "Diagonal of D in LDLT decomposition: " << D.transpose()
-            << std::endl;
+  // print min eig of H to check for PSDness
+  Eigen::SelfAdjointEigenSolver<Matrix> es_H(H.selfadjointView<Eigen::Upper>());
+  double min_eig_H = es_H.eigenvalues().minCoeff();
+  std::cout << "Minimum eigenvalue of H: " << min_eig_H << std::endl;
   // print residual of the linear system solution
   Vector residual = H.selfadjointView<Eigen::Upper>() * multipliers - d;
   std::cout << "Residual norm of linear system solution: " << residual.norm()
