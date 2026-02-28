@@ -20,10 +20,18 @@ struct AnalyticCenterResult {
   double complementarity;
 };
 
-enum class LinearSolverType {
-  LDLT,
-  CG
-};
+enum class LinearSolverType { LDLT, CG };
+
+std::string print_solver(LinearSolverType solver) {
+  switch (solver) {
+    case LinearSolverType::LDLT:
+      return "LDLT";
+    case LinearSolverType::CG:
+      return "CG";
+    default:
+      return "Unknown";
+  }
+}
 
 struct AnalyticCenterParams {
   // Verbosity
@@ -37,12 +45,12 @@ struct AnalyticCenterParams {
   bool reduce_violation = true;
   // max number of iterations for centering
   int max_iter = 50;
-  // Rescale linear system for centering 
+  // Rescale linear system for centering
   // This rescaling is consistent with the system in Sremac 2021
   bool rescale_lin_sys = true;
   // Select linear solver for centering step
   LinearSolverType lin_solver = LinearSolverType::LDLT;
-  
+
   // Adaptive Perturbation Parameters
   // -------------------------
   // enable adaptive perturbation for centering
@@ -91,7 +99,8 @@ struct AnalyticCenterParams {
   double tol_cert_psd = 1e-5;
   // tolerance for checking first order condition of certificate matrix
   double tol_cert_complementarity = 1e-5;
-  // primal feasibility tolerance for certificate check (i.e., tolerance for violation of constraints)
+  // primal feasibility tolerance for certificate check (i.e., tolerance for
+  // violation of constraints)
   double tol_cert_primal_feas = 1e-5;
 };
 
@@ -158,6 +167,21 @@ class AnalyticCenter {
   // returning the optimal multipliers and the current violation of constraints
   std::pair<Vector, Vector> solve_analytic_center_system(const Matrix& Z,
                                                          double delta) const;
+
+  // Intermediate representation of the analytic center linear system
+  struct ACSystem {
+    Matrix H;                     // LHS matrix (m x m)
+    Vector d;                     // RHS vector (m)
+    Vector violation;             // constraint violation (m)
+    std::vector<Matrix> AZ;       // A_i * Z products
+    std::vector<double> A_trace;  // diagonal traces of A_i
+  };
+
+  // Constructs the linear system (H, d, violation) for the analytic center step
+  ACSystem build_ac_system(const Matrix& Z, double delta) const;
+
+  // Solves the linear system H * multipliers = d using the configured solver
+  Vector solve_ac_system(const ACSystem& system) const;
 
   double get_analytic_center_objective(const Matrix& X, double delta) const {
     auto I = Matrix::Identity(X.rows(), X.cols());

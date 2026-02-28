@@ -137,6 +137,11 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     // Print update
     n_iter++;
     if (params_.verbose) {
+      if (n_iter == 1) {
+        std::cout << "Starting Analytic Center Iterations..." << std::endl;
+        std::cout << "Running with Linear Solver: "
+                  << print_solver(params_.lin_solver) << std::endl;
+      }
       // Objective value
       f_val = logdet(Z);
       // get rank of solution
@@ -206,65 +211,66 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   return {Z, mult_scaled};
 }
 
-std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
-    const Matrix& Z, double delta) const {
-  // Construct AZ matrices, violation vector and d vector
-  Vector d(m);
-  Vector violation(m);
-  std::vector<Matrix> AZ;
-  // TODO trace value should be precomputed for efficiency
-  std::vector<double> A_trace;
+AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
+                                                         double delta) const {
+  ACSystem sys;
+  sys.d.resize(m);
+  sys.violation.resize(m);
+
   for (int i = 0; i < m; i++) {
-    // compute violation
     if (i < A_.size()) {
-      AZ.push_back(A_[i].selfadjointView<Eigen::Upper>() * Z);
-      A_trace.push_back(A_[i].diagonal().sum());
-      violation(i) = (A_[i].selfadjointView<Eigen::Upper>() * Z).trace() -
-                     b_[i] - delta * A_trace[i];
+      sys.AZ.push_back(A_[i].selfadjointView<Eigen::Upper>() * Z);
+      sys.A_trace.push_back(A_[i].diagonal().sum());
+      sys.violation(i) = (A_[i].selfadjointView<Eigen::Upper>() * Z).trace() -
+                         b_[i] - delta * sys.A_trace[i];
     } else {
-      AZ.push_back(C_ * Z);
-      A_trace.push_back(C_.diagonal().sum());
-      violation(i) = (C_ * Z).trace() - rho_ - delta * A_trace[i];
+      sys.AZ.push_back(C_ * Z);
+      sys.A_trace.push_back(C_.diagonal().sum());
+      sys.violation(i) = (C_ * Z).trace() - rho_ - delta * sys.A_trace[i];
     }
-    // "perturbed" RHS of the linera system
-    d(i) = AZ[i].trace();
+    sys.d(i) = sys.AZ[i].trace();
     if (params_.reduce_violation) {
-      d(i) += violation(i);
+      sys.d(i) += sys.violation(i);
     }
   }
 
   // Construct the LHS matrix
-  Matrix H(m, m);
+  sys.H.resize(m, m);
   for (int i = 0; i < m; i++) {
     for (int j = i; j < m; j++) {
       if (params_.rescale_lin_sys) {
-        H(i, j) = (AZ[i] * AZ[j]).trace() / delta;
+        sys.H(i, j) = (sys.AZ[i] * sys.AZ[j]).trace() / delta;
       } else {
-        H(i, j) = (AZ[i] * AZ[j]).trace();
+        sys.H(i, j) = (sys.AZ[i] * sys.AZ[j]).trace();
       }
     }
   }
 
-  // SOLVE THE LINEAR SYSTEM
+  return sys;
+}
+
+Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
   Vector multipliers(m);
+
   if (params_.lin_solver == LinearSolverType::CG) {
     // Solve the linear system with Conjugate Gradient (CG) method
     // Note: CG is more scalable for large problems, but may require more
     // careful tuning of parameters and preconditioning for convergence,
     // especially in early iterations when the system can be ill-conditioned.
     Eigen::ConjugateGradient<Matrix, Eigen::Upper> cg;
-    cg.compute(H);
+    cg.compute(sys.H);
     if (cg.info() != Eigen::Success) {
       std::cout << "Decomposition failed: " << cg.error() << std::endl;
     }
 
-    // Use previous multipliers as initial guess if available to speed up convergence
+    // Use previous multipliers as initial guess if available to speed up
+    // convergence
     if (prev_multipliers_.size() == m) {
       cg.setMaxIterations(1000);  // Set a maximum number of iterations
       cg.setTolerance(1e-6);      // Set a convergence tolerance
-      multipliers = cg.solveWithGuess(d, prev_multipliers_);
+      multipliers = cg.solveWithGuess(sys.d, prev_multipliers_);
     } else {
-      multipliers = cg.solve(d);
+      multipliers = cg.solve(sys.d);
     }
     prev_multipliers_ = multipliers;  // Store the multipliers for the next
                                       // iteration's initial guess
@@ -276,7 +282,7 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
     // Solve the linear equation with LDLT decomposition (includes pivoting by
     // default) Note: This method is preferred because the system is PSD, but
     // can be ill-conditioned, especially in early iterations.
-    Eigen::LDLT<Eigen::MatrixXd> ldlt(H.selfadjointView<Eigen::Upper>());
+    Eigen::LDLT<Eigen::MatrixXd> ldlt(sys.H.selfadjointView<Eigen::Upper>());
     // Check for success (critical for rank-deficient cases)
     if (ldlt.info() == Eigen::NumericalIssue) {
       std::cout << "The matrix is has severe numerical issues." << std::endl;
@@ -285,7 +291,7 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
       std::cout << "The matrix is not positive semidefinite." << std::endl;
     }
     // Solve the linear system.
-    multipliers = ldlt.solve(d);
+    multipliers = ldlt.solve(sys.d);
 
 #ifdef DEBUG
     // Print the diagonal of the LDLT decomposition to check for small or
@@ -297,20 +303,32 @@ std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
   }
 #ifdef DEBUG
   // print information about the linear system
-  Eigen::SelfAdjointEigenSolver<Matrix> es_Z(Z);
-  double min_eig_Z = es_Z.eigenvalues().minCoeff();
-  std::cout << "Minimum eigenvalue of Z: " << min_eig_Z << std::endl;
-  // print min eig of H to check for PSDness
-  Eigen::SelfAdjointEigenSolver<Matrix> es_H(H.selfadjointView<Eigen::Upper>());
-  double min_eig_H = es_H.eigenvalues().minCoeff();
+  Eigen::SelfAdjointEigenSolver<Matrix> es_Z_dbg(
+      sys.H.selfadjointView<Eigen::Upper>());
+  double min_eig_H = es_Z_dbg.eigenvalues().minCoeff();
   std::cout << "Minimum eigenvalue of H: " << min_eig_H << std::endl;
   // print residual of the linear system solution
-  Vector residual = H.selfadjointView<Eigen::Upper>() * multipliers - d;
+  Vector residual = sys.H.selfadjointView<Eigen::Upper>() * multipliers - sys.d;
   std::cout << "Residual norm of linear system solution: " << residual.norm()
             << std::endl;
 #endif
 
-  return {multipliers, violation};
+  return multipliers;
+}
+
+std::pair<Vector, Vector> AnalyticCenter::solve_analytic_center_system(
+    const Matrix& Z, double delta) const {
+  auto sys = build_ac_system(Z, delta);
+  Vector multipliers = solve_ac_system(sys);
+
+#ifdef DEBUG
+  // print information about Z
+  Eigen::SelfAdjointEigenSolver<Matrix> es_Z(Z);
+  double min_eig_Z = es_Z.eigenvalues().minCoeff();
+  std::cout << "Minimum eigenvalue of Z: " << min_eig_Z << std::endl;
+#endif
+
+  return {multipliers, sys.violation};
 }
 
 double AnalyticCenter::line_search_psd(Matrix& Z, const Matrix& dZ) const {

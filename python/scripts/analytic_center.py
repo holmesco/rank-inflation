@@ -7,7 +7,7 @@ import pickle
 import pandas as pd
 
 from cert_tools.sdp_solvers import solve_sdp_fusion, adjust_Q
-from ranktools import AnalyticCenterParams, AnalyticCenter, solve_sdp_mosek, AnalyticCenterResult
+from ranktools import AnalyticCenterParams, AnalyticCenter, solve_sdp_mosek, AnalyticCenterResult, LinearSolverType
 
 np.set_printoptions(precision=2)
 
@@ -27,6 +27,7 @@ def run_analytic_center(
     params.check_cert= True
     params.delta_min = 1e-7
     params.max_iter = 50
+    params.lin_solver = LinearSolverType.LDLT
     delta = 1e-5
     As, bs = [], []
     for constraint in Constraints:

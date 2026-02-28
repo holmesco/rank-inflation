@@ -73,6 +73,13 @@ PYBIND11_MODULE(ranktools, m) {
       "Python bindings for the RankTools library (AnalyticCenter, "
       "rank_reduction, solve_sdp_mosek)";
 
+  // ---- LinearSolverType ----
+  py::enum_<LinearSolverType>(m, "LinearSolverType",
+                              "Linear solver type for the analytic center step.")
+      .value("LDLT", LinearSolverType::LDLT, "Cholesky-based LDLT solver")
+      .value("CG", LinearSolverType::CG, "Conjugate gradient solver")
+      .export_values();
+
   // ---- AnalyticCenterParams ----
   py::class_<AnalyticCenterParams>(m, "AnalyticCenterParams")
       .def(py::init<>())
@@ -85,6 +92,7 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
       .def_readwrite("rescale_lin_sys",
                      &AnalyticCenterParams::rescale_lin_sys)
+      .def_readwrite("lin_solver", &AnalyticCenterParams::lin_solver)
       // Adaptive perturbation
       .def_readwrite("adaptive_perturb",
                      &AnalyticCenterParams::adaptive_perturb)
