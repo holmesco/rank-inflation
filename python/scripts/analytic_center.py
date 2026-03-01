@@ -27,7 +27,7 @@ def run_analytic_center(
     params.check_cert= True
     params.delta_min = 1e-7
     params.max_iter = 50
-    params.lin_solver = LinearSolverType.LDLT
+    params.lin_solver = LinearSolverType.CG
     delta = 1e-5
     As, bs = [], []
     for constraint in Constraints:

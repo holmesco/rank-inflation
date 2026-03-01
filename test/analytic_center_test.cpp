@@ -194,10 +194,8 @@ TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert = true;  // Turn off early stopping based on certificate for
-                             // testing purposes
-  params.rescale_lin_sys =
-      false;  // use rescaling to be consistent with the system in Sremac 2021
+  params.check_cert = true;  
+  params.rescale_lin_sys = true;  
   auto delta = 1e-7;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
@@ -219,14 +217,14 @@ TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
   // Build the certificate matrix
   auto H = problem.build_certificate_from_dual(multipliers);
   // check certificate on high rank solution
-  auto [min_eig_hr, first_ord_cond_hr] = problem.check_certificate(H, Y);
+  auto [min_eig_hr, first_ord_cond_hr] = problem.eval_certificate(H, Y);
   std::cout << "Cost at High Rank Solution: " << (sdp.C * X).trace()
             << std::endl;
   std::cout << "Minimum Eigenvalue of Certificate: " << min_eig_hr << std::endl;
   std::cout << "First Order Condition Norm at High Rank Solution: "
             << first_ord_cond_hr << std::endl;
   // check certificate on initial solution
-  auto [min_eig, first_ord_cond] = problem.check_certificate(H, Y_0);
+  auto [min_eig, first_ord_cond] = problem.eval_certificate(H, Y_0);
   std::cout << "First Order Condition Norm at Rank 1 Solution: "
             << first_ord_cond << std::endl;
 }

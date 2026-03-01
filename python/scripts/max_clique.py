@@ -133,7 +133,7 @@ class MaxCliqueProblem:
         self.params.check_cert= True
         self.params.delta_min = 1e-7
         self.params.max_iter = 50
-        self.params.lin_solver = LinearSolverType.LDLT
+        self.params.lin_solver = LinearSolverType.CG
         
 
     def get_constraints(self):
@@ -239,7 +239,7 @@ if __name__ == "__main__":
     m = 100      # total number of associations in problem
     n1 = 100     # number of points used on model (i.e., seen in view 1)
     n2o = 10     # number of outliers in data (i.e., seen in view 2)
-    outrat = 0.1 # outlier ratio of initial association set
+    outrat = 0.5 # outlier ratio of initial association set
     sigma = 0.01  # uniform noise [m] range
     pcfile = '/workspace/python/examples/bun10k.ply'  # Object file
     # Random pose transormation

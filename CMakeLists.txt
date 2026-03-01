@@ -19,6 +19,7 @@ option(BUILD_TESTS "Build testsuite" ON)
 option(BUILD_PYTHON_BINDINGS "Build pybind11 Python bindings" OFF)
 option(DEBUG_FLAG "Print additional debugging information" OFF)
 option(TIMING_FLAG "Print out timing data" OFF)
+option(ENABLE_PARALLEL "Enable OpenMP parallelization of hot loops" ON)
 
 ###############################################################################
 # Dependencies
@@ -86,6 +87,11 @@ endif()
 if(TIMING_FLAG)
   message(STATUS "Enabling timing flag")
   target_compile_definitions(rank_tools PRIVATE TIMING)
+endif()
+
+if(ENABLE_PARALLEL)
+  message(STATUS "Enabling OpenMP parallelization of hot loops")
+  target_compile_definitions(rank_tools PRIVATE RANKTOOLS_PARALLEL)
 endif()
 
 # version

@@ -153,6 +153,12 @@ class AnalyticCenter {
   // Check global optimality of a solution
   // Returns the minimum eigenvalue of the certificate matrix and the evaluation
   // of the certificate matrix at the solution (first order condition)
+  std::pair<double, double> eval_certificate(const Matrix& H,
+                                             const Matrix& Y) const;
+
+  // Check global optimality of a solution
+  // Returns the whether certificate matrix is PSD and complementarity
+  // of the provided solution.
   std::pair<double, double> check_certificate(const Matrix& H,
                                               const Matrix& Y) const;
 
@@ -172,10 +178,11 @@ class AnalyticCenter {
 
   // Intermediate representation of the analytic center linear system
   struct ACSystem {
-    Matrix H;                     // LHS matrix (m x m)
+    Matrix B;                     // LHS matrix (m x m)
     Vector d;                     // RHS vector (m)
     Vector violation;             // constraint violation (m)
     std::vector<Matrix> AZ;       // A_i * Z products
+    std::vector<Matrix> AZt;      // (A_i * Z)^T products
     std::vector<double> A_trace;  // diagonal traces of A_i
   };
 

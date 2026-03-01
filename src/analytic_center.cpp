@@ -58,16 +58,28 @@ Matrix AnalyticCenter::build_certificate_from_dual(
   return H;
 }
 
-std::pair<double, double> AnalyticCenter::check_certificate(
+std::pair<double, double> AnalyticCenter::eval_certificate(
     const Matrix& H, const Matrix& Y) const {
   // Evaluate the stationarity condition
-  double first_order_norm = (Y.transpose() * H * Y).norm();
+  double complementarity = (Y.transpose() * H * Y).norm();
   // Check Eigenvalues
   // Use SelfAdjointEigenSolver for symmetric matrices
   Eigen::SelfAdjointEigenSolver<Matrix> es(H);
   double min_eig = es.eigenvalues().minCoeff();
 
-  return {min_eig, first_order_norm};
+  return {min_eig, complementarity};
+}
+
+std::pair<double, double> AnalyticCenter::check_certificate(
+    const Matrix& H, const Matrix& Y) const {
+  // Evaluate the stationarity condition
+  double complementarity = (Y.transpose() * H * Y).norm();
+  // PSD Check
+  Eigen::LLT<Matrix> llt(H + Matrix::Identity(H.rows(), H.cols()) *
+                                 params_.tol_cert_psd);
+  bool psd = (llt.info() == Eigen::Success);
+
+  return {psd, complementarity};
 }
 
 AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0,
@@ -76,7 +88,7 @@ AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0,
   auto [X, mult_scaled] = get_analytic_center(Y_0, delta_init);
   auto H = build_certificate_from_dual(mult_scaled);
   // Check certificate at the final solution
-  auto [min_eig, complementarity] = check_certificate(H, Y_0);
+  auto [min_eig, complementarity] = eval_certificate(H, Y_0);
   // Return the final solution, multipliers and certificate information
   AnalyticCenterResult result;
   result.X = X;
@@ -110,11 +122,6 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
 
     // get the barrier parameter value
     barrier_param = multipliers(m - 1);
-    // if (barrier_param <= 0) {
-    //   std::cerr << "Warning: Barrier parameter is non-positive: " +
-    //                    std::to_string(barrier_param)
-    //             << std::endl;
-    // }
     // compute scaled multipliers for certificate checking
     mult_scaled = multipliers.segment(0, m - 1) / barrier_param;
 
@@ -164,11 +171,10 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       // Check complementarity condition for first order optimality
       complementarity = (Y_0.transpose() * H * Y_0).norm();
       if (complementarity <= params_.tol_cert_complementarity) {
-        // if first order condition is satisfied, check eigenvalues of
-        // certificate matrix
-        Eigen::SelfAdjointEigenSolver<Matrix> es(H);
-        min_eig = es.eigenvalues().minCoeff();
-        if (min_eig >= -params_.tol_cert_psd) {
+        // Use a cholesky decomposition for a quick check of PSDness.
+        Eigen::LLT<Matrix> llt(H + Matrix::Identity(H.rows(), H.cols()) *
+                                       params_.tol_cert_psd);
+        if (llt.info() == Eigen::Success) {
           if (params_.verbose) {
             std::cout << "Certificate Found! Stopping centering." << std::endl;
           }
@@ -215,17 +221,26 @@ AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
   ACSystem sys;
   sys.d.resize(m);
   sys.violation.resize(m);
-
+  sys.AZ.resize(m);
+  sys.AZt.resize(m);
+  sys.A_trace.resize(m);
+  // Compute the A_i * Z products and the constraint violations for the current
+  // solution
+  const int a_size = static_cast<int>(A_.size());
+#ifdef RANKTOOLS_PARALLEL
+#pragma omp parallel for schedule(dynamic)
+#endif
   for (int i = 0; i < m; i++) {
-    if (i < A_.size()) {
-      sys.AZ.push_back(A_[i].selfadjointView<Eigen::Upper>() * Z);
-      sys.A_trace.push_back(A_[i].diagonal().sum());
-      sys.violation(i) = (A_[i].selfadjointView<Eigen::Upper>() * Z).trace() -
-                         b_[i] - delta * sys.A_trace[i];
+    if (i < a_size) {
+      sys.AZ[i] = A_[i].selfadjointView<Eigen::Upper>() * Z;
+      sys.AZt[i] = sys.AZ[i].transpose();  // O(n²) each, done once
+      sys.A_trace[i] = A_[i].diagonal().sum();
+      sys.violation(i) = sys.AZ[i].trace() - b_[i] - delta * sys.A_trace[i];
     } else {
-      sys.AZ.push_back(C_ * Z);
-      sys.A_trace.push_back(C_.diagonal().sum());
-      sys.violation(i) = (C_ * Z).trace() - rho_ - delta * sys.A_trace[i];
+      sys.AZ[i] = C_ * Z;
+      sys.AZt[i] = sys.AZ[i].transpose();  // O(n²) each, done once
+      sys.A_trace[i] = C_.diagonal().sum();
+      sys.violation(i) = sys.AZ[i].trace() - rho_ - delta * sys.A_trace[i];
     }
     sys.d(i) = sys.AZ[i].trace();
     if (params_.reduce_violation) {
@@ -234,14 +249,18 @@ AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
   }
 
   // Construct the LHS matrix
-  sys.H.resize(m, m);
+  sys.B.resize(m, m);
+  // Build H with O(n²) dot products instead of O(n³) matmuls (AZ[i] *
+  // AZ[j]).trace
+#ifdef RANKTOOLS_PARALLEL
+#pragma omp parallel for schedule(dynamic)
+#endif
   for (int i = 0; i < m; i++) {
+    Eigen::Map<const Vector> vi(sys.AZt[i].data(), dim * dim);
     for (int j = i; j < m; j++) {
-      if (params_.rescale_lin_sys) {
-        sys.H(i, j) = (sys.AZ[i] * sys.AZ[j]).trace() / delta;
-      } else {
-        sys.H(i, j) = (sys.AZ[i] * sys.AZ[j]).trace();
-      }
+      Eigen::Map<const Vector> vj(sys.AZ[j].data(), dim * dim);
+      double val = vi.dot(vj);  // = trace(AZ[i] * AZ[j])
+      sys.B(i, j) = params_.rescale_lin_sys ? val / delta : val;
     }
   }
 
@@ -257,7 +276,7 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
     // careful tuning of parameters and preconditioning for convergence,
     // especially in early iterations when the system can be ill-conditioned.
     Eigen::ConjugateGradient<Matrix, Eigen::Upper> cg;
-    cg.compute(sys.H);
+    cg.compute(sys.B);
     if (cg.info() != Eigen::Success) {
       std::cout << "Decomposition failed: " << cg.error() << std::endl;
     }
@@ -281,7 +300,7 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
     // Solve the linear equation with LDLT decomposition (includes pivoting by
     // default) Note: This method is preferred because the system is PSD, but
     // can be ill-conditioned, especially in early iterations.
-    Eigen::LDLT<Eigen::MatrixXd> ldlt(sys.H.selfadjointView<Eigen::Upper>());
+    Eigen::LDLT<Eigen::MatrixXd> ldlt(sys.B.selfadjointView<Eigen::Upper>());
     // Check for success (critical for rank-deficient cases)
     if (ldlt.info() == Eigen::NumericalIssue) {
       std::cout << "The matrix is has severe numerical issues." << std::endl;
@@ -295,11 +314,11 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
 #ifdef DEBUG
   // print information about the linear system
   Eigen::SelfAdjointEigenSolver<Matrix> es_Z_dbg(
-      sys.H.selfadjointView<Eigen::Upper>());
-  double min_eig_H = es_Z_dbg.eigenvalues().minCoeff();
-  std::cout << "Minimum eigenvalue of H: " << min_eig_H << std::endl;
+      sys.B.selfadjointView<Eigen::Upper>());
+  double min_eig_B = es_Z_dbg.eigenvalues().minCoeff();
+  std::cout << "Minimum eigenvalue of B: " << min_eig_B << std::endl;
   // print residual of the linear system solution
-  Vector residual = sys.H.selfadjointView<Eigen::Upper>() * multipliers - sys.d;
+  Vector residual = sys.B.selfadjointView<Eigen::Upper>() * multipliers - sys.d;
   std::cout << "Residual norm of linear system solution: " << residual.norm()
             << std::endl;
 #endif
