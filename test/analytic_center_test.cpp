@@ -177,14 +177,14 @@ TEST_P(AnalyticCentParamTest, CertAtCenter) {
   // Build the certificate matrix
   auto H = problem.build_certificate_from_dual(multipliers);
   // check certificate on high rank solution
-  auto [min_eig_hr, first_ord_cond_hr] = problem.check_certificate(H, Y);
+  auto [min_eig_hr, first_ord_cond_hr] = problem.eval_certificate(H, Y);
   std::cout << "Cost at High Rank Solution: " << (sdp.C * X).trace()
             << std::endl;
   std::cout << "Minimum Eigenvalue of Certificate: " << min_eig_hr << std::endl;
   std::cout << "First Order Condition Norm at High Rank Solution: "
             << first_ord_cond_hr << std::endl;
   // check certificate on initial solution
-  auto [min_eig, first_ord_cond] = problem.check_certificate(H, Y_0);
+  auto [min_eig, first_ord_cond] = problem.eval_certificate(H, Y_0);
   std::cout << "First Order Condition Norm at Rank 1 Solution: "
             << first_ord_cond << std::endl;
 }

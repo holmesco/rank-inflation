@@ -6,7 +6,8 @@ from scipy.special import gammainc
 from scipy.sparse import csc_array
 
 import clipperpy
-from ranktools import AnalyticCenter, AnalyticCenterParams, AnalyticCenterResult, LinearSolverType
+from cert_tools.sdp_solvers import solve_sdp_fusion, adjust_Q
+from ranktools import AnalyticCenter, AnalyticCenterParams, LinearSolverType
 
 
 def randsphere(m,n,r):
@@ -155,7 +156,7 @@ class MaxCliqueProblem:
         rows, cols = np.where((self.M == 0) & (np.triu(np.ones(self.M.shape, dtype=bool), k=1)))
         constraints = []
         for r, c in zip(rows, cols):
-            sparse_mat = csc_array(([1.0], ([r], [c])), shape=self.M.shape)
+            sparse_mat = csc_array(([1.0,1.0], ([r,c], [c,r])), shape=self.M.shape)
             constraints.append(sparse_mat)
         values = np.array([0.0] * len(constraints))
         # add the trace constraint
@@ -231,6 +232,46 @@ class MaxCliqueProblem:
         u = soln.u / np.linalg.norm(soln.u)
         # Certify solution
         result, time_ac = self.certify_candidate(u)
+        
+    def solve_sdp(self):
+        
+        """Solve the maximum clique SDP relaxation using MOSEK's Fusion solver."""
+        n = self.M.shape[0]
+
+        # Build the cost matrix Q = -M (we minimize, so negate for max clique)
+        Q = -self.M
+
+        # Build constraint list in the format expected by solve_sdp_fusion
+        # Each constraint is (A_i, b_i) such that <A_i, X> = b_i
+        constraints = []
+        for A_i, b_i in zip(self.As, self.bs):
+            constraints.append((A_i, b_i))
+
+        # Solve SDP: min <Q, X> s.t. <A_i, X> = b_i, X >= 0
+        t1 = time.time()
+        X_sol, info = solve_sdp_fusion(
+            Q=Q,
+            Constraints=constraints,
+            verbose=True
+        )
+        time_sdp = time.time() - t1
+        print(f"SDP solve time: {time_sdp*1e3:.0f} ms")
+
+        # Extract rank-1 solution via eigendecomposition
+        eigvals, eigvecs = np.linalg.eigh(X_sol)
+        # Leading eigenvector (largest eigenvalue)
+        u = eigvecs[:, -1] * np.sqrt(np.maximum(eigvals[-1], 0.0))
+        # Normalize
+        u = u / np.linalg.norm(u)
+
+        # Report SDP cost
+        sdp_cost = np.trace(Q @ X_sol)
+        print(f"SDP cost: {sdp_cost}")
+        print(f"Rank of SDP solution (tol=1e-6): {np.sum(eigvals > 1e-6)}")
+
+        return X_sol, u
+        
+        
 
     
 if __name__ == "__main__":
@@ -249,4 +290,6 @@ if __name__ == "__main__":
     # Generate data
     clipper, Agt = generate_dataset(pcfile, m, n1, n2o, outrat, sigma, T_21)
     
-    MaxCliqueProblem(clipper).solve_and_certify()
+    prob = MaxCliqueProblem(clipper)
+    prob.solve_and_certify()
+    prob.solve_sdp()

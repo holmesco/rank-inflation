@@ -17,8 +17,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(BUILD_TESTS "Build testsuite" ON)
 option(BUILD_PYTHON_BINDINGS "Build pybind11 Python bindings" OFF)
-option(DEBUG_FLAG "Print additional debugging information" OFF)
-option(TIMING_FLAG "Print out timing data" OFF)
+option(ENABLE_DEBUG "Print additional debugging information" OFF)
+option(ENABLE_TIMING "Print out timing data" OFF)
 option(ENABLE_PARALLEL "Enable OpenMP parallelization of hot loops" ON)
 
 ###############################################################################
@@ -79,12 +79,12 @@ target_link_libraries(rank_tools PUBLIC OpenMP::OpenMP_CXX)
 target_link_libraries(rank_tools PUBLIC ${FUSION_LIB} ${MOSEK_LIB})
 
 # debug flag  
-if(DEBUG_FLAG)
+if(ENABLE_DEBUG)
         message(STATUS "Enabling debug flag")
         target_compile_definitions(rank_tools PRIVATE DEBUG)
 endif()
 
-if(TIMING_FLAG)
+if(ENABLE_TIMING)
   message(STATUS "Enabling timing flag")
   target_compile_definitions(rank_tools PRIVATE TIMING)
 endif()
