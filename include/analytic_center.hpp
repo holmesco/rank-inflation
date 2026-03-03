@@ -2,6 +2,7 @@
 #include <chrono>
 
 #include "utils.hpp"
+#include "matrix_free_methods.hpp"
 
 namespace RankTools {
 
@@ -22,14 +23,16 @@ struct AnalyticCenterResult {
   double complementarity;
 };
 
-enum class LinearSolverType { LDLT, CG };
+enum class LinearSolverType { LDLT, CG , MFCG};
 
 std::string print_solver(LinearSolverType solver) {
   switch (solver) {
     case LinearSolverType::LDLT:
-      return "LDLT";
+      return "LDLT Direct Solver";
     case LinearSolverType::CG:
-      return "CG";
+      return "Conjugate Gradient";
+    case LinearSolverType::MFCG:
+      return "Matrix-Free Conjugate Gradient";
     default:
       return "Unknown";
   }
@@ -184,6 +187,7 @@ class AnalyticCenter {
     std::vector<Matrix> AZ;       // A_i * Z products
     std::vector<Matrix> AZt;      // (A_i * Z)^T products
     std::vector<double> A_trace;  // diagonal traces of A_i
+    std::unique_ptr<MultiplierLinSys> B_mf;       // Matrix-free operator for B (if using matrix-free solver)
   };
 
   // Constructs the linear system (H, d, violation) for the analytic center step

@@ -310,6 +310,69 @@ TEST_P(AnalyticCentParamTest, CertifyConjGrad) {
             << result.complementarity << std::endl;
 }
 
+TEST(MatrixFree, Product) {
+  // Load a test problem
+  auto sdp = make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8}, "Clique1");
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.rescale_lin_sys = true;  // Use rescaling for consistency with Sremac 2021
+  auto delta = 1e-7;
+  // generate problem
+  auto problem = sdp.make_testable(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  Matrix X = Y_0 * Y_0.transpose() + Matrix::Identity(sdp.dim, sdp.dim) * delta;
+  // Build the linear system
+  auto system = problem.build_ac_system(X, delta);
+  // Build the matrix-free operator
+  MultiplierLinSys lin_op(problem.C_,problem.A_, X, delta);
+  // Generate a random vector for testing
+  Vector random_vec = Vector::Random(problem.m);
+  // Compute the matrix-free product
+  Vector mf_product = lin_op * random_vec;
+  // Compute the explicit product using the system matrix
+  Vector explicit_product = system.B.selfadjointView<Eigen::Upper>() * random_vec;
+  // Compare the results
+  double tol = 1e-10;
+  ASSERT_EQ(mf_product.size(), explicit_product.size());
+  for (int i = 0; i < mf_product.size(); ++i) {
+    EXPECT_NEAR(mf_product(i), explicit_product(i), tol+tol*explicit_product.norm())
+        << "Matrix-free product does not match explicit product at index " << i;
+  }
+  
+}
+
+TEST_P(AnalyticCentParamTest, CertifyMatrixFree) {
+  const auto& sdp = GetParam();
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.check_cert = false;  // Turn off early stopping based on certificate
+                              // for testing purposes
+  params.adaptive_perturb =
+      true;  // Turn on adaptive perturbation for testing purposes
+  params.delta_min = 1e-8;
+  params.max_iter = 50;
+  // use rescaling to be consistent with the system in Sremac 2021
+  params.rescale_lin_sys = true;
+  params.lin_solver = LinearSolverType::MFCG;  // Use Conjugate Gradient solver
+  auto delta = 1e-5;
+  // generate problem
+  AnalyticCenter problem = sdp.make(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  // Run certification method
+  auto result = problem.certify(Y_0, delta);
+  // check that the solution is certified
+  EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
+  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
+            << std::endl;
+  std::cout << "Complementarity (First Order Condition): "
+            << result.complementarity << std::endl;
+}
+
+
 INSTANTIATE_TEST_SUITE_P(
     AnalyticCenterSuite, AnalyticCentParamTest,
     ::testing::Values(

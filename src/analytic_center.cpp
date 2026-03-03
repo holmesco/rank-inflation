@@ -248,20 +248,26 @@ AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
     }
   }
 
-  // Construct the LHS matrix
-  sys.B.resize(m, m);
-  // Build H with O(n²) dot products instead of O(n³) matmuls (AZ[i] *
-  // AZ[j]).trace
+  // Only build the LHS matrix if not using matrix-free solver.
+  if (params_.lin_solver != LinearSolverType::MFCG) {
+    // Construct the LHS matrix
+    sys.B.resize(m, m);
+    // Build H with O(n²) dot products instead of O(n³) matmuls (AZ[i] *
+    // AZ[j]).trace
 #ifdef RANKTOOLS_PARALLEL
 #pragma omp parallel for schedule(dynamic)
 #endif
-  for (int i = 0; i < m; i++) {
-    Eigen::Map<const Vector> vi(sys.AZt[i].data(), dim * dim);
-    for (int j = i; j < m; j++) {
-      Eigen::Map<const Vector> vj(sys.AZ[j].data(), dim * dim);
-      double val = vi.dot(vj);  // = trace(AZ[i] * AZ[j])
-      sys.B(i, j) = params_.rescale_lin_sys ? val / delta : val;
+    for (int i = 0; i < m; i++) {
+      Eigen::Map<const Vector> vi(sys.AZt[i].data(), dim * dim);
+      for (int j = i; j < m; j++) {
+        Eigen::Map<const Vector> vj(sys.AZ[j].data(), dim * dim);
+        double val = vi.dot(vj);  // = trace(AZ[i] * AZ[j])
+        sys.B(i, j) = params_.rescale_lin_sys ? val / delta : val;
+      }
     }
+  } else {
+    // If using matrix-free solver, build the matrix-free operator for the LHS
+    sys.B_mf = std::make_unique<MultiplierLinSys>(C_, A_, Z, delta);
   }
 
   return sys;
@@ -295,7 +301,34 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
     if (cg.info() != Eigen::Success) {
       std::cout << "Solving failed: " << cg.error() << std::endl;
     }
+  } else if (params_.lin_solver == LinearSolverType::MFCG) {
+    // Solve the linear system with Matrix-Free Conjugate Gradient (MFCG) method
+    // Note: This method is more scalable for large problems and can handle
+    // ill-conditioned systems better, but requires a well-designed matrix-free
+    // operator and may require tuning of parameters for convergence.
+    MultiplierLinSys& lin_op = *(sys.B_mf);
+    Eigen::ConjugateGradient<MultiplierLinSys, Eigen::Upper | Eigen::Lower,
+                             Eigen::IdentityPreconditioner>
+        mfcg;
+    mfcg.compute(lin_op);
+    if (mfcg.info() != Eigen::Success) {
+      std::cout << "Decomposition failed: " << mfcg.error() << std::endl;
+    }
 
+    // Use previous multipliers as initial guess if available to speed up
+    // convergence
+    if (prev_multipliers_.size() == m) {
+      mfcg.setMaxIterations(1000);  // Set a maximum number of iterations
+      mfcg.setTolerance(1e-6);      // Set a convergence tolerance
+      multipliers = mfcg.solveWithGuess(sys.d, prev_multipliers_);
+    } else {
+      multipliers = mfcg.solve(sys.d);
+    }
+    prev_multipliers_ = multipliers;  // Store the multipliers for the next
+                                      // iteration's initial guess
+    if (mfcg.info() != Eigen::Success) {
+      std::cout << "Solving failed: " << mfcg.error() << std::endl;
+    }
   } else if (params_.lin_solver == LinearSolverType::LDLT) {
     // Solve the linear equation with LDLT decomposition (includes pivoting by
     // default) Note: This method is preferred because the system is PSD, but
