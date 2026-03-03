@@ -194,8 +194,8 @@ TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert = true;  
-  params.rescale_lin_sys = true;  
+  params.check_cert = true;
+  params.rescale_lin_sys = true;
   params.lin_solver = LinearSolverType::MFCG;
   auto delta = 1e-5;
   // generate problem
@@ -317,7 +317,8 @@ TEST(MatrixFree, Product) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.rescale_lin_sys = true;  // Use rescaling for consistency with Sremac 2021
+  params.rescale_lin_sys =
+      true;  // Use rescaling for consistency with Sremac 2021
   auto delta = 1e-7;
   // generate problem
   auto problem = sdp.make_testable(params);
@@ -327,21 +328,76 @@ TEST(MatrixFree, Product) {
   // Build the linear system
   auto system = problem.build_ac_system(X, delta);
   // Build the matrix-free operator
-  MultiplierLinSys lin_op(problem.C_,problem.A_, X, delta);
+  MultiplierLinSys lin_op(problem.C_, problem.A_, X, delta);
   // Generate a random vector for testing
   Vector random_vec = Vector::Random(problem.m);
   // Compute the matrix-free product
   Vector mf_product = lin_op * random_vec;
   // Compute the explicit product using the system matrix
-  Vector explicit_product = system.B.selfadjointView<Eigen::Upper>() * random_vec;
+  Vector explicit_product =
+      system.B.selfadjointView<Eigen::Upper>() * random_vec;
   // Compare the results
   double tol = 1e-10;
   ASSERT_EQ(mf_product.size(), explicit_product.size());
   for (int i = 0; i < mf_product.size(); ++i) {
-    EXPECT_NEAR(mf_product(i), explicit_product(i), tol+tol*explicit_product.norm())
+    EXPECT_NEAR(mf_product(i), explicit_product(i),
+                tol + tol * explicit_product.norm())
         << "Matrix-free product does not match explicit product at index " << i;
   }
-  
+}
+
+TEST(MatrixFree, DiagonalPreconditioner) {
+  // Load a test problem
+  auto sdp = make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8}, "Clique1");
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.rescale_lin_sys = true;
+  auto delta = 1e-5;
+  // generate problem
+  auto problem = sdp.make_testable(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  Matrix X = Y_0 * Y_0.transpose() + Matrix::Identity(sdp.dim, sdp.dim) * delta;
+  // Build the explicit system to get the true diagonal of B
+  auto system = problem.build_ac_system(X, delta);
+  // Build the matrix-free operator and preconditioner
+  MultiplierLinSys lin_op(problem.C_, problem.A_, X, delta);
+  MultiplierDiagPreconditioner precond;
+  precond.compute(lin_op);
+  // Check that the preconditioner computed successfully
+  EXPECT_EQ(precond.info(), Eigen::Success);
+  // Verify the preconditioner diagonal matches the true diagonal of B
+  // The preconditioner stores 1/diag, so applying it to e_i gives 1/B(i,i)
+  double tol = 1e-10;
+  for (int i = 0; i < problem.m; ++i) {
+    // Extract true diagonal from the explicit system (upper triangle storage)
+    double B_ii = system.B(i, i);
+    // Apply preconditioner to a unit vector to extract 1/B(i,i)
+    Vector e_i = Vector::Zero(problem.m);
+    e_i(i) = 1.0;
+    Vector precond_ei = precond.solve(e_i);
+    double precond_diag = precond_ei(i);
+    double expected_inv = (B_ii > 1e-14) ? 1.0 / B_ii : 1.0;
+    EXPECT_NEAR(precond_diag, expected_inv, tol )
+        << "Preconditioner diagonal does not match B(" << i << "," << i << ")";
+  }
+
+  // Verify that the preconditioned CG solves the system correctly
+  Eigen::ConjugateGradient<MultiplierLinSys, Eigen::Upper | Eigen::Lower,
+                           MultiplierDiagPreconditioner>
+      pcg;
+  pcg.compute(lin_op);
+  EXPECT_EQ(pcg.info(), Eigen::Success);
+  // Solve B * x = d using preconditioned CG
+  Vector rhs = Vector::Random(problem.m);
+  Vector x_pcg = pcg.solve(rhs);
+  EXPECT_EQ(pcg.info(), Eigen::Success)
+      << "Preconditioned CG failed to converge";
+  // Check residual
+  Vector residual = lin_op * x_pcg - rhs;
+  EXPECT_LT(residual.norm() / rhs.norm(), 1e-6)
+      << "Preconditioned CG residual too large";
 }
 
 TEST_P(AnalyticCentParamTest, CertifyMatrixFree) {
@@ -372,7 +428,6 @@ TEST_P(AnalyticCentParamTest, CertifyMatrixFree) {
   std::cout << "Complementarity (First Order Condition): "
             << result.complementarity << std::endl;
 }
-
 
 INSTANTIATE_TEST_SUITE_P(
     AnalyticCenterSuite, AnalyticCentParamTest,
