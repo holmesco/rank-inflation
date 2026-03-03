@@ -53,15 +53,14 @@ class MultiplierLinSys : public Eigen::EigenBase<MultiplierLinSys> {
   MultiplierLinSys(const Eigen::MatrixXd& C,
                    const std::vector<Eigen::SparseMatrix<double>>& As,
                    const Eigen::MatrixXd& X, double delta)
-      : num_constraints_(As.size() + 1), C_(C), As_(As), X_(&X), delta_(delta) {}
+      : num_constraints_(As.size() + 1),
+        C_(C),
+        As_(As),
+        X_(&X),
+        delta_(delta) {}
 
-  void setX(const Eigen::MatrixXd& new_X) {
-    X_ = &new_X;
-  }
-  void setDelta(double new_delta) {
-    delta_ = new_delta;
-  }
-
+  void setX(const Eigen::MatrixXd& new_X) { X_ = &new_X; }
+  void setDelta(double new_delta) { delta_ = new_delta; }
 };
 
 // Implementation of MultiplierLinSys * Eigen::DenseVector though a
@@ -89,8 +88,8 @@ struct generic_product_impl<MultiplierLinSys, Rhs, DenseShape, DenseShape,
       S += rhs(i) * lhs.As_[i];
     }
     // Form dense product
-    Eigen::MatrixXd P = (*lhs.X_) * S.selfadjointView<Eigen::Upper>() * (*lhs.X_) * alpha /
-             lhs.delta_;
+    Eigen::MatrixXd P = (*lhs.X_) * S.selfadjointView<Eigen::Upper>() *
+                        (*lhs.X_) * alpha / lhs.delta_;
     // Compute the trace of A_i * P for each constraint
     // For sparse A (upper triangular storage):
     for (size_t i = 0; i < lhs.As_.size(); ++i) {
@@ -112,3 +111,51 @@ struct generic_product_impl<MultiplierLinSys, Rhs, DenseShape, DenseShape,
 
 }  // namespace internal
 }  // namespace Eigen
+
+// Diagonal preconditioner for MultiplierLinSys.
+// Diagonal entry i is B(i,i) = tr(A_i * X * A_i * X) / delta = tr((A_i*X)^2) /
+// delta. Computed in O(n^2) per entry via tr(M^2) = sum_jk M_jk * M_kj = <M,
+// M^T>_F.
+class MultiplierDiagPreconditioner {
+ public:
+  typedef double Scalar;
+  typedef Eigen::VectorXd Vector;
+
+  MultiplierDiagPreconditioner() : is_initialized_(false) {}
+
+  // Eigen's CG calls compute(mat) with the matrix-free operator
+  MultiplierDiagPreconditioner& compute(const MultiplierLinSys& op) {
+    const int m = op.num_constraints_;
+    const auto& X = *op.X_;
+    inv_diag_.resize(m);
+
+    const int a_size = static_cast<int>(op.As_.size());
+    for (int i = 0; i < m; ++i) {
+      Eigen::MatrixXd AiX;
+      if (i < a_size) {
+        AiX = op.As_[i].selfadjointView<Eigen::Upper>() * X;
+      } else {
+        AiX = op.C_ * X;  // last entry corresponds to the cost matrix
+      }
+      // tr((AiX)^2) = sum_jk (AiX)_jk * (AiX)_kj = <AiX, AiX^T>_F
+      double diag_val = AiX.cwiseProduct(AiX.transpose()).sum() / op.delta_;
+      inv_diag_(i) = (diag_val > 1e-14) ? 1.0 / diag_val : 1.0;
+    }
+    is_initialized_ = true;
+    return *this;
+  }
+
+  // Apply the preconditioner: element-wise multiply by 1/diag
+  template <typename Rhs>
+  Eigen::VectorXd solve(const Eigen::MatrixBase<Rhs>& b) const {
+    return inv_diag_.cwiseProduct(b);
+  }
+
+  Eigen::ComputationInfo info() const {
+    return is_initialized_ ? Eigen::Success : Eigen::InvalidInput;
+  }
+
+ private:
+  Vector inv_diag_;
+  bool is_initialized_;
+};

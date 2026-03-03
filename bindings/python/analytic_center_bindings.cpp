@@ -78,6 +78,8 @@ PYBIND11_MODULE(ranktools, m) {
                               "Linear solver type for the analytic center step.")
       .value("LDLT", LinearSolverType::LDLT, "Cholesky-based LDLT solver")
       .value("CG", LinearSolverType::CG, "Conjugate gradient solver")
+      .value("MFCG", LinearSolverType::MFCG,
+             "Matrix-free conjugate gradient solver")
       .export_values();
 
   // ---- AnalyticCenterParams ----

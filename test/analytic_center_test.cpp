@@ -196,7 +196,8 @@ TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
   params.verbose = true;
   params.check_cert = true;  
   params.rescale_lin_sys = true;  
-  auto delta = 1e-7;
+  params.lin_solver = LinearSolverType::MFCG;
+  auto delta = 1e-5;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution

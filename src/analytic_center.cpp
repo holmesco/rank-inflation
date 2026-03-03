@@ -154,14 +154,14 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       // get rank of solution
       int sol_rank = get_rank(Z, params_.tol_rank_sol);
       if (n_iter % 10 == 1) {
-        std::printf("%6s %6s %12s %12s %12s %12s %12s %12s %12s %8s\n", "Iter",
-                    "SolRank", "ViolNorm", "StepNorm", "Complement.", "MinEig",
-                    "BarrParam", "Alpha", "Delta", "Obj Val.");
+        std::printf("%6s %6s %12s %12s %12s %12s %12s %12s %8s\n", "Iter",
+            "SolRank", "ViolNorm", "StepNorm", "Complement.",
+            "BarrParam", "Alpha", "Delta", "Obj Val.");
       }
       std::printf(
-          "%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n",
+          "%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n",
           n_iter, sol_rank, violation.norm(), deltaZ.norm(), complementarity,
-          min_eig, barrier_param, alpha, delta, f_val);
+          barrier_param, alpha, delta, f_val);
     }
 
     // Certificate Checking (Early stopping condition if the certificate is PSD)
@@ -308,7 +308,7 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
     // operator and may require tuning of parameters for convergence.
     MultiplierLinSys& lin_op = *(sys.B_mf);
     Eigen::ConjugateGradient<MultiplierLinSys, Eigen::Upper | Eigen::Lower,
-                             Eigen::IdentityPreconditioner>
+                             MultiplierDiagPreconditioner>
         mfcg;
     mfcg.compute(lin_op);
     if (mfcg.info() != Eigen::Success) {
