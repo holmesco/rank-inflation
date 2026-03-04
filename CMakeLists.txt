@@ -19,7 +19,7 @@ option(BUILD_TESTS "Build testsuite" ON)
 option(BUILD_PYTHON_BINDINGS "Build pybind11 Python bindings" OFF)
 option(ENABLE_DEBUG "Print additional debugging information" OFF)
 option(ENABLE_TIMING "Print out timing data" OFF)
-option(ENABLE_PARALLEL "Enable OpenMP parallelization of hot loops" ON)
+option(ENABLE_PARALLEL "Enable OpenMP parallelization of hot loops" OFF)
 
 ###############################################################################
 # Dependencies

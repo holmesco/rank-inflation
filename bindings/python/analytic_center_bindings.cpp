@@ -54,6 +54,11 @@ class PyAnalyticCenter {
     return ac_.build_certificate_from_dual(multipliers);
   }
 
+  std::pair<double, double> eval_certificate(const Matrix& H,
+                                             const Matrix& Y) const {
+    return ac_.eval_certificate(H, Y);
+  }
+
   std::pair<double, double> check_certificate(const Matrix& H,
                                               const Matrix& Y) const {
     return ac_.check_certificate(H, Y);
@@ -95,6 +100,10 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("rescale_lin_sys",
                      &AnalyticCenterParams::rescale_lin_sys)
       .def_readwrite("lin_solver", &AnalyticCenterParams::lin_solver)
+      // Iterative linear solve
+      .def_readwrite("lin_solve_max_iter",
+                     &AnalyticCenterParams::lin_solve_max_iter)
+      .def_readwrite("lin_solve_tol", &AnalyticCenterParams::lin_solve_tol)
       // Adaptive perturbation
       .def_readwrite("adaptive_perturb",
                      &AnalyticCenterParams::adaptive_perturb)
@@ -208,14 +217,37 @@ tuple(X, multipliers)
            &PyAnalyticCenter::build_certificate_from_dual,
            py::arg("multipliers"),
            "Build the certificate matrix H from dual multipliers.")
+      .def("eval_certificate", &PyAnalyticCenter::eval_certificate,
+           py::arg("H"), py::arg("Y"),
+           R"pbdoc(
+Evaluate the optimality certificate.
+
+Returns the minimum eigenvalue of the certificate matrix and the
+evaluation of the certificate matrix at the solution (first order
+condition).
+
+Parameters
+----------
+H : numpy.ndarray (n, n)
+    Certificate matrix.
+Y : numpy.ndarray (n, r)
+    Low-rank factor of the solution.
+
+Returns
+-------
+tuple(min_eig, first_order_cond)
+)pbdoc")
       .def("check_certificate", &PyAnalyticCenter::check_certificate,
            py::arg("H"), py::arg("Y"),
            R"pbdoc(
 Check global optimality of a solution.
 
+Returns whether the certificate matrix is PSD and the complementarity
+of the provided solution.
+
 Returns
 -------
-tuple(min_eig, first_order_cond)
+tuple(min_eig, complementarity)
 )pbdoc");
 
   // ---- SDPResult ----

@@ -27,7 +27,7 @@ def run_analytic_center(
     params.check_cert= True
     params.delta_min = 1e-7
     params.max_iter = 50
-    params.lin_solver = LinearSolverType.CG
+    params.lin_solver = LinearSolverType.MFCG
     delta = 1e-5
     As, bs = [], []
     for constraint in Constraints:
@@ -82,6 +82,10 @@ def compare_solvers(data : dict):
     print(f"------- time for SDP: {time_ip*1e3:.0f} ms")
     optimal_cost = np.trace(data["Q"] @ X)
     print(f"SDP optimal cost: {optimal_cost}")
+    # Get rank of SDP solution
+    eigs = np.linalg.eigvalsh(X)
+    rank = np.sum(eigs > 1e-6*eigs[-1])
+    print(f"Rank of SDP solution: {rank} (matrix size: {X.shape[0]})")
         
     # Check if SDP certifies the candidate solution
     certified_ip = check_candidate(info["H"], data["x_cand"])

@@ -328,22 +328,53 @@ TEST(MatrixFree, Product) {
   // Build the linear system
   auto system = problem.build_ac_system(X, delta);
   // Build the matrix-free operator
-  MultiplierLinSys lin_op(problem.C_, problem.A_, X, delta);
-  // Generate a random vector for testing
-  Vector random_vec = Vector::Random(problem.m);
-  // Compute the matrix-free product
-  Vector mf_product = lin_op * random_vec;
-  // Compute the explicit product using the system matrix
-  Vector explicit_product =
-      system.B.selfadjointView<Eigen::Upper>() * random_vec;
-  // Compare the results
-  double tol = 1e-10;
-  ASSERT_EQ(mf_product.size(), explicit_product.size());
-  for (int i = 0; i < mf_product.size(); ++i) {
-    EXPECT_NEAR(mf_product(i), explicit_product(i),
-                tol + tol * explicit_product.norm())
-        << "Matrix-free product does not match explicit product at index " << i;
+  MultiplierLinSys lin_op(problem.C_, problem.A_, X, system.AZ, system.AZt, delta);
+  // Test on columns of identity
+  auto Id = Matrix::Identity(sdp.dim, sdp.dim);
+  for (int i=0; i<sdp.dim; i++){
+    // Compute the matrix-free product
+    Vector mf_product = lin_op * Id.col(i);
+    // Compute the explicit product using the system matrix
+    Vector explicit_product =
+        system.B.selfadjointView<Eigen::Upper>() * Id.col(i);
+    // Compare the results
+    double tol = 1e-12;
+    ASSERT_EQ(mf_product.size(), explicit_product.size());
+    for (int j = 0; j < mf_product.size(); ++j) {
+      double val =std::abs(explicit_product(j));
+      EXPECT_NEAR(mf_product(j), explicit_product(j), tol + tol*val)
+          << "Matrix-free product does not match explicit product at index ()" << i << " , " << j << ")";
+    }
   }
+}
+
+TEST(MatrixFree, Diagonal) {
+  // Load a test problem
+  auto sdp = make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8}, "Clique1");
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.rescale_lin_sys = true;
+  auto delta = 1e-5;
+  // generate problem
+  auto problem = sdp.make_testable(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  Matrix X = Y_0 * Y_0.transpose() + Matrix::Identity(sdp.dim, sdp.dim) * delta;
+  // Build the explicit system to get the true diagonal of B
+  auto system = problem.build_ac_system(X, delta);
+  // Build the matrix-free operator and preconditioner
+  MultiplierLinSys lin_op(problem.C_, problem.A_, X, system.AZ, system.AZt, delta);
+ 
+  // Check diagonal elements
+  auto diagonal_mf = lin_op.diagonal();
+  auto diagonal_exp = system.B.diagonal();
+  double tol = 1e-12;
+  for (int i = 0; i < problem.m; ++i) {
+    EXPECT_NEAR(diagonal_mf(i), diagonal_exp(i), tol+tol*std::abs(diagonal_exp(i)) )
+        << "Diagonal does not match at B(" << i << "," << i << ")";
+  }
+
 }
 
 TEST(MatrixFree, DiagonalPreconditioner) {
@@ -362,7 +393,7 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   // Build the explicit system to get the true diagonal of B
   auto system = problem.build_ac_system(X, delta);
   // Build the matrix-free operator and preconditioner
-  MultiplierLinSys lin_op(problem.C_, problem.A_, X, delta);
+  MultiplierLinSys lin_op(problem.C_, problem.A_, X, system.AZ, system.AZt, delta);
   MultiplierDiagPreconditioner precond;
   precond.compute(lin_op);
   // Check that the preconditioner computed successfully
@@ -399,6 +430,7 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   EXPECT_LT(residual.norm() / rhs.norm(), 1e-6)
       << "Preconditioned CG residual too large";
 }
+
 
 TEST_P(AnalyticCentParamTest, CertifyMatrixFree) {
   const auto& sdp = GetParam();

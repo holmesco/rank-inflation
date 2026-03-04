@@ -133,8 +133,9 @@ class MaxCliqueProblem:
         self.params.verbose = True
         self.params.check_cert= True
         self.params.delta_min = 1e-7
+        self.params.delta_dec = 0.1
         self.params.max_iter = 50
-        self.params.lin_solver = LinearSolverType.CG
+        self.params.lin_solver = LinearSolverType.MFCG
         
 
     def get_constraints(self):
@@ -166,7 +167,7 @@ class MaxCliqueProblem:
         
         return constraints, values
     
-    def certify_candidate(self, x_cand, delta=1e-5):
+    def certify_candidate(self, x_cand, delta=1e-4):
         """Certify the optimality of a candidate solution to the maximum clique problem.
         
         Parameters
@@ -233,7 +234,9 @@ class MaxCliqueProblem:
         # Certify solution
         result, time_ac = self.certify_candidate(u)
         
-    def solve_sdp(self):
+        return u
+        
+    def solve_sdp(self,u):
         
         """Solve the maximum clique SDP relaxation using MOSEK's Fusion solver."""
         n = self.M.shape[0]
@@ -257,17 +260,20 @@ class MaxCliqueProblem:
         time_sdp = time.time() - t1
         print(f"SDP solve time: {time_sdp*1e3:.0f} ms")
 
-        # Extract rank-1 solution via eigendecomposition
+        # # Extract rank-1 solution via eigendecomposition
         eigvals, eigvecs = np.linalg.eigh(X_sol)
-        # Leading eigenvector (largest eigenvalue)
-        u = eigvecs[:, -1] * np.sqrt(np.maximum(eigvals[-1], 0.0))
-        # Normalize
-        u = u / np.linalg.norm(u)
+        # # Leading eigenvector (largest eigenvalue)
+        # u = eigvecs[:, -1] * np.sqrt(np.maximum(eigvals[-1], 0.0))
+        # # Normalize
+        # u = u / np.linalg.norm(u)
+        
+        # Check complementarity at solution
+        print(f"Complementarity at solution: {u.T@info['H']@u}")
 
         # Report SDP cost
         sdp_cost = np.trace(Q @ X_sol)
         print(f"SDP cost: {sdp_cost}")
-        print(f"Rank of SDP solution (tol=1e-6): {np.sum(eigvals > 1e-6)}")
+        print(f"Rank of SDP solution (tol=1e-6): {np.sum(eigvals > 1e-6*eigvals[-1])}")
 
         return X_sol, u
         
@@ -280,7 +286,7 @@ if __name__ == "__main__":
     m = 100      # total number of associations in problem
     n1 = 100     # number of points used on model (i.e., seen in view 1)
     n2o = 10     # number of outliers in data (i.e., seen in view 2)
-    outrat = 0.5 # outlier ratio of initial association set
+    outrat = 0.11 # outlier ratio of initial association set
     sigma = 0.01  # uniform noise [m] range
     pcfile = '/workspace/python/examples/bun10k.ply'  # Object file
     # Random pose transormation
@@ -291,5 +297,5 @@ if __name__ == "__main__":
     clipper, Agt = generate_dataset(pcfile, m, n1, n2o, outrat, sigma, T_21)
     
     prob = MaxCliqueProblem(clipper)
-    prob.solve_and_certify()
-    prob.solve_sdp()
+    u = prob.solve_and_certify()
+    prob.solve_sdp(u)

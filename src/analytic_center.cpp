@@ -155,13 +155,12 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       int sol_rank = get_rank(Z, params_.tol_rank_sol);
       if (n_iter % 10 == 1) {
         std::printf("%6s %6s %12s %12s %12s %12s %12s %12s %8s\n", "Iter",
-            "SolRank", "ViolNorm", "StepNorm", "Complement.",
-            "BarrParam", "Alpha", "Delta", "Obj Val.");
+                    "SolRank", "ViolNorm", "StepNorm", "Complement.",
+                    "BarrParam", "Alpha", "Delta", "Obj Val.");
       }
-      std::printf(
-          "%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n",
-          n_iter, sol_rank, violation.norm(), deltaZ.norm(), complementarity,
-          barrier_param, alpha, delta, f_val);
+      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n",
+                  n_iter, sol_rank, violation.norm(), deltaZ.norm(),
+                  complementarity, barrier_param, alpha, delta, f_val);
     }
 
     // Certificate Checking (Early stopping condition if the certificate is PSD)
@@ -267,7 +266,8 @@ AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
     }
   } else {
     // If using matrix-free solver, build the matrix-free operator for the LHS
-    sys.B_mf = std::make_unique<MultiplierLinSys>(C_, A_, Z, delta);
+    sys.B_mf =
+        std::make_unique<MultiplierLinSys>(C_, A_, Z, sys.AZ, sys.AZt, delta);
   }
 
   return sys;
@@ -282,6 +282,10 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
     // careful tuning of parameters and preconditioning for convergence,
     // especially in early iterations when the system can be ill-conditioned.
     Eigen::ConjugateGradient<Matrix, Eigen::Upper> cg;
+    // Set paramters
+    cg.setMaxIterations(
+        params_.lin_solve_max_iter);  // Set a maximum number of iterations
+    cg.setTolerance(params_.lin_solve_tol);  // Set a convergence tolerance
     cg.compute(sys.B);
     if (cg.info() != Eigen::Success) {
       std::cout << "Decomposition failed: " << cg.error() << std::endl;
@@ -290,8 +294,6 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
     // Use previous multipliers as initial guess if available to speed up
     // convergence
     if (prev_multipliers_.size() == m) {
-      cg.setMaxIterations(1000);  // Set a maximum number of iterations
-      cg.setTolerance(1e-6);      // Set a convergence tolerance
       multipliers = cg.solveWithGuess(sys.d, prev_multipliers_);
     } else {
       multipliers = cg.solve(sys.d);
@@ -310,6 +312,11 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
     Eigen::ConjugateGradient<MultiplierLinSys, Eigen::Upper | Eigen::Lower,
                              MultiplierDiagPreconditioner>
         mfcg;
+    // Set solve parameters
+    mfcg.setMaxIterations(
+        params_.lin_solve_max_iter);  // Set a maximum number of iterations
+    mfcg.setTolerance(params_.lin_solve_tol);  // Set a convergence tolerance
+
     mfcg.compute(lin_op);
     if (mfcg.info() != Eigen::Success) {
       std::cout << "Decomposition failed: " << mfcg.error() << std::endl;

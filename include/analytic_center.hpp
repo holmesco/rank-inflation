@@ -3,6 +3,8 @@
 
 #include "utils.hpp"
 #include "matrix_free_methods.hpp"
+#include <Eigen/IterativeLinearSolvers>
+
 
 namespace RankTools {
 
@@ -76,6 +78,11 @@ struct AnalyticCenterParams {
   double delta_dec_step_min = 0.9;
   // update factor for adjusting delta in adaptive centering
   double delta_dec = 0.6;
+
+  // Iterative Linear Solve Paramteres
+  // -----------------
+  int lin_solve_max_iter = 100;
+  double lin_solve_tol = 1e-5;
 
   // Line search
   // ----------------
