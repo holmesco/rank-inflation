@@ -84,6 +84,7 @@ def compare_solvers(data : dict):
     print(f"SDP optimal cost: {optimal_cost}")
     # Get rank of SDP solution
     eigs = np.linalg.eigvalsh(X)
+    print("Top SDP solution eigenvalues:", eigs[-5:])
     rank = np.sum(eigs > 1e-6*eigs[-1])
     print(f"Rank of SDP solution: {rank} (matrix size: {X.shape[0]})")
         
@@ -95,7 +96,8 @@ def compare_solvers(data : dict):
                   cert_ac=res_ac.certified,
                   time_ip=info["time"],
                   time_ac=time_ac,
-                  n_iters_ac=len(data["Constraints"]),)
+                  n_cons=len(data["Constraints"]),
+                  rank_sdp=rank)
     
     return result
 
@@ -145,6 +147,7 @@ def run_all_probs():
         "test_prob_9L.pkl",
         # "test_prob_9.pkl", remove because solution accuracy too low
     ]
+    # fnames = ["test_prob_13G.pkl"]
         
     results = []
     for fname in fnames:
@@ -168,8 +171,8 @@ def plot_results(df):
 
     fig, ax = plt.subplots(figsize=(8, 5))
     colors = df_filtered["cert_ip"].map({True: "green", False: "red"})
-    ax.scatter(df_filtered["n_iters_ac"], df_filtered["time_ip"] * 1e3, label="Interior Point", marker="o", c=colors)
-    ax.scatter(df_filtered["n_iters_ac"], df_filtered["time_ac"] * 1e3, label="Analytic Center", marker="x",c=colors)
+    ax.scatter(df_filtered["n_cons"], df_filtered["time_ip"] * 1e3, label="Interior Point", marker="o", c=colors)
+    ax.scatter(df_filtered["n_cons"], df_filtered["time_ac"] * 1e3, label="Analytic Center", marker="x",c=colors)
     ax.set_xlabel("Number of Constraints")
     ax.set_ylabel("Time (ms)")
     ax.set_yscale("log")

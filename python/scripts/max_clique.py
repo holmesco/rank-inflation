@@ -117,7 +117,7 @@ def generate_dataset(pcfile, m, n1, n2o, outrat, sigma, T_21):
         return (clipper, Agt)
 
 class MaxCliqueProblem:
-    def __init__(self, clipper, threshold=0.0):
+    def __init__(self, clipper, threshold=0.0, params: AnalyticCenterParams = None):
         self.clipper = clipper
         # Get affinity matrix from clipper
         M = clipper.get_affinity_matrix()
@@ -129,13 +129,16 @@ class MaxCliqueProblem:
         # Get constraints for problem
         self.As, self.bs = self.get_constraints()
         # set up parameters for analytic center
-        self.params = AnalyticCenterParams()
-        self.params.verbose = True
-        self.params.check_cert= True
-        self.params.delta_min = 1e-7
-        self.params.delta_dec = 0.1
-        self.params.max_iter = 50
-        self.params.lin_solver = LinearSolverType.MFCG
+        if params is not None:
+            self.params = params
+        else:
+            self.params = AnalyticCenterParams()
+            self.params.verbose = True
+            self.params.check_cert= True
+            self.params.delta_min = 1e-9
+            self.params.delta_dec = 0.6
+            self.params.max_iter = 50
+            self.params.lin_solver = LinearSolverType.MFCG
         
 
     def get_constraints(self):
@@ -167,7 +170,7 @@ class MaxCliqueProblem:
         
         return constraints, values
     
-    def certify_candidate(self, x_cand, delta=1e-4):
+    def certify_candidate(self, x_cand, cost=None,delta=1e-5):
         """Certify the optimality of a candidate solution to the maximum clique problem.
         
         Parameters
@@ -186,8 +189,9 @@ class MaxCliqueProblem:
             Time taken for the analytic center certification process.
         """
         # Get cost of candidate solution
-        cost = -(x_cand.T @ self.M @ x_cand).item()
-        print(f"Cost of candidate solution: {cost}")
+        if cost is None:
+            cost = -(x_cand.T @ self.M @ x_cand).item()
+        print(f"target cost: {cost}")
         print(f"Number of constraints: {len(self.As)}")
         # Run certifier
         ac = AnalyticCenter(C=-self.M, rho=cost, A=self.As, b=self.bs, params=self.params)
@@ -236,7 +240,7 @@ class MaxCliqueProblem:
         
         return u
         
-    def solve_sdp(self,u):
+    def solve_sdp(self):
         
         """Solve the maximum clique SDP relaxation using MOSEK's Fusion solver."""
         n = self.M.shape[0]
@@ -255,27 +259,26 @@ class MaxCliqueProblem:
         X_sol, info = solve_sdp_fusion(
             Q=Q,
             Constraints=constraints,
-            verbose=True
+            adjust=False,
+            verbose=True,
         )
         time_sdp = time.time() - t1
         print(f"SDP solve time: {time_sdp*1e3:.0f} ms")
 
         # # Extract rank-1 solution via eigendecomposition
         eigvals, eigvecs = np.linalg.eigh(X_sol)
-        # # Leading eigenvector (largest eigenvalue)
-        # u = eigvecs[:, -1] * np.sqrt(np.maximum(eigvals[-1], 0.0))
-        # # Normalize
-        # u = u / np.linalg.norm(u)
-        
-        # Check complementarity at solution
-        print(f"Complementarity at solution: {u.T@info['H']@u}")
-
+        # Leading eigenvector (largest eigenvalue)
+        u = eigvecs[:, -1] * np.sqrt(np.maximum(eigvals[-1], 0.0))
+                
         # Report SDP cost
         sdp_cost = np.trace(Q @ X_sol)
         print(f"SDP cost: {sdp_cost}")
-        print(f"Rank of SDP solution (tol=1e-6): {np.sum(eigvals > 1e-6*eigvals[-1])}")
+        cost_u = u.T @ Q @ u
+        print(f"Cost of leading eigenvector solution: {cost_u}")
+        rank = np.sum(eigvals > 1e-6*eigvals[-1])
+        print(f"Rank of SDP solution (tol=1e-6): {rank}")
 
-        return X_sol, u
+        return X_sol, u, rank
         
         
 
@@ -286,7 +289,7 @@ if __name__ == "__main__":
     m = 100      # total number of associations in problem
     n1 = 100     # number of points used on model (i.e., seen in view 1)
     n2o = 10     # number of outliers in data (i.e., seen in view 2)
-    outrat = 0.11 # outlier ratio of initial association set
+    outrat = 0.9 # outlier ratio of initial association set
     sigma = 0.01  # uniform noise [m] range
     pcfile = '/workspace/python/examples/bun10k.ply'  # Object file
     # Random pose transormation
@@ -297,5 +300,5 @@ if __name__ == "__main__":
     clipper, Agt = generate_dataset(pcfile, m, n1, n2o, outrat, sigma, T_21)
     
     prob = MaxCliqueProblem(clipper)
-    u = prob.solve_and_certify()
-    prob.solve_sdp(u)
+    X, u, rank = prob.solve_sdp()
+    result, time_ac = prob.certify_candidate(u)
