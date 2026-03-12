@@ -32,7 +32,7 @@ OUTRAT_MAX = 0.98
 # Number of trials (from the low-outrat end) for which the expensive
 # full-matrix solvers (CG, LDLT) are also run.  Set to N_OUTRAT to
 # run them for every trial.
-N_FULL_MAT = 3
+N_FULL_MAT = 0
 
 # Dataset parameters (mirroring max_clique.py __main__)
 M_ASSOC = 100       # total number of associations

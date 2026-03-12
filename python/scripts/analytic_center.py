@@ -169,8 +169,8 @@ def compare_solvers(data : dict):
         
     # Check if SDP certifies the candidate solution
     certified_ip = check_candidate(info["H"], data["x_cand"])
-    # Check simple certifier
-    mults_simple, H_simple = simple_certifier_wrapper(**data)
+    # # Check simple certifier
+    # mults_simple, H_simple = simple_certifier_wrapper(**data)
     # Run centering certifier
     res_ac, time_ac = run_analytic_center(**data, X_ip=X)
     result = dict(cert_ip=certified_ip, 
@@ -228,7 +228,7 @@ def run_all_probs():
         "test_prob_9L.pkl",
         # "test_prob_9.pkl", remove because solution accuracy too low
     ]
-    fnames = ["test_prob_13L.pkl"]
+    # fnames = ["test_prob_13L.pkl"]
         
     results = []
     for fname in fnames:
