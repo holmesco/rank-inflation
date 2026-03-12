@@ -73,6 +73,85 @@ def check_candidate(H, x_cand):
         return False
     return True
 
+def simple_certifier_wrapper(Q, Constraints, x_cand, **kwargs):
+    As, bs = [], []
+    
+    for constraint in Constraints:
+        A, b = constraint
+        As.append(A)
+        bs.append(b)
+    Q_adj, scale, offset = adjust_Q(Q)
+    cost_adj = (x_cand.T @ Q_adj @ x_cand).item()
+        
+    return simple_certifier(x_cand, Q_adj, rho=cost_adj, As=As, bs=bs)
+
+def simple_certifier(V0: np.ndarray, C : np.ndarray, rho:float, As:list[np.ndarray], bs : list[float]):
+    """
+    An iterative approach where the current minimum eigenvector of the dual matrix
+    is added to the primal solution space (multiplied by a small scalar).
+    This approach does seem to converge, but very slowly.
+    
+    Parameters
+    ----------
+    V0 : float
+        The value to certify.
+    C : np.ndarray
+        The cost vector.
+    rho : float
+        Optimal cost
+    As : list of np.ndarray
+        The list of constraint matrices.
+    bs : list of np.ndarray
+        The list of constraint vectors.
+
+    Returns
+    -------
+    bool
+        True if the certification is successful, False otherwise.
+    """
+    delta = 1e-8
+    epsilon_p = 1e-5
+    V: np.ndarray = V0
+    while True:
+        # Get vectorized system 
+        c = (C @ V).reshape(-1,1,order='F')
+        Abar = np.zeros(( V.shape[0] * V.shape[1] , len(As) ))
+        for i,A in enumerate(As):
+            Abar[:,[i]] = (A @ V).reshape(-1,1,order='F')
+        # Solve the linear system
+        mults, res, rank,s = np.linalg.lstsq(Abar, -c, rcond=None)  
+        # Build the certificate matrix
+        H = C + sum(mults[i,0] * As[i] for i in range(len(As)))  
+        # get minimum eigenvalue and corresponding eigenvector
+        eigvals, eigvecs = np.linalg.eig(H.todense() if hasattr(H, 'todense') else H)
+        min_eigval = np.min(eigvals)
+        min_eigvec = eigvecs[:, np.argmin(eigvals)]
+        # Check if the minimum eigenvalue is non-negative
+        if min_eigval >= -epsilon_p:
+            break
+        else:
+            # Update V using the eigenvector corresponding to the minimum eigenvalue
+            V = np.concatenate([V, min_eigvec], axis=1)
+        num_neg = np.sum(eigvals < -epsilon_p)
+        print(f"Iteration {V.shape[1]}: min eigenvalue = {min_eigval:.6e}, num negative eigenvalues = {num_neg}, residual = {np.linalg.norm(Abar @ mults + c):.6e}")
+    # Rescale V
+    n_delta = V.shape[1]-1
+    Delta = np.concatenate([np.array([1]), delta*np.ones(n_delta)])
+    V = V @ np.diag(Delta)
+    
+    # Check final constraint violation
+    violation = [(V.T @ C @ V).trace() - rho]
+    for i in range(len(As)):
+        violation.append((V.T @ As[i] @ V).trace() - bs[i])
+    violation = np.array(violation)
+    print(f" Norm of final violation: {np.linalg.norm(violation)}")
+    print(f"Complementarity of solution: {np.trace(H @ (V0 @ V0.T))}")
+    print(f"Minimum eigenvalue of final H: {min_eigval:.6e}")
+    
+    return mults, H
+    
+    
+
 def compare_solvers(data : dict):
     t1 = time.time()
     X, info = solve_sdp_fusion(
@@ -90,6 +169,8 @@ def compare_solvers(data : dict):
         
     # Check if SDP certifies the candidate solution
     certified_ip = check_candidate(info["H"], data["x_cand"])
+    # Check simple certifier
+    mults_simple, H_simple = simple_certifier_wrapper(**data)
     # Run centering certifier
     res_ac, time_ac = run_analytic_center(**data, X_ip=X)
     result = dict(cert_ip=certified_ip, 
@@ -147,7 +228,7 @@ def run_all_probs():
         "test_prob_9L.pkl",
         # "test_prob_9.pkl", remove because solution accuracy too low
     ]
-    # fnames = ["test_prob_13G.pkl"]
+    fnames = ["test_prob_13L.pkl"]
         
     results = []
     for fname in fnames:

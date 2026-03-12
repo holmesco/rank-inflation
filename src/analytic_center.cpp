@@ -325,8 +325,6 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
     // Use previous multipliers as initial guess if available to speed up
     // convergence
     if (prev_multipliers_.size() == m) {
-      mfcg.setMaxIterations(1000);  // Set a maximum number of iterations
-      mfcg.setTolerance(1e-6);      // Set a convergence tolerance
       multipliers = mfcg.solveWithGuess(sys.d, prev_multipliers_);
     } else {
       multipliers = mfcg.solve(sys.d);

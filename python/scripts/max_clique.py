@@ -139,6 +139,8 @@ class MaxCliqueProblem:
             self.params.delta_dec = 0.6
             self.params.max_iter = 50
             self.params.lin_solver = LinearSolverType.MFCG
+            self.params.lin_solve_max_iter = 200
+            self.params.lin_solve_tol = 1e-4
         
 
     def get_constraints(self):
@@ -286,10 +288,10 @@ class MaxCliqueProblem:
 if __name__ == "__main__":
     np.random.seed(0)
     # Build a bunny dataset
-    m = 100      # total number of associations in problem
-    n1 = 100     # number of points used on model (i.e., seen in view 1)
+    m = 300      # total number of associations in problem
+    n1 = 300     # number of points used on model (i.e., seen in view 1)
     n2o = 10     # number of outliers in data (i.e., seen in view 2)
-    outrat = 0.9 # outlier ratio of initial association set
+    outrat = 0.1 # outlier ratio of initial association set
     sigma = 0.01  # uniform noise [m] range
     pcfile = '/workspace/python/examples/bun10k.ply'  # Object file
     # Random pose transormation

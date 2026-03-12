@@ -26,8 +26,8 @@ from ranktools import AnalyticCenterParams, LinearSolverType
 N_OUTRAT = 10
 
 # Range of outlier ratios (log-spaced between these bounds)
-OUTRAT_MIN = 0.02
-OUTRAT_MAX = 0.95
+OUTRAT_MIN = 0.1
+OUTRAT_MAX = 0.98
 
 # Number of trials (from the low-outrat end) for which the expensive
 # full-matrix solvers (CG, LDLT) are also run.  Set to N_OUTRAT to
@@ -68,6 +68,8 @@ def make_ac_params(solver_type: LinearSolverType) -> AnalyticCenterParams:
     params.delta_dec = 0.6
     params.max_iter = 50
     params.lin_solver = solver_type
+    params.lin_solve_max_iter = 200
+    params.lin_solve_tol = 1e-4
     return params
 
 
@@ -142,7 +144,7 @@ def run_analysis(
             params = make_ac_params(solver_enum)
             prob_solver = MaxCliqueProblem(clipper, params=params)
 
-            result, ac_time = prob_solver.certify_candidate(u_sdp, cost=sdp_cost)
+            result, ac_time = prob_solver.certify_candidate(u_sdp, cost=sdp_cost, delta=1e-5)
 
             records.append(
                 {
@@ -227,17 +229,17 @@ def plot_runtime_vs_constraints(csv_path: str = DEFAULT_CSV) -> None:
 # Main
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    # df = run_analysis()
+    df = run_analysis()
 
-    # print("\n\n" + "=" * 70)
-    # print("RESULTS")
-    # print("=" * 70)
-    # print(df.to_string(index=False))
+    print("\n\n" + "=" * 70)
+    print("RESULTS")
+    print("=" * 70)
+    print(df.to_string(index=False))
 
-    # # Persist to CSV for later inspection
-    # out_path = "/workspace/results/max_clique_analysis.csv"
-    # df.to_csv(out_path, index=False)
-    # print(f"\nResults saved to {out_path}")
+    # Persist to CSV for later inspection
+    out_path = "/workspace/python/results/max_clique_analysis.csv"
+    df.to_csv(out_path, index=False)
+    print(f"\nResults saved to {out_path}")
 
     # Generate the runtime plot
-    plot_runtime_vs_constraints()
+    plot_runtime_vs_constraints(out_path)
