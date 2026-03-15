@@ -14,6 +14,7 @@ using Vector = Eigen::VectorXd;
 using Triplet = Eigen::Triplet<double>;
 using SpMatrix = Eigen::SparseMatrix<double>;
 using ScalarFunc = std::function<double(double)>;
+using Diagonal = Eigen::DiagonalMatrix<double, Eigen::Dynamic>;
 
 // Result of solving a linear system using rank-revealing QR decomposition.
 // Contains both the least-squares particular solution and the nullspace basis.

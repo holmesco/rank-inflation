@@ -35,7 +35,7 @@ struct LineCertifierParams {
   // Select linear solver for centering step
   LinearSolverType lin_solver = LinearSolverType::LDLT;
 
-  // Iterative Linear Solve Paramteres
+  // Iterative Linear Solve Parameters
   // -----------------
   // Max iterations for iterative linear solvers
   int lin_solve_max_iter = 100;
@@ -68,13 +68,19 @@ class LineCertifier {
   const std::vector<Eigen::SparseMatrix<double>>& A_;
   // constraint values
   const std::vector<double>& b_;
+  // factorization of solution matrix
+  const Matrix Y_;
+  // factorization of the interior solution matrix for scaling in line search
+  Matrix V_;
+
   // parameters
   LineCertifierParams params_;
 
   // Constructor
   LineCertifier(const Matrix& C, double rho,
                 const std::vector<Eigen::SparseMatrix<double>>& A,
-                const std::vector<double>& b, LineCertifierParams params);
+                const std::vector<double>& b, const Matrix& Y,
+                LineCertifierParams params);
 
   LineCertifierResult certify(const Matrix& Y_0, double delta_init) const;
 
@@ -95,10 +101,12 @@ class LineCertifier {
                                               const Matrix& Y) const;
 
   // Get the factorization of the primal matrix
-  Matrix get_primal_factor(const Matrix& Y) const;
+  // We do this by computing the null space of the solution matrix in a one-time
+  // computation
+  Matrix get_interior_factor(const Matrix& Y) const;
 
   // Retrieve the scaling diagonal  for the line search
-  Vector get_scaling_diagonal(double alpha) const;
+  Diagonal get_scaling_diagonal(double alpha) const;
 
  protected:
   // Previous multipliers for iterative linear system solvers
@@ -108,5 +116,6 @@ class LineCertifier {
   // If the coefficient falls below `tol` then the corresponding constraint is
   // not added to the sum
   SpMatrix build_adjoint(const Vector& coeffs, double tol = 0.0) const;
+};
 
 }  // namespace RankTools

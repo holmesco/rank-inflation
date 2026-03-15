@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <stdexcept>
 #include <vector>
+
 #include "test_harness.hpp"
 
 namespace RankTools {
