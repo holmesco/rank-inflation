@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <iostream>
 #include <utility>
+#include <vector>
 
 #include "analytic_center.hpp"
 #include "rank_inflation.hpp"
@@ -236,3 +237,5 @@ SDPTestProblem make_two_sphere_sdp(int n, double r1, double r2, double d) {
 
   return sdp;
 }
+
+
