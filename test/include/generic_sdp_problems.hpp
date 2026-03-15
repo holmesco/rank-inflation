@@ -1,3 +1,4 @@
+// Defines a set of generic SDP problems for testing.
 #pragma once
 
 #include <Eigen/Dense>
@@ -6,6 +7,7 @@
 #include <stdexcept>
 #include <vector>
 #include "test_harness.hpp"
+
 namespace RankTools {
 namespace ExportedSDPProblems {
 
