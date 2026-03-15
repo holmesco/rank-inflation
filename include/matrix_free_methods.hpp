@@ -16,6 +16,7 @@ struct traits<MultiplierLinSys> : public traits<Eigen::SparseMatrix<double>> {};
 }  // namespace internal
 }  // namespace Eigen
 
+
 // Multiplier Linear System for use in iterative solvers. This class allows us
 // to use Eigen's iterative solvers with a custom matrix-vector product defined
 // by the sparse matrix of the problem, without explicitly forming the dense
@@ -129,7 +130,6 @@ struct generic_product_impl<MultiplierLinSys, Rhs, SparseShape, DenseShape,
 }  // namespace internal
 }  // namespace Eigen
 
-namespace RankTools {
 
 // Diagonal preconditioner for MultiplierLinSys.
 // Diagonal entry i is B(i,i) = tr(A_i * X * A_i * X) / delta = tr((A_i*X)^2)
@@ -173,9 +173,13 @@ class MultiplierDiagPreconditioner {
   bool is_initialized_;
 };
 
+namespace RankTools {
+
+// Enumeration for linear solver types
 enum class LinearSolverType { LDLT, CG, MFCG };
 
-std::string print_solver(LinearSolverType solver) {
+// Nice printing for the linear solver types for debugging and display purposes
+inline std::string print_solver(LinearSolverType solver) {
   switch (solver) {
     case LinearSolverType::LDLT:
       return "LDLT Direct Solver";

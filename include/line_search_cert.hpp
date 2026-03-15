@@ -82,7 +82,7 @@ class LineCertifier {
                 const std::vector<double>& b, const Matrix& Y,
                 LineCertifierParams params);
 
-  LineCertifierResult certify(const Matrix& Y_0, double delta_init) const;
+  // LineCertifierResult certify(const Matrix& Y_0, double delta_init) const;
 
   // Build the optimality certificate for the problem using the optimal
   // multipliers

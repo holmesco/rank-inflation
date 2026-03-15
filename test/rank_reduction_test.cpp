@@ -4,7 +4,8 @@ c++ tests for rank inflation
 #include "rank_reduction.hpp"
 
 #include "interior_point_sdp.hpp"
-#include "test_harness.hpp"
+#include "circle_problem.hpp"
+#include "lovasz_theta_problems.hpp"
 
 using namespace RankTools;
 

@@ -1,0 +1,25 @@
+name test_prob_16Lc
+dim 3
+C 9
+0
+0
+0
+0
+0
+0
+0
+0
+0
+constraints 2
+A 3 3 1
+0 0 1
+b 1
+A 3 3 3
+2 0 -1
+1 1 2
+0 2 -1
+b 0
+soln 3 1 3
+1
+0
+0

@@ -2,7 +2,8 @@
 c++ tests for rank inflation
 */
 #include "interior_point_sdp.hpp"
-#include "test_harness.hpp"
+#include "circle_problem.hpp"
+#include "lovasz_theta_problems.hpp"
 
 using namespace RankTools;
 
