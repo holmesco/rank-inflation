@@ -92,6 +92,10 @@ inline SDPTestProblem load_problem_from_file(const std::string& problem_name) {
       }
     }
   }
+  // remove homogenization offset
+  sdp.C(0,0) = 0.0;
+  // Rescale C to have norm 1, to avoid numerical issues in testing.
+  sdp.C /= sdp.C.norm();
 
   expect_key(in, "constraints", path_str);
   int n_constraints = 0;
