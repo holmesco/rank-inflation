@@ -4,38 +4,6 @@
 
 namespace RankTools {
 
-Vector vec_symm(const Matrix& A) {
-  int n = A.rows();
-  Vector v(n * (n + 1) / 2);
-  int k = 0;
-  for (int j = 0; j < n; ++j) {
-    for (int i = 0; i <= j; ++i) {
-      if (i == j)
-        v(k++) = A(i, j);
-      else
-        v(k++) = std::sqrt(2.0) * A(i, j);  // Standard scaling for isometry
-    }
-  }
-  return v;
-}
-
-Matrix unvec_symm(const Vector& v, int dim) {
-  Matrix A = Matrix::Zero(dim, dim);
-  int k = 0;
-  for (int j = 0; j < dim; ++j) {
-    for (int i = 0; i <= j; ++i) {
-      if (i == j)
-        A(i, j) = v(k++);
-      else {
-        double val = v(k++) / std::sqrt(2.0);
-        A(i, j) = val;
-        A(j, i) = val;
-      }
-    }
-  }
-  return A;
-}
-
 Matrix get_constraint_op(const std::vector<SpMatrix>& As, const Matrix& V) {
   // Get solution space null space operator.
   int m = As.size();

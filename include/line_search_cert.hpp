@@ -12,8 +12,6 @@ struct LineCertifierResult {
   Matrix H;
   // Optimal multipliers for the constraints at the solution
   Vector multipliers;
-  // Constraint violation at the solution
-  Vector violation;
   // Whether the solution is certified by the certificate matrix
   bool certified;
   // Minimum eigenvalue of the certificate matrix
@@ -34,6 +32,10 @@ struct LineCertifierParams {
   int max_iter = 50;
   // Select linear solver for centering step
   LinearSolverType lin_solver = LinearSolverType::LDLT;
+
+  // Bisection line search parameters
+  // -----------------
+  double alpha_min = 1e-8;  // minimum step size
 
   // Iterative Linear Solve Parameters
   // -----------------
@@ -72,6 +74,8 @@ class LineCertifier {
   const Matrix Y_;
   // factorization of the interior solution matrix for scaling in line search
   Matrix V_;
+  // Vector of constraint-factor products
+  std::vector<Matrix> VAV_;
 
   // parameters
   LineCertifierParams params_;
@@ -82,7 +86,10 @@ class LineCertifier {
                 const std::vector<double>& b, const Matrix& Y,
                 LineCertifierParams params);
 
-  // LineCertifierResult certify(const Matrix& Y_0, double delta_init) const;
+  LineCertifierResult certify(double alpha) const;
+
+  // Solve the linear system and get the certificate
+  QRResult get_multipliers(double alpha) const;
 
   // Build the optimality certificate for the problem using the optimal
   // multipliers

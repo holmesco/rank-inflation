@@ -2,6 +2,38 @@
 
 namespace RankTools {
 
+Vector vec_symm(const Matrix& A) {
+  int n = A.rows();
+  Vector v(n * (n + 1) / 2);
+  int k = 0;
+  for (int j = 0; j < n; ++j) {
+    for (int i = 0; i <= j; ++i) {
+      if (i == j)
+        v(k++) = A(i, j);
+      else
+        v(k++) = std::sqrt(2.0) * A(i, j);  // Standard scaling for isometry
+    }
+  }
+  return v;
+}
+
+Matrix unvec_symm(const Vector& v, int dim) {
+  Matrix A = Matrix::Zero(dim, dim);
+  int k = 0;
+  for (int j = 0; j < dim; ++j) {
+    for (int i = 0; i <= j; ++i) {
+      if (i == j)
+        A(i, j) = v(k++);
+      else {
+        double val = v(k++) / std::sqrt(2.0);
+        A(i, j) = val;
+        A(j, i) = val;
+      }
+    }
+  }
+  return A;
+}
+
 double bisection_line_search(const ScalarFunc& df, double alpha_low,
                              double alpha_high, double tol) {
   // Ensure that the upper bound is valid

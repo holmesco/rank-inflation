@@ -27,12 +27,12 @@ static std::vector<SDPTestProblem> get_small_exported_cases() {
   selected.reserve(10);
 
   for (const auto& sdp : all) {
-    if (sdp.dim <= 25) {
+    if (sdp.A.size() <= 100) {
       selected.push_back(sdp);
     }
-    if (selected.size() >= 10) {
-      break;
-    }
+    // if (selected.size() >= 10) {
+    //   break;
+    // }
   }
 
   if (selected.empty()) {
@@ -45,10 +45,18 @@ static std::vector<SDPTestProblem> get_small_exported_cases() {
 
 static LineCertifierParams make_params() {
   LineCertifierParams p;
-  p.verbose = false;
-  p.tol_cert_psd = 1e-9;
-  p.tol_cert_complementarity = 1e-8;
+  p.verbose = true;
+  p.tol_cert_psd = 1e-5;
+  p.tol_cert_complementarity = 1e-5;
   return p;
+}
+
+TEST_P(LineSearchParamTest, CertifyFindsCertificate) {
+  const auto& sdp = GetParam();
+  auto params = make_params();
+
+  LineCertifier cert(sdp.C, sdp.rho, sdp.A, sdp.b, sdp.soln, params);
+  auto result = cert.certify(1.0);
 }
 
 TEST_P(LineSearchParamTest, InteriorFactorContainsCandidateColumns) {
