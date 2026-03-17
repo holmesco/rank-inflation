@@ -168,7 +168,7 @@ class AnalyticCenter {
 
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
-  std::pair<Vector, Vector> get_multipliers(const Matrix& Z,
+  std::pair<Vector, Vector> get_multipliers(const Matrix& Z, const Matrix& L,
                                             double delta) const;
 
   // Intermediate representation of the analytic center linear system
@@ -176,14 +176,13 @@ class AnalyticCenter {
     Matrix B;                     // LHS matrix (m x m)
     Vector d;                     // RHS vector (m)
     Vector violation;             // constraint violation (m)
-    std::vector<Matrix> AZ;       // A_i * Z products
-    std::vector<Matrix> AZt;      // (A_i * Z)^T products
+    std::vector<Matrix> LAL;       // L^T * A_i * L products (L is the cholesky factor of the primal solution)
     std::vector<double> A_trace;  // diagonal traces of A_i
     std::unique_ptr<MultiplierLinSys> B_mf;       // Matrix-free operator for B (if using matrix-free solver)
   };
 
   // Constructs the linear system (H, d, violation) for the analytic center step
-  ACSystem build_ac_system(const Matrix& Z, double delta) const;
+  ACSystem build_ac_system(const Matrix& Z,const Matrix& L, double delta) const;
 
   // Solves the linear system H * multipliers = d using the configured solver
   Vector solve_ac_system(const ACSystem& system) const;

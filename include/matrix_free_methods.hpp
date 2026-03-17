@@ -43,49 +43,31 @@ class MultiplierLinSys : public Eigen::EigenBase<MultiplierLinSys> {
   }
   // Stored values for the linear system
   const int num_constraints_;
+  // cost matrix
   const Eigen::MatrixXd& C_;
-  const std::vector<Eigen::SparseMatrix<double>>& As_;
-  const Eigen::MatrixXd* X_;
-  const std::vector<Eigen::MatrixXd>& AX_;
-  const std::vector<Eigen::MatrixXd>& AXt_;
+  // constraint matrices
+  const std::vector<Eigen::SparseMatrix<double>>& As_; 
+  // Cholesky factor of primal solution,
+  const Eigen::MatrixXd& L_;
+  // precomputed L^T * A_i * L products for efficient matrix-vector product computation
+  const std::vector<Eigen::MatrixXd>& LAL_;
+  // perturbation parameter 
   double delta_;
 
   // API to set the data of the linear system (the cost matrix and the
   // constraint matrices)
   MultiplierLinSys(const Eigen::MatrixXd& C,
                    const std::vector<Eigen::SparseMatrix<double>>& As,
-                   const Eigen::MatrixXd& X,
-                   const std::vector<Eigen::MatrixXd>& AX,
-                   const std::vector<Eigen::MatrixXd>& AXt, double delta)
+                   const Eigen::MatrixXd& L,
+                   const std::vector<Eigen::MatrixXd>& LAL,
+                   double delta)
       : num_constraints_(As.size() + 1),
         C_(C),
         As_(As),
-        X_(&X),
-        AX_(AX),
-        AXt_(AXt),
+        L_(L),
+        LAL_(LAL),
         delta_(delta) {}
 
-  void setX(const Eigen::MatrixXd& new_X) { X_ = &new_X; }
-  void setDelta(double new_delta) { delta_ = new_delta; }
-
-  // Compute the diagonal of the matrix for preconditioner.
-  Eigen::VectorXd diagonal() const {
-    const int m = num_constraints_;
-    const auto& X = *X_;
-    Eigen::VectorXd diag(m);
-    const int a_size = static_cast<int>(As_.size());
-    for (int i = 0; i < m; ++i) {
-      Eigen::MatrixXd AiX;
-      if (i < a_size) {
-        AiX = As_[i].selfadjointView<Eigen::Upper>() * X;
-      } else {
-        AiX = C_ * X;  // last entry corresponds to the cost matrix
-      }
-      // tr((AiX)^2) = sum_jk (AiX)_jk * (AiX)_kj = <AiX, AiX^T>_F
-      diag(i) = AiX.cwiseProduct(AiX.transpose()).sum() / delta_;
-    }
-    return diag;
-  }
 };
 
 // Implementation of MultiplierLinSys * Eigen::DenseVector though a
@@ -113,15 +95,18 @@ struct generic_product_impl<MultiplierLinSys, Rhs, SparseShape, DenseShape,
     for (size_t i = 0; i < lhs.As_.size(); ++i) {
       S += rhs(i) * lhs.As_[i];
     }
-    // Single O(n^3) multiply: SX = S_sym * X
-    Eigen::MatrixXd SX =
-        S.selfadjointView<Eigen::Upper>() * (*lhs.X_) * (alpha / lhs.delta_);
-    // dst(i) = <AXt_[i], SX>_F = tr(A_i * X * S * X) * alpha / delta
+    // two O(n^3) multiply: LSL = L^t * S_sym * L
+    Eigen::MatrixXd LSL =
+        lhs.L_.transpose() * S.selfadjointView<Eigen::Upper>() * lhs.L_ * (alpha / lhs.delta_);
+    // dst(i) = tr(A_i * X * S * X) * alpha / delta 
+    //        = tr(L^T * A_i * L * L^T * S * L) * alpha / delta, where L is the Cholesky factor of X
+    //        = vec(LAL_[i])^T * vec(LSL) *alpha/delta
+    // O(n^3)
     const int m = lhs.num_constraints_;
     for (int i = 0; i < m; ++i) {
-      Eigen::Map<const Eigen::VectorXd> axt(lhs.AXt_[i].data(),
-                                            lhs.AXt_[i].size());
-      Eigen::Map<const Eigen::VectorXd> sx(SX.data(), SX.size());
+      Eigen::Map<const Eigen::VectorXd> axt(lhs.LAL_[i].data(),
+                                            lhs.LAL_[i].size());
+      Eigen::Map<const Eigen::VectorXd> sx(LSL.data(), LSL.size());
       dst(i) += axt.dot(sx);
     }
   }
@@ -145,13 +130,12 @@ class MultiplierDiagPreconditioner {
   // Eigen's CG calls compute(mat) with the matrix-free operator
   MultiplierDiagPreconditioner& compute(const MultiplierLinSys& op) {
     const int m = op.num_constraints_;
-    const auto& X = *op.X_;
     inv_diag_.resize(m);
 
     const int a_size = static_cast<int>(op.As_.size());
     for (int i = 0; i < m; ++i) {
-      // tr((AiX)^2) = sum_jk (AiX)_jk * (AiX)_kj = <AiX, AiX^T>_F
-      double diag_val = op.AX_[i].cwiseProduct(op.AXt_[i]).sum() / op.delta_;
+      // tr(Ai * X * Ai * X) = tr (L^T * A_i * L * L^T * A_i * L) = tr((L^T * A_i * L)^2) = sum_jk (L^T * A_i * L)_jk^2
+      double diag_val = op.LAL_[i].array().square().sum() / op.delta_;
       inv_diag_(i) = (diag_val != Scalar(0)) ? 1.0 / diag_val : 1.0;
     }
     is_initialized_ = true;

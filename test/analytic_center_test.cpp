@@ -1,8 +1,8 @@
 /*
 Test file for Analytic Center implementation.
 */
-#include "interior_point_sdp.hpp"
 #include "circle_problem.hpp"
+#include "interior_point_sdp.hpp"
 #include "lovasz_theta_problems.hpp"
 
 using namespace RankTools;
@@ -66,8 +66,7 @@ TEST_P(AnalyticCentParamTest, PrimalSolution) {
       << "Analytic center solution is not close to Mosek solution";
 }
 
-
-// Test early stopping based on certificate found. 
+// Test early stopping based on certificate found.
 TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
   const auto& sdp = GetParam();
   // parameters
@@ -109,8 +108,7 @@ TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
             << first_ord_cond << std::endl;
 }
 
-
-// Test the Fixed perturbation and verify that the method converges. 
+// Test the Fixed perturbation and verify that the method converges.
 TEST_P(AnalyticCentParamTest, CertifyFixedPerturb) {
   const auto& sdp = GetParam();
   // parameters
@@ -194,7 +192,8 @@ TEST_P(AnalyticCentParamTest, CertifyLDLT) {
             << result.complementarity << std::endl;
 }
 
-// Test the Conjugate Gradient linear solver on the system for computing multipliers
+// Test the Conjugate Gradient linear solver on the system for computing
+// multipliers
 TEST_P(AnalyticCentParamTest, CertifyConjGrad) {
   const auto& sdp = GetParam();
   // parameters
@@ -224,6 +223,29 @@ TEST_P(AnalyticCentParamTest, CertifyConjGrad) {
             << result.complementarity << std::endl;
 }
 
+// Test the Cholesky factorization used for line search and certificate checking.
+TEST(General, CholeskyFactorization) {
+  // Load a test problem
+  auto sdp = make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8}, "Clique1");
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.rescale_lin_sys =
+      true;  // Use rescaling for consistency with Sremac 2021
+  auto delta = 1e-7;
+  // generate problem
+  auto problem = sdp.make_testable(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  Matrix X = Y_0 * Y_0.transpose();
+  auto [alpha, L] = problem.line_search_psd(
+      X, Matrix::Identity(problem.dim, problem.dim) * delta);
+  // Verify that L*L^T = X
+  Matrix reconstructed = L * L.transpose();
+  double reconstruction_error = (reconstructed - X).norm();
+  EXPECT_NEAR(reconstruction_error, 0.0, 1e-10) << "L*L^T does not equal X";
+}
+
 // Test the matrix-free operator product
 TEST(MatrixFree, Product) {
   // Load a test problem
@@ -238,14 +260,16 @@ TEST(MatrixFree, Product) {
   auto problem = sdp.make_testable(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
-  Matrix X = Y_0 * Y_0.transpose() + Matrix::Identity(sdp.dim, sdp.dim) * delta;
-  // Build the linear system
-  auto system = problem.build_ac_system(X, delta);
+  Matrix X = Y_0 * Y_0.transpose();
+  auto [alpha, L] = problem.line_search_psd(
+      X, Matrix::Identity(problem.dim, problem.dim) * delta);
+  // Build the explicit system to get the true diagonal of B
+  auto system = problem.build_ac_system(X, L, delta);
   // Build the matrix-free operator
-  MultiplierLinSys lin_op(problem.C_, problem.A_, X, system.AZ, system.AZt, delta);
+  MultiplierLinSys lin_op(problem.C_, problem.A_, L, system.LAL, delta);
   // Test on columns of identity
   auto Id = Matrix::Identity(sdp.dim, sdp.dim);
-  for (int i=0; i<sdp.dim; i++){
+  for (int i = 0; i < sdp.dim; i++) {
     // Compute the matrix-free product
     Vector mf_product = lin_op * Id.col(i);
     // Compute the explicit product using the system matrix
@@ -255,40 +279,12 @@ TEST(MatrixFree, Product) {
     double tol = 1e-12;
     ASSERT_EQ(mf_product.size(), explicit_product.size());
     for (int j = 0; j < mf_product.size(); ++j) {
-      double val =std::abs(explicit_product(j));
-      EXPECT_NEAR(mf_product(j), explicit_product(j), tol + tol*val)
-          << "Matrix-free product does not match explicit product at index ()" << i << " , " << j << ")";
+      double val = std::abs(explicit_product(j));
+      EXPECT_NEAR(mf_product(j), explicit_product(j), tol + tol * val)
+          << "Matrix-free product does not match explicit product at index ()"
+          << i << " , " << j << ")";
     }
   }
-}
-
-TEST(MatrixFree, Diagonal) {
-  // Load a test problem
-  auto sdp = make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8}, "Clique1");
-  // parameters
-  AnalyticCenterParams params;
-  params.verbose = true;
-  params.rescale_lin_sys = true;
-  auto delta = 1e-5;
-  // generate problem
-  auto problem = sdp.make_testable(params);
-  // get current solution
-  Matrix Y_0 = sdp.make_solution(1);
-  Matrix X = Y_0 * Y_0.transpose() + Matrix::Identity(sdp.dim, sdp.dim) * delta;
-  // Build the explicit system to get the true diagonal of B
-  auto system = problem.build_ac_system(X, delta);
-  // Build the matrix-free operator and preconditioner
-  MultiplierLinSys lin_op(problem.C_, problem.A_, X, system.AZ, system.AZt, delta);
- 
-  // Check diagonal elements
-  auto diagonal_mf = lin_op.diagonal();
-  auto diagonal_exp = system.B.diagonal();
-  double tol = 1e-12;
-  for (int i = 0; i < problem.m; ++i) {
-    EXPECT_NEAR(diagonal_mf(i), diagonal_exp(i), tol+tol*std::abs(diagonal_exp(i)) )
-        << "Diagonal does not match at B(" << i << "," << i << ")";
-  }
-
 }
 
 TEST(MatrixFree, DiagonalPreconditioner) {
@@ -303,11 +299,13 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   auto problem = sdp.make_testable(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
-  Matrix X = Y_0 * Y_0.transpose() + Matrix::Identity(sdp.dim, sdp.dim) * delta;
+  Matrix X = Y_0 * Y_0.transpose();
+  auto [alpha, L] = problem.line_search_psd(
+      X, Matrix::Identity(problem.dim, problem.dim) * delta);
   // Build the explicit system to get the true diagonal of B
-  auto system = problem.build_ac_system(X, delta);
+  auto system = problem.build_ac_system(X, L, delta);
   // Build the matrix-free operator and preconditioner
-  MultiplierLinSys lin_op(problem.C_, problem.A_, X, system.AZ, system.AZt, delta);
+  MultiplierLinSys lin_op(problem.C_, problem.A_, L, system.LAL, delta);
   MultiplierDiagPreconditioner precond;
   precond.compute(lin_op);
   // Check that the preconditioner computed successfully
@@ -324,7 +322,7 @@ TEST(MatrixFree, DiagonalPreconditioner) {
     Vector precond_ei = precond.solve(e_i);
     double precond_diag = precond_ei(i);
     double expected_inv = (B_ii > 1e-14) ? 1.0 / B_ii : 1.0;
-    EXPECT_NEAR(precond_diag, expected_inv, tol )
+    EXPECT_NEAR(precond_diag, expected_inv, tol)
         << "Preconditioner diagonal does not match B(" << i << "," << i << ")";
   }
 
@@ -344,7 +342,6 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   EXPECT_LT(residual.norm() / rhs.norm(), 1e-6)
       << "Preconditioned CG residual too large";
 }
-
 
 TEST_P(AnalyticCentParamTest, CertifyMatrixFree) {
   const auto& sdp = GetParam();

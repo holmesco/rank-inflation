@@ -108,7 +108,9 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   int n_iter = 0;
   double delta = delta_init;
   Matrix Z = Y_0 * Y_0.transpose();
-  auto [alpha, L] = line_search_psd(Z, Matrix::Identity(dim, dim) * delta);  // Initial line search to ensure PSDness of the starting point
+  auto [alpha, L] = line_search_psd(
+      Z, Matrix::Identity(dim, dim) * delta);  // Initial line search to ensure
+                                               // PSDness of the starting point
   double f_val = logdet(Z);
   Vector mult_scaled(m - 1);
   // Optimality certificate
@@ -119,7 +121,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   // Main loop
   while (n_iter < params_.max_iter) {
     // Get system of equations
-    auto [multipliers, violation] = get_multipliers(Z, delta);
+    auto [multipliers, violation] = get_multipliers(Z, L, delta);
 
     // get the barrier parameter value
     barrier_param = multipliers(m - 1);
@@ -217,12 +219,12 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
 }
 
 AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
+                                                         const Matrix& L,
                                                          double delta) const {
   ACSystem sys;
   sys.d.resize(m);
   sys.violation.resize(m);
-  sys.AZ.resize(m);
-  sys.AZt.resize(m);
+  sys.LAL.resize(m);
   sys.A_trace.resize(m);
   // Compute the A_i * Z products and the constraint violations for the current
   // solution
@@ -232,17 +234,15 @@ AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
 #endif
   for (int i = 0; i < m; i++) {
     if (i < a_size) {
-      sys.AZ[i] = A_[i].selfadjointView<Eigen::Upper>() * Z;
-      sys.AZt[i] = sys.AZ[i].transpose();  // O(n²) each, done once
+      sys.LAL[i] = L.transpose() * A_[i].selfadjointView<Eigen::Upper>() * L;
       sys.A_trace[i] = A_[i].diagonal().sum();
-      sys.violation(i) = sys.AZ[i].trace() - b_[i] - delta * sys.A_trace[i];
+      sys.violation(i) = sys.LAL[i].trace() - b_[i] - delta * sys.A_trace[i];
     } else {
-      sys.AZ[i] = C_ * Z;
-      sys.AZt[i] = sys.AZ[i].transpose();  // O(n²) each, done once
+      sys.LAL[i] = L.transpose() * C_.selfadjointView<Eigen::Upper>() * L;
       sys.A_trace[i] = C_.diagonal().sum();
-      sys.violation(i) = sys.AZ[i].trace() - rho_ - delta * sys.A_trace[i];
+      sys.violation(i) = sys.LAL[i].trace() - rho_ - delta * sys.A_trace[i];
     }
-    sys.d(i) = sys.AZ[i].trace();
+    sys.d(i) = sys.LAL[i].trace();
     if (params_.reduce_violation) {
       sys.d(i) += sys.violation(i);
     }
@@ -258,17 +258,17 @@ AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
 #pragma omp parallel for schedule(dynamic)
 #endif
     for (int i = 0; i < m; i++) {
-      Eigen::Map<const Vector> vi(sys.AZt[i].data(), dim * dim);
+      Eigen::Map<const Vector> vi(sys.LAL[i].data(), dim * dim);
       for (int j = i; j < m; j++) {
-        Eigen::Map<const Vector> vj(sys.AZ[j].data(), dim * dim);
-        double val = vi.dot(vj);  // = trace(AZ[i] * AZ[j])
+        Eigen::Map<const Vector> vj(sys.LAL[j].data(), dim * dim);
+        double val = vi.dot(vj);  // = trace(AZ[i] * AZ[j]) = trace(L^T * A_i *
+                                  // L * L^T * A_j * L)
         sys.B(i, j) = params_.rescale_lin_sys ? val / delta : val;
       }
     }
   } else {
     // If using matrix-free solver, build the matrix-free operator for the LHS
-    sys.B_mf =
-        std::make_unique<MultiplierLinSys>(C_, A_, Z, sys.AZ, sys.AZt, delta);
+    sys.B_mf = std::make_unique<MultiplierLinSys>(C_, A_, L, sys.LAL, delta);
   }
 
   return sys;
@@ -366,13 +366,14 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
 }
 
 std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
+                                                          const Matrix& L,
                                                           double delta) const {
   // Build the system of equations for the current solution
 #ifdef TIMING
   // start a timer for building the system
   auto start = std::chrono::high_resolution_clock::now();
 #endif
-  auto sys = build_ac_system(Z, delta);
+  auto sys = build_ac_system(Z, L, delta);
 
 #ifdef TIMING
   auto end = std::chrono::high_resolution_clock::now();
@@ -428,12 +429,11 @@ std::pair<double, Matrix> AnalyticCenter::line_search_psd(
   Z = Z_new;
   // Return the Cholesky factorization of the new Z for use in the next
   // iteration's linear system
-  Matrix L_unit = ldlt.matrixL();
-  Vector D_vec = ldlt.vectorD();
-  Matrix D_sqrt = D_vec.cwiseSqrt().asDiagonal();
-  Matrix L_tilde = L_unit * D_sqrt;
+  Eigen::MatrixXd L_chol = ldlt.matrixL();
+  L_chol.noalias() = L_chol * ldlt.vectorD().cwiseSqrt().asDiagonal();
+  L_chol.noalias() = ldlt.transpositionsP().transpose() * L_chol;
 
-  return {alpha, L_tilde};
+  return {alpha, L_chol};
 }
 
 }  // namespace RankTools

@@ -29,6 +29,7 @@ class AnalyticCenterTestable : public AnalyticCenter {
   using AnalyticCenter::get_analytic_center_objective;
   using AnalyticCenter::get_multipliers;
   using AnalyticCenter::solve_ac_system;
+  using AnalyticCenter::line_search_psd;
 };
 
 // Test case data structure
