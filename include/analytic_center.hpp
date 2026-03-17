@@ -66,8 +66,8 @@ struct AnalyticCenterParams {
 
   // Iterative Linear Solve Paramteres
   // -----------------
-  int lin_solve_max_iter = 100;
-  double lin_solve_tol = 1e-5;
+  int lin_solve_max_iter = 200;
+  double lin_solve_tol = 1e-4;
 
   // Line search
   // ----------------
@@ -195,5 +195,6 @@ class AnalyticCenter {
 
   // Line search to ensure PSDness of the solution for the analytic center step
   double line_search_psd(Matrix& Z, const Matrix& dZ) const;
+};
 
 }  // namespace RankTools

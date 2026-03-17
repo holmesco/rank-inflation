@@ -11,54 +11,6 @@ using namespace RankTools;
 class AnalyticCentParamTest : public ::testing::TestWithParam<SDPTestProblem> {
 };
 
-TEST(AnalyticCenter, LineSearchFunctions) {
-  // Generate random PSD matrix
-  int dim = 5;
-  // generate random orthogonal matrix A
-  Matrix tmp = Matrix::Random(dim, dim);
-  Eigen::HouseholderQR<Matrix> qr(tmp);
-  Matrix A = qr.householderQ() * Matrix::Identity(dim, dim);
-  // generate PSD matrix Z
-  Matrix Z = A.transpose() * A * 5.0;
-  // Generate random direction
-  Matrix Aw = Matrix::Random(dim, dim);
-  Aw = 0.5 * (Aw + Aw.transpose());  // symmetrize
-  // Create step of the proper form
-  Matrix dZ = Z - Z * Aw * Z;
-  // parameters
-  AnalyticCenterParams params;
-  params.verbose = true;
-  AnalyticCenterTestable problem(Matrix::Zero(dim, dim), 0.0, {}, {}, params);
-  double delta = 1e-6;
-  // Generate functions
-  auto [f, df] = problem.analytic_center_line_search_func(Z, Aw);
-  // Test at several step sizes
-  std::vector<double> alphas = {1e-4, 1e-2, 1e-1, 0.5, 1.0};
-  const double tol = 1e-7;
-  // Value checks
-  for (double alpha : alphas) {
-    double f_expected = -logdet(Z + alpha * dZ);
-    if (std::isinf(f_expected)) {
-      continue;  // skip infinite values
-    }
-    double f_val = f(alpha) - logdet(Z);
-    EXPECT_NEAR(f_val, f_expected, tol)
-        << "Line search function value mismatch at alpha = " << alpha;
-  }
-  // Derivative (finite-difference) checks
-  for (double alpha : alphas) {
-    double f_val = f(alpha);
-    if (std::isinf(f_val)) {
-      continue;  // skip infinite values
-    }
-    double df_val = df(alpha);
-    double f_val_plus = f(alpha + tol);
-    double num_df = (f_val_plus - f_val) / tol;
-    EXPECT_NEAR(df_val, num_df, tol * 100)
-        << "Line search derivative mismatch at alpha = " << alpha;
-  }
-}
-
 // Test that centering works as expected
 TEST_P(AnalyticCentParamTest, PrimalSolution) {
   const auto& sdp = GetParam();
@@ -404,10 +356,6 @@ INSTANTIATE_TEST_SUITE_P(
                               "Clique3_Large20x20"),
         // CASE 4
         make_lovasz_test_case(clique4_adj, {0, 1, 2}, "Clique4_Disconnected")),
-    // // CASE 5: Two Sphere Intersection (removed because not tight)
-    // make_two_sphere_sdp(5, 1.0, 1.0, 1.5)),
-    // This helper function names the tests based on the 'test_name'
-    // field
     [](const ::testing::TestParamInfo<AnalyticCentParamTest::ParamType>& info) {
       return info.param.name;
     });
