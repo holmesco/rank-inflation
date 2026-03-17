@@ -1,5 +1,5 @@
-// This file defines the test harness for SDP unit tests, including the test case
-// data structure and a subclass of AnalyticCenter that promotes protected
+// This file defines the test harness for SDP unit tests, including the test
+// case data structure and a subclass of AnalyticCenter that promotes protected
 // methods to public for testing purposes.
 
 #pragma once
@@ -28,8 +28,8 @@ class AnalyticCenterTestable : public AnalyticCenter {
   using AnalyticCenter::build_adjoint;
   using AnalyticCenter::get_analytic_center_objective;
   using AnalyticCenter::get_multipliers;
+  using AnalyticCenter::line_search_factorization;
   using AnalyticCenter::solve_ac_system;
-  using AnalyticCenter::line_search_psd;
 };
 
 // Test case data structure

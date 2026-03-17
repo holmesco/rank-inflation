@@ -108,42 +108,44 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   int n_iter = 0;
   double delta = delta_init;
   Matrix Z = Y_0 * Y_0.transpose();
-  auto [alpha, L] = line_search_psd(
+  auto [alpha, L] = line_search_factorization(
       Z, Matrix::Identity(dim, dim) * delta);  // Initial line search to ensure
                                                // PSDness of the starting point
-  double f_val = logdet(Z);
   Vector mult_scaled(m - 1);
   // Optimality certificate
   Matrix H;
   double complementarity = std::nan("");
   double min_eig = std::nan("");
   double barrier_param = std::nan("");
+  double cent_metric = std::nan("");
   // Main loop
   while (n_iter < params_.max_iter) {
     // Get system of equations
     auto [multipliers, violation] = get_multipliers(Z, L, delta);
 
     // get the barrier parameter value
-    barrier_param = multipliers(m - 1);
+    barrier_param = 1 / multipliers(m - 1);
     // compute scaled multipliers for certificate checking
-    mult_scaled = multipliers.segment(0, m - 1) / barrier_param;
+    mult_scaled = multipliers.segment(0, m - 1) * barrier_param;
 
-    // Get step direction
+    // Dual matrix (adjoint of constraints with multipliers + cost term )
     auto adjoint_sp = build_adjoint(multipliers);
     Matrix adjoint = C_ * multipliers(m - 1) + adjoint_sp;
     if (params_.rescale_lin_sys) {
       adjoint = adjoint / delta;
     }
+    // Get Newton step direction towards analytic center
     auto deltaZ = Z - Z * adjoint * Z;
     // Line search to find step that ensures PSDness of the solution
     // NOTE: Could replace with exact line search based on determinant increase,
     // but this backtracking
     alpha = 1.0;
-    if (params_.enable_line_search) {
-      std::tie(alpha, L) = line_search_psd(Z, deltaZ);
-    } else {
-      Z.noalias() += alpha * deltaZ;
-    }
+    std::tie(alpha, L) = line_search_factorization(Z, deltaZ);
+    // Compute centrality metric from He et al. 1997
+    // When this is below 1, the dual matrix is guaranteed to be PSD, so this
+    // can be used as an early stopping condition for the centering iterations.
+    cent_metric =
+        (L.transpose() * adjoint * L - Matrix::Identity(dim, dim)).norm();
     // Print update
     n_iter++;
     if (params_.verbose) {
@@ -152,35 +154,45 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
         std::cout << "Running with Linear Solver: "
                   << print_solver(params_.lin_solver) << std::endl;
       }
-      // Objective value
-      f_val = logdet(Z);
       // get rank of solution
       int sol_rank = get_rank(Z, params_.tol_rank_sol);
       if (n_iter % 10 == 1) {
-        std::printf("%6s %6s %12s %12s %12s %12s %12s %12s %8s\n", "Iter",
+        std::printf("%6s %6s %12s %12s %12s %12s %12s %12s %12s\n", "Iter",
                     "SolRank", "ViolNorm", "StepNorm", "Complement.",
-                    "BarrParam", "Alpha", "Delta", "Obj Val.");
+                    "BarrParam", "Alpha", "Delta", "CentMetric");
       }
-      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n",
+      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e\n",
                   n_iter, sol_rank, violation.norm(), deltaZ.norm(),
-                  complementarity, barrier_param, alpha, delta, f_val);
+                  complementarity, barrier_param, alpha, delta, cent_metric);
     }
 
     // Certificate Checking (Early stopping condition if the certificate is PSD)
     if (params_.check_cert) {
-      // Build certificate matrix
-      H = build_certificate_from_dual(mult_scaled);
-      // Check complementarity condition for first order optimality
-      complementarity = (Y_0.transpose() * H * Y_0).norm();
-      if (complementarity <= params_.tol_cert_complementarity) {
-        // Use a cholesky decomposition for a quick check of PSDness.
-        Eigen::LLT<Matrix> llt(H + Matrix::Identity(H.rows(), H.cols()) *
-                                       params_.tol_cert_psd);
-        if (llt.info() == Eigen::Success) {
+      if (params_.use_cert_centrality_metric) {
+        if (cent_metric <= 1 + params_.tol_cert_centrality) {
           if (params_.verbose) {
-            std::cout << "Certificate Found! Stopping centering." << std::endl;
+            std::cout << "Certificate Centrality Metric below threshold! "
+                         "Stopping centering."
+                      << std::endl;
           }
           break;
+        }
+      } else {
+        // Build certificate matrix
+        H = build_certificate_from_dual(mult_scaled);
+        // Check complementarity condition for first order optimality
+        complementarity = (Y_0.transpose() * H * Y_0).norm();
+        if (complementarity <= params_.tol_cert_complementarity) {
+          // Use a cholesky decomposition for a quick check of PSDness.
+          Eigen::LLT<Matrix> llt(H + Matrix::Identity(H.rows(), H.cols()) *
+                                         params_.tol_cert_psd);
+          if (llt.info() == Eigen::Success) {
+            if (params_.verbose) {
+              std::cout << "Certificate Found! Stopping centering."
+                        << std::endl;
+            }
+            break;
+          }
         }
       }
     }
@@ -406,7 +418,7 @@ std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
   return {multipliers, sys.violation};
 }
 
-std::pair<double, Matrix> AnalyticCenter::line_search_psd(
+std::pair<double, Matrix> AnalyticCenter::line_search_factorization(
     Matrix& Z, const Matrix& dZ) const {
   //  Initial step size
   double alpha = params_.alpha_init;

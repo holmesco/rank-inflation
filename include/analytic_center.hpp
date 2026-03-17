@@ -73,17 +73,21 @@ struct AnalyticCenterParams {
   // ----------------
   // line search enable for analytic center
   bool enable_line_search = true;
-  // Line search sufficient decrease parameter (should be between zero and one)
-  double ln_search_suff_dec = 1e-4;
   // Line search reduction factor (should be between zero and one)
   double ln_search_red_factor = 0.5;
   // Line search initialization
   double alpha_init = 1.0;
   // Line search lower bound
   double alpha_min = 1e-10;
-  // line search (bisection) parameters for centering
-  // NOTE: line search param will be certain to 1/2^k for k = ls_iter_ac
-  double tol_bisect = 1e-6;
+
+  // Low Rank Approximation
+  // ----------------
+  // enable low rank approximation for certificate matrix in centering step
+  bool low_rank_approx = false;
+  // rank for low rank approximation of certificate matrix
+  int low_rank_approx_rank = 5;
+  // tolerance for low rank approximation of certificate matrix
+  double low_rank_approx_tol = 1e-6;
 
   // Certificate parameters
   // -------------------------
@@ -99,6 +103,10 @@ struct AnalyticCenterParams {
   // primal feasibility tolerance for certificate check (i.e., tolerance for
   // violation of constraints)
   double tol_cert_primal_feas = 1e-5;
+  // use the centrality metric from He et al. 1997
+  bool use_cert_centrality_metric = false;
+  // centrality metric tolerance
+  double tol_cert_centrality = 1e-5;
 };
 
 class AnalyticCenter {
@@ -199,7 +207,8 @@ class AnalyticCenter {
   // This function will update Z with the new solution after line search.
   // Returns the final step size alpha used for the update and the Cholesky
   // factorization of the updated solution for free reuse in the next iteration.
-  std::pair<double, Matrix> line_search_psd(Matrix& Z, const Matrix& dZ) const;
+  std::pair<double, Matrix> line_search_factorization(Matrix& Z,
+                                                      const Matrix& dZ) const;
 };
 
 }  // namespace RankTools

@@ -224,7 +224,8 @@ TEST_P(AnalyticCentParamTest, CertifyConjGrad) {
             << result.complementarity << std::endl;
 }
 
-// Test the Cholesky factorization used for line search and certificate checking.
+// Test the Cholesky factorization used for line search and certificate
+// checking.
 TEST(General, CholeskyFactorization) {
   // Load a test problem
   auto sdp = make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8}, "Clique1");
@@ -239,7 +240,7 @@ TEST(General, CholeskyFactorization) {
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
   Matrix X = Y_0 * Y_0.transpose();
-  auto [alpha, L] = problem.line_search_psd(
+  auto [alpha, L] = problem.line_search_factorization(
       X, Matrix::Identity(problem.dim, problem.dim) * delta);
   // Verify that L*L^T = X
   Matrix reconstructed = L * L.transpose();
@@ -262,12 +263,12 @@ TEST(MatrixFree, Product) {
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
   Matrix X = Y_0 * Y_0.transpose();
-  auto [alpha, L] = problem.line_search_psd(
+  auto [alpha, L] = problem.line_search_factorization(
       X, Matrix::Identity(problem.dim, problem.dim) * delta);
   // Build the explicit system to get the true diagonal of B
   auto system = problem.build_ac_system(X, L, delta);
   // Build the matrix-free operator
-  MultiplierLinSys lin_op(system.LAL, 1/delta);
+  MultiplierLinSys lin_op(system.LAL, 1 / delta);
   // Test on columns of identity
   auto Id = Matrix::Identity(sdp.dim, sdp.dim);
   for (int i = 0; i < sdp.dim; i++) {
@@ -301,12 +302,12 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
   Matrix X = Y_0 * Y_0.transpose();
-  auto [alpha, L] = problem.line_search_psd(
+  auto [alpha, L] = problem.line_search_factorization(
       X, Matrix::Identity(problem.dim, problem.dim) * delta);
   // Build the explicit system to get the true diagonal of B
   auto system = problem.build_ac_system(X, L, delta);
   // Build the matrix-free operator and preconditioner
-  MultiplierLinSys lin_op(system.LAL, 1/delta);
+  MultiplierLinSys lin_op(system.LAL, 1 / delta);
   MultiplierDiagPreconditioner precond;
   precond.compute(lin_op);
   // Check that the preconditioner computed successfully
