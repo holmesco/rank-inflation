@@ -164,6 +164,36 @@ TEST_P(AnalyticCentParamTest, CertifyAdaptivePerturb) {
             << result.complementarity << std::endl;
 }
 
+// Test the LDLT linear solver on the system for computing multipliers
+TEST_P(AnalyticCentParamTest, CertifyLDLT) {
+  const auto& sdp = GetParam();
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.check_cert = false;  // Turn off early stopping based on certificate
+                              // for testing purposes
+  params.adaptive_perturb =
+      true;  // Turn on adaptive perturbation for testing purposes
+  params.delta_min = 1e-8;
+  params.max_iter = 50;
+  // use rescaling to be consistent with the system in Sremac 2021
+  params.rescale_lin_sys = true;
+  params.lin_solver = LinearSolverType::LDLT;  // Use Conjugate Gradient solver
+  auto delta = 1e-5;
+  // generate problem
+  AnalyticCenter problem = sdp.make(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  // Run certification method
+  auto result = problem.certify(Y_0, delta);
+  // check that the solution is certified
+  EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
+  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
+            << std::endl;
+  std::cout << "Complementarity (First Order Condition): "
+            << result.complementarity << std::endl;
+}
+
 // Test the Conjugate Gradient linear solver on the system for computing multipliers
 TEST_P(AnalyticCentParamTest, CertifyConjGrad) {
   const auto& sdp = GetParam();

@@ -107,7 +107,8 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   // Initialize
   int n_iter = 0;
   double delta = delta_init;
-  Matrix Z = Y_0 * Y_0.transpose() + Matrix::Identity(dim, dim) * delta;
+  Matrix Z = Y_0 * Y_0.transpose();
+  auto [alpha, L] = line_search_psd(Z, Matrix::Identity(dim, dim) * delta);  // Initial line search to ensure PSDness of the starting point
   double f_val = logdet(Z);
   Vector mult_scaled(m - 1);
   // Optimality certificate
@@ -135,9 +136,9 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     // Line search to find step that ensures PSDness of the solution
     // NOTE: Could replace with exact line search based on determinant increase,
     // but this backtracking
-    double alpha = 1.0;
+    alpha = 1.0;
     if (params_.enable_line_search) {
-      alpha = line_search_psd(Z, deltaZ);
+      std::tie(alpha, L) = line_search_psd(Z, deltaZ);
     } else {
       Z.noalias() += alpha * deltaZ;
     }
@@ -398,8 +399,8 @@ std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
   return {multipliers, sys.violation};
 }
 
-double AnalyticCenter::line_search_psd(Matrix& Z, const Matrix& dZ) const {
-  // NOTE: Should make this function generic for any line search function
+std::pair<double, Matrix> AnalyticCenter::line_search_psd(
+    Matrix& Z, const Matrix& dZ) const {
   //  Initial step size
   double alpha = params_.alpha_init;
   // Backtracking parameters
@@ -425,7 +426,14 @@ double AnalyticCenter::line_search_psd(Matrix& Z, const Matrix& dZ) const {
   }
   // update Z with the new value that ensures PSDness
   Z = Z_new;
-  return alpha;
+  // Return the Cholesky factorization of the new Z for use in the next
+  // iteration's linear system
+  Matrix L_unit = ldlt.matrixL();
+  Vector D_vec = ldlt.vectorD();
+  Matrix D_sqrt = D_vec.cwiseSqrt().asDiagonal();
+  Matrix L_tilde = L_unit * D_sqrt;
+
+  return {alpha, L_tilde};
 }
 
 }  // namespace RankTools

@@ -194,7 +194,9 @@ class AnalyticCenter {
   }
 
   // Line search to ensure PSDness of the solution for the analytic center step
-  double line_search_psd(Matrix& Z, const Matrix& dZ) const;
+  // This function will update Z with the new solution after line search.
+  // Returns the final step size alpha used for the update and the Cholesky factorization of the updated solution for free reuse in the next iteration.
+  std::pair<double, Matrix> line_search_psd(Matrix& Z, const Matrix& dZ) const;
 };
 
 }  // namespace RankTools
