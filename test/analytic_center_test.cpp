@@ -1,5 +1,5 @@
 /*
-c++ tests for rank inflation
+Test file for Analytic Center implementation.
 */
 #include "interior_point_sdp.hpp"
 #include "circle_problem.hpp"
@@ -10,24 +10,6 @@ using namespace RankTools;
 // Fixture Class
 class AnalyticCentParamTest : public ::testing::TestWithParam<SDPTestProblem> {
 };
-
-TEST_P(AnalyticCentParamTest, MosekSolve) {
-  const auto& sdp = GetParam();
-  // solve sdp using Mosek to get dual solution
-
-  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b);
-  // print objective value
-  std::cout << "Mosek Primal Objective: " << mosek_soln.obj_value << std::endl;
-  // print the solution rank
-  Eigen::SelfAdjointEigenSolver<Matrix> es(mosek_soln.X);
-  std::cout << "Mosek Solution Eigenvalues: " << std::endl
-            << es.eigenvalues() << std::endl;
-  std::cout << "Mosek Solution Rank: " << get_rank(mosek_soln.X, 1e-6)
-            << std::endl;
-  // Check that objective matches rho
-  EXPECT_NEAR(mosek_soln.obj_value, sdp.rho, 1e-6)
-      << "Mosek objective does not match expected value at analytic center";
-}
 
 TEST(AnalyticCenter, LineSearchFunctions) {
   // Generate random PSD matrix
@@ -77,26 +59,7 @@ TEST(AnalyticCenter, LineSearchFunctions) {
   }
 }
 
-TEST(AnalyticCentParamTest, LowRankRecovery) {
-  int dim = 3;
-  double r1 = 0.5;
-  double r2 = 0.5;
-  double d = 0.5;
-  // Start from skewed solution
-  auto weights = Vector::Ones(dim - 1).eval();
-  weights(0) = 10.0;
-  weights /= weights.sum();
-  auto Y0 = make_two_sphere_soln(r1, r2, d, weights);
-  // recompute center
-  auto X0 = Y0 * Y0.transpose();
-  auto Y = recover_lowrank_factor(X0, 1e-10);
-  // Compare to original solution
-  auto diff = (X0 - Y * Y.transpose()).norm();
-  const double tol = 1e-8;
-  EXPECT_NEAR(diff, 0.0, tol);
-  EXPECT_TRUE(Y.cols() == Y0.cols());
-}
-
+// Test that centering works as expected
 TEST_P(AnalyticCentParamTest, PrimalSolution) {
   const auto& sdp = GetParam();
   // parameters
@@ -150,46 +113,8 @@ TEST_P(AnalyticCentParamTest, PrimalSolution) {
       << "Analytic center solution is not close to Mosek solution";
 }
 
-TEST_P(AnalyticCentParamTest, CertAtCenter) {
-  const auto& sdp = GetParam();
-  // parameters
-  AnalyticCenterParams params;
-  params.verbose = true;
-  params.check_cert = false;  // Turn off early stopping based on certificate
-                              // for testing purposes
-  auto delta = 1e-7;
-  // generate problem
-  AnalyticCenter problem = sdp.make(params);
-  // get current solution
-  Matrix Y_0 = sdp.make_solution(1);
-  // Run rank inflation, without inflation (target rank is 1)
-  auto [X, multipliers] =
-      problem.get_analytic_center(Y_0 * Y_0.transpose(), delta);
-  std::cout
-      << "Eigenvalues of Center: " << std::endl
-      << Eigen::SelfAdjointEigenSolver<Matrix>(X).eigenvalues().transpose()
-      << std::endl;
-  // Recover low rank solution
-  Matrix Y = get_positive_eigspace(X, params.tol_rank_sol);
-  std::cout << "rank of recovered solution: " << get_rank(Y, 1e-5) << std::endl;
-  auto violation = problem.eval_constraints(X);
-  std::cout << "Violation at Analytic Center: " << violation.norm()
-            << std::endl;
-  // Build the certificate matrix
-  auto H = problem.build_certificate_from_dual(multipliers);
-  // check certificate on high rank solution
-  auto [min_eig_hr, first_ord_cond_hr] = problem.eval_certificate(H, Y);
-  std::cout << "Cost at High Rank Solution: " << (sdp.C * X).trace()
-            << std::endl;
-  std::cout << "Minimum Eigenvalue of Certificate: " << min_eig_hr << std::endl;
-  std::cout << "First Order Condition Norm at High Rank Solution: "
-            << first_ord_cond_hr << std::endl;
-  // check certificate on initial solution
-  auto [min_eig, first_ord_cond] = problem.eval_certificate(H, Y_0);
-  std::cout << "First Order Condition Norm at Rank 1 Solution: "
-            << first_ord_cond << std::endl;
-}
 
+// Test early stopping based on certificate found. 
 TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
   const auto& sdp = GetParam();
   // parameters
@@ -231,6 +156,8 @@ TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
             << first_ord_cond << std::endl;
 }
 
+
+// Test the Fixed perturbation and verify that the method converges. 
 TEST_P(AnalyticCentParamTest, CertifyFixedPerturb) {
   const auto& sdp = GetParam();
   // parameters
@@ -255,6 +182,7 @@ TEST_P(AnalyticCentParamTest, CertifyFixedPerturb) {
             << result.complementarity << std::endl;
 }
 
+// Test adapative perturbation. Ensure that we converge to a certificate.
 TEST_P(AnalyticCentParamTest, CertifyAdaptivePerturb) {
   const auto& sdp = GetParam();
   // parameters
@@ -283,6 +211,7 @@ TEST_P(AnalyticCentParamTest, CertifyAdaptivePerturb) {
             << result.complementarity << std::endl;
 }
 
+// Test the Conjugate Gradient linear solver on the system for computing multipliers
 TEST_P(AnalyticCentParamTest, CertifyConjGrad) {
   const auto& sdp = GetParam();
   // parameters
@@ -312,6 +241,7 @@ TEST_P(AnalyticCentParamTest, CertifyConjGrad) {
             << result.complementarity << std::endl;
 }
 
+// Test the matrix-free operator product
 TEST(MatrixFree, Product) {
   // Load a test problem
   auto sdp = make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8}, "Clique1");

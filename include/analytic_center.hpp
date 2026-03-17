@@ -196,19 +196,4 @@ class AnalyticCenter {
   // Line search to ensure PSDness of the solution for the analytic center step
   double line_search_psd(Matrix& Z, const Matrix& dZ) const;
 
-  // Line search based on determinant increase for analytic center
-  std::pair<double, double> line_search_det(const Matrix& Z,
-                                            const Matrix& Aw) const;
-
-  // Perform bisection line search to find optimal step size for analytic
-  // center
-  double analytic_center_bisect(const Matrix& Z, const Matrix& Aw) const;
-
-  // Line search function and derivative for analytic center
-  // NOTE: it was shown in Boyd that this function is convex, so simple
-  // bisection on the derivative is sufficient
-  std::pair<ScalarFunc, ScalarFunc> analytic_center_line_search_func(
-      const Matrix& Z, const Matrix& Aw) const;
-};
-
 }  // namespace RankTools
