@@ -14,6 +14,13 @@ using Vector = Eigen::VectorXd;
 using Triplet = Eigen::Triplet<double>;
 using SpMatrix = Eigen::SparseMatrix<double>;
 using ScalarFunc = std::function<double(double)>;
+using Diagonal = Eigen::DiagonalMatrix<double, Eigen::Dynamic>;
+
+// Applies symmetric vectorization to a matrix
+Vector vec_symm(const Matrix& A);
+
+// Reverses the symmetric vectorization of a matrix
+Matrix unvec_symm(const Vector& v, int dim);
 
 // Result of solving a linear system using rank-revealing QR decomposition.
 // Contains both the least-squares particular solution and the nullspace basis.

@@ -25,21 +25,6 @@ struct AnalyticCenterResult {
   double complementarity;
 };
 
-enum class LinearSolverType { LDLT, CG , MFCG};
-
-std::string print_solver(LinearSolverType solver) {
-  switch (solver) {
-    case LinearSolverType::LDLT:
-      return "LDLT Direct Solver";
-    case LinearSolverType::CG:
-      return "Conjugate Gradient";
-    case LinearSolverType::MFCG:
-      return "Matrix-Free Conjugate Gradient";
-    default:
-      return "Unknown";
-  }
-}
-
 struct AnalyticCenterParams {
   // Verbosity
   bool verbose = true;
