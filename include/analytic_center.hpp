@@ -1,10 +1,9 @@
 #pragma once
+#include <Eigen/IterativeLinearSolvers>
 #include <chrono>
 
-#include "utils.hpp"
 #include "matrix_free_methods.hpp"
-#include <Eigen/IterativeLinearSolvers>
-
+#include "utils.hpp"
 
 namespace RankTools {
 
@@ -38,7 +37,8 @@ struct AnalyticCenterParams {
   // max number of iterations for centering
   int max_iter = 50;
   // Rescale linear system for centering
-  // This rescaling is consistent with the system in Sremac 2021
+  // Rescaling is akin to scaling the log det objective by delta and improves
+  // conditioning.
   bool rescale_lin_sys = true;
   // Select linear solver for centering step
   LinearSolverType lin_solver = LinearSolverType::LDLT;
@@ -173,16 +173,19 @@ class AnalyticCenter {
 
   // Intermediate representation of the analytic center linear system
   struct ACSystem {
-    Matrix B;                     // LHS matrix (m x m)
-    Vector d;                     // RHS vector (m)
-    Vector violation;             // constraint violation (m)
-    std::vector<Matrix> LAL;       // L^T * A_i * L products (L is the cholesky factor of the primal solution)
+    Matrix B;          // LHS matrix (m x m)
+    Vector d;          // RHS vector (m)
+    Vector violation;  // constraint violation (m)
+    Matrix LAL;  // each col is vec(L^T * A_i * L) (L is the cholesky factor of
+                 // the primal solution)
     std::vector<double> A_trace;  // diagonal traces of A_i
-    std::unique_ptr<MultiplierLinSys> B_mf;       // Matrix-free operator for B (if using matrix-free solver)
+    std::unique_ptr<MultiplierLinSys>
+        B_mf;  // Matrix-free operator for B (if using matrix-free solver)
   };
 
   // Constructs the linear system (H, d, violation) for the analytic center step
-  ACSystem build_ac_system(const Matrix& Z,const Matrix& L, double delta) const;
+  ACSystem build_ac_system(const Matrix& Z, const Matrix& L,
+                           double delta) const;
 
   // Solves the linear system H * multipliers = d using the configured solver
   Vector solve_ac_system(const ACSystem& system) const;
@@ -194,7 +197,8 @@ class AnalyticCenter {
 
   // Line search to ensure PSDness of the solution for the analytic center step
   // This function will update Z with the new solution after line search.
-  // Returns the final step size alpha used for the update and the Cholesky factorization of the updated solution for free reuse in the next iteration.
+  // Returns the final step size alpha used for the update and the Cholesky
+  // factorization of the updated solution for free reuse in the next iteration.
   std::pair<double, Matrix> line_search_psd(Matrix& Z, const Matrix& dZ) const;
 };
 

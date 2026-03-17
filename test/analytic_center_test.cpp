@@ -19,7 +19,8 @@ TEST_P(AnalyticCentParamTest, PrimalSolution) {
   params.verbose = true;
   params.check_cert = false;  // Turn off early stopping based on certificate
                               // for testing purposes
-  params.max_iter = 300;
+  params.max_iter = 50;
+  params.rescale_lin_sys = false;
   double delta = 1e-7;
   // generate problem
   auto problem = sdp.make_testable(params);
@@ -143,11 +144,11 @@ TEST_P(AnalyticCentParamTest, CertifyAdaptivePerturb) {
                               // for testing purposes
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-10;
+  params.delta_min = 1e-9;
   params.max_iter = 100;
   // use rescaling to be consistent with the system in Sremac 2021
   params.rescale_lin_sys = true;
-  auto delta = 1e-4;
+  auto delta = 1e-5;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
@@ -266,7 +267,7 @@ TEST(MatrixFree, Product) {
   // Build the explicit system to get the true diagonal of B
   auto system = problem.build_ac_system(X, L, delta);
   // Build the matrix-free operator
-  MultiplierLinSys lin_op(problem.C_, problem.A_, L, system.LAL, delta);
+  MultiplierLinSys lin_op(system.LAL, 1/delta);
   // Test on columns of identity
   auto Id = Matrix::Identity(sdp.dim, sdp.dim);
   for (int i = 0; i < sdp.dim; i++) {
@@ -305,7 +306,7 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   // Build the explicit system to get the true diagonal of B
   auto system = problem.build_ac_system(X, L, delta);
   // Build the matrix-free operator and preconditioner
-  MultiplierLinSys lin_op(problem.C_, problem.A_, L, system.LAL, delta);
+  MultiplierLinSys lin_op(system.LAL, 1/delta);
   MultiplierDiagPreconditioner precond;
   precond.compute(lin_op);
   // Check that the preconditioner computed successfully

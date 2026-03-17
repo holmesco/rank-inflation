@@ -224,25 +224,30 @@ AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
   ACSystem sys;
   sys.d.resize(m);
   sys.violation.resize(m);
-  sys.LAL.resize(m);
+  sys.LAL.resize(dim * dim, m);
   sys.A_trace.resize(m);
-  // Compute the A_i * Z products and the constraint violations for the current
-  // solution
+  sys.B.resize(m, m);
+  // Compute the L^T * A_i * L products and the constraint violations for the
+  // current solution
   const int a_size = static_cast<int>(A_.size());
 #ifdef RANKTOOLS_PARALLEL
 #pragma omp parallel for schedule(dynamic)
 #endif
   for (int i = 0; i < m; i++) {
+    Matrix mat(dim, dim);
+    double val;
     if (i < a_size) {
-      sys.LAL[i] = L.transpose() * A_[i].selfadjointView<Eigen::Upper>() * L;
+      mat = L.transpose() * A_[i].selfadjointView<Eigen::Upper>() * L;
+      val = b_[i];
       sys.A_trace[i] = A_[i].diagonal().sum();
-      sys.violation(i) = sys.LAL[i].trace() - b_[i] - delta * sys.A_trace[i];
     } else {
-      sys.LAL[i] = L.transpose() * C_.selfadjointView<Eigen::Upper>() * L;
+      mat = L.transpose() * C_.selfadjointView<Eigen::Upper>() * L;
+      val = rho_;
       sys.A_trace[i] = C_.diagonal().sum();
-      sys.violation(i) = sys.LAL[i].trace() - rho_ - delta * sys.A_trace[i];
     }
-    sys.d(i) = sys.LAL[i].trace();
+    sys.d(i) = mat.trace();
+    sys.violation(i) = sys.d(i) - val - delta * sys.A_trace[i];
+    sys.LAL.col(i) = Eigen::Map<Vector>(mat.data(), dim * dim);
     if (params_.reduce_violation) {
       sys.d(i) += sys.violation(i);
     }
@@ -250,25 +255,22 @@ AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
 
   // Only build the LHS matrix if not using matrix-free solver.
   if (params_.lin_solver != LinearSolverType::MFCG) {
-    // Construct the LHS matrix
-    sys.B.resize(m, m);
-    // Build H with O(n²) dot products instead of O(n³) matmuls (AZ[i] *
-    // AZ[j]).trace
-#ifdef RANKTOOLS_PARALLEL
-#pragma omp parallel for schedule(dynamic)
-#endif
-    for (int i = 0; i < m; i++) {
-      Eigen::Map<const Vector> vi(sys.LAL[i].data(), dim * dim);
-      for (int j = i; j < m; j++) {
-        Eigen::Map<const Vector> vj(sys.LAL[j].data(), dim * dim);
-        double val = vi.dot(vj);  // = trace(AZ[i] * AZ[j]) = trace(L^T * A_i *
-                                  // L * L^T * A_j * L)
-        sys.B(i, j) = params_.rescale_lin_sys ? val / delta : val;
-      }
-    }
+    const double scale = params_.rescale_lin_sys ? (1.0 / delta) : 1.0;
+    sys.B.setZero();
+    // B += scale * (LAL^T) * (LAL^T)^T = scale * LAL^T * LAL
+    sys.B.selfadjointView<Eigen::Upper>().rankUpdate(sys.LAL.transpose(),
+                                                     scale);
+
+    // Optional: only if some code later expects full symmetric storage
+    // sys.B.template triangularView<Eigen::Lower>() =
+    //     sys.B.transpose().template triangularView<Eigen::Lower>();
   } else {
     // If using matrix-free solver, build the matrix-free operator for the LHS
-    sys.B_mf = std::make_unique<MultiplierLinSys>(C_, A_, L, sys.LAL, delta);
+    if (params_.rescale_lin_sys) {
+      sys.B_mf = std::make_unique<MultiplierLinSys>(sys.LAL, 1 / delta);
+    } else {
+      sys.B_mf = std::make_unique<MultiplierLinSys>(sys.LAL, 1.0);
+    }
   }
 
   return sys;
@@ -341,11 +343,15 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
     // can be ill-conditioned, especially in early iterations.
     Eigen::LDLT<Eigen::MatrixXd> ldlt(sys.B.selfadjointView<Eigen::Upper>());
     // Check for success (critical for rank-deficient cases)
-    if (ldlt.info() == Eigen::NumericalIssue) {
-      std::cout << "The matrix is has severe numerical issues." << std::endl;
-    }
-    if (ldlt.isPositive() == false) {
-      std::cout << "The matrix is not positive semidefinite." << std::endl;
+    if (params_.verbose) {
+      if (ldlt.info() == Eigen::NumericalIssue) {
+        std::cout << "LDLT SOLVE: The matrix is has severe numerical issues."
+                  << std::endl;
+      }
+      if (ldlt.isPositive() == false) {
+        std::cout << "LDLT SOLVE: The matrix is not positive semidefinite."
+                  << std::endl;
+      }
     }
     // Solve the linear system.
     multipliers = ldlt.solve(sys.d);
