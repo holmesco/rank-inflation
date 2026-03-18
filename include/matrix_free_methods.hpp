@@ -66,7 +66,8 @@ struct generic_product_impl<MultiplierLinSys, Rhs, SparseShape, DenseShape,
   // Custom implementation of the matrix-vector product for our linear system.
   // Computes a matrix vector product y = B*x = LAL_^T * (LAL_ * x) without
   // explicitly forming the dense matrix.
-  // Complexity: O(n^2 m) where n is the dimension of the SDP and m is the number of constraints.
+  // Complexity: O(n^2 m) where n is the dimension of the SDP and m is the
+  // number of constraints.
   template <typename Dest>
   static void scaleAndAddTo(Dest& dst, const MultiplierLinSys& lhs,
                             const Rhs& rhs, const Scalar& alpha) {
@@ -113,6 +114,112 @@ class MultiplierDiagPreconditioner {
  private:
   Vector inv_diag_;
   bool is_initialized_;
+};
+
+// Low Rank Preconditioner for the Lagrange multiplier system.
+// Definition of preconditioner follows  Loraine (Habibi 2017)
+class MultSysLowRankPrecond {
+ public:
+  typedef double Scalar;
+  using Vector = Eigen::VectorXd;
+  using Matrix = Eigen::MatrixXd;
+  using SpMatrix = Eigen::SparseMatrix<double>;
+
+  MultSysLowRankPrecond(const std::vector<SpMatrix>& As, const Matrix& C,
+                        int rank)
+      : is_initialized_(false),
+        C_(C),
+        As_(As),
+        rank_(rank),
+        dim(C.cols()),
+        ncons(As.size() + 1) {}
+
+  // Eigen's CG calls compute(mat) with the matrix-free operator
+  MultSysLowRankPrecond& compute(const Matrix& X) {
+    // decompose eigenspace
+    auto [U, W0, tau] = decompose_soln(X);
+    // store tau^2
+    tau_sq_ = std::pow(tau, 2);
+    // construct Gamma matrix s.t. Gamma Gamma^T = (2W0 + U U^T) = X + W0
+    Eigen::LLT<Matrix> llt(X + W0);
+    Matrix Gamma = llt.matrixL();
+    // construct V_tilde
+    V_tilde_ = build_V_tilde(U, Gamma);
+    // Construct Schur complement matrix and decompose it
+    Matrix Theta = Matrix::Identity(rank_ * dim, rank_ * dim) +
+                   V_tilde_.transpose() * V_tilde_ / tau_sq_;
+    // Prefactorize Theta
+    Theta_ldlt_.compute(Theta);
+    // Flag that we have initialized
+    is_initialized_ = true;
+    return *this;
+  }
+
+  // Build the V_tilde matrix
+  Matrix build_V_tilde(const Matrix& U, const Matrix& Gamma) const {
+    auto V = Matrix(ncons, rank_ * dim);
+    for (int i = 0; i < ncons; i++) {
+      Matrix mat;
+      if (i < ncons - 1) {
+        mat = Gamma.transpose() * As_[i] * U;
+      } else {
+        mat = Gamma.transpose() * C_ * U;
+      }
+      V.row(i) = Eigen::Map<Vector>(mat.data(), mat.size());
+    }
+    return V;
+  }
+
+  // Decompose the solution in to high and low eigenvalue matrices
+  std::tuple<Matrix, Matrix, double> decompose_soln(const Matrix& X) const {
+    // Eigendecomposition of solution
+    Eigen::SelfAdjointEigenSolver<Matrix> es(X);
+    Vector eigenvalues = es.eigenvalues();
+    Matrix eigenvectors = es.eigenvectors();
+    // Select smallest eigenvalue as tau
+    // NOTE: Other options could be used here: mineig(X) <= tau < top_eigs
+    double tau = eigenvalues(0);
+    // Construct U matrix (large-eigenvalue, low rank, part)
+    Vector top_eigs = eigenvalues.tail(rank_).array() - tau;
+    Matrix U =
+        eigenvectors.rightCols(rank_) * top_eigs.cwiseSqrt().asDiagonal();
+    // Replace top eigenvalues with tau
+    eigenvalues.segment(dim - rank_, rank_).setConstant(tau);
+    // Build W0 (low-eigenvalue part)
+    auto W0 = eigenvectors * eigenvalues.asDiagonal() * eigenvectors.transpose();
+
+    return {U, W0, tau};
+  }
+
+  // Apply the preconditioner: Use SMW formula in (14) of Habibi et al. (2017)
+  template <typename Rhs>
+  Eigen::VectorXd solve(const Eigen::MatrixBase<Rhs>& b) const {
+    // scale the solution
+    auto b_scaled = b / tau_sq_;
+    // mult by Vt
+    auto Vtb = V_tilde_.transpose() * b_scaled;
+    auto y = Theta_ldlt_.solve(Vtb);
+    auto result = b_scaled - V_tilde_ * y;
+
+    return result;
+  }
+
+  Eigen::ComputationInfo info() const {
+    return is_initialized_ ? Eigen::Success : Eigen::InvalidInput;
+  }
+
+ private:
+  bool is_initialized_;
+  const Matrix& C_;
+  const std::vector<Eigen::SparseMatrix<double>>& As_;
+  int rank_;
+  int dim;
+  int ncons;
+
+  // Stored matrices and values
+  Matrix V_tilde_;
+  Eigen::LDLT<Matrix> Theta_ldlt_;
+  double tau_sq_;
 };
 
 namespace RankTools {

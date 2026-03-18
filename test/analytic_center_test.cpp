@@ -345,6 +345,69 @@ TEST(MatrixFree, DiagonalPreconditioner) {
       << "Preconditioned CG residual too large";
 }
 
+TEST_P(AnalyticCentParamTest, LowRankPrecond) {
+  const auto& sdp = GetParam();
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.rescale_lin_sys = false;
+  auto delta = 1e-5;
+
+  // Build system at perturbed rank-1 solution X = Y Y^T + delta I
+  auto problem = sdp.make_testable(params);
+  Matrix Y_0 = sdp.make_solution(1);
+  Matrix X = Y_0 * Y_0.transpose();
+  auto [alpha, L] = problem.line_search_factorization(
+      X, Matrix::Identity(problem.dim, problem.dim) * delta);
+  auto system = problem.build_ac_system(X, L, delta);
+
+  // Explicit system matrix B
+  Matrix B = system.B.selfadjointView<Eigen::Upper>();
+
+  // Build low-rank preconditioner with rank = 1 at the perturbed solution
+  MultSysLowRankPrecond precond(sdp.A, sdp.C, 1);
+  // Test descomposition
+  auto [U, W0, tau] = precond.decompose_soln(X);
+  // Verify that W0 + U*U.transpose() == X
+  Matrix reconstructed = W0 + U * U.transpose();
+  double reconstruction_error = (reconstructed - X).norm();
+  EXPECT_NEAR(reconstruction_error, 0.0, 1e-10) 
+    << "W0 + U*U^T does not equal X";
+
+  // Compute preconditioning precursers
+  precond.compute(X);
+  EXPECT_EQ(precond.info(), Eigen::Success);
+
+  // Build explicit preconditioned operator PB by applying P to each column of
+  // B. For a good preconditioner, PB should be well-conditioned.
+  Matrix PB(problem.m, problem.m);
+  for (int i = 0; i < problem.m; ++i) {
+    PB.col(i) = precond.solve(B.col(i));
+  }
+
+  // Inspect spectrum of PB.
+  Eigen::EigenSolver<Matrix> es(PB);
+  ASSERT_EQ(es.info(), Eigen::Success);
+  auto eigvals = es.eigenvalues();
+
+  double min_abs_eig = std::numeric_limits<double>::infinity();
+  double max_abs_eig = 0.0;
+  for (int i = 0; i < eigvals.size(); ++i) {
+    const double abs_eig = std::abs(eigvals(i));
+    min_abs_eig = std::min(min_abs_eig, abs_eig);
+    max_abs_eig = std::max(max_abs_eig, abs_eig);
+  }
+
+  // Condition number estimate from eigenvalue magnitudes.
+  const double cond_est = max_abs_eig / min_abs_eig;
+  std::cout << "cond(PB): " << cond_est << std::endl;
+
+  // Well-preconditioned systems should have condition number close to 1.
+  EXPECT_LT(cond_est, 10.0)
+      << "Preconditioned operator PB is poorly conditioned.";
+
+}
+
 TEST_P(AnalyticCentParamTest, CertifyMatrixFree) {
   const auto& sdp = GetParam();
   // parameters
