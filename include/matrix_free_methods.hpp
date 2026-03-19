@@ -175,9 +175,9 @@ class ApproxLowRankPrecond {
     for (int i = 0; i < ncons; i++) {
       Matrix mat;
       if (i < ncons - 1) {
-        mat = Z.transpose() * As_[i] * U;
+        mat = Z.transpose() * As_[i].selfadjointView<Eigen::Upper>() * U;
       } else {
-        mat = Z.transpose() * C_ * U;
+        mat = Z.transpose() * C_.selfadjointView<Eigen::Upper>() * U;
       }
       V.row(i) = Eigen::Map<Vector>(mat.data(), mat.size());
     }
@@ -227,6 +227,8 @@ class ApproxLowRankPrecond {
 
 // Low Rank Preconditioner for the Lagrange multiplier system.
 // Definition of preconditioner follows equation 23 of Zhang and Lavaei 2017
+// use_approx applies the approximation ZZ^T = 2tau I instead of Z Z^T = X + W0,
+// which is cheaper to compute, but in our case may be less effective at improving conditioning.
 class LowRankPrecond {
  public:
   typedef double Scalar;
@@ -235,14 +237,15 @@ class LowRankPrecond {
   using SpMatrix = Eigen::SparseMatrix<double>;
 
   LowRankPrecond(const Matrix& X, const std::vector<SpMatrix>& As,
-                 const Matrix& C, int rank)
+                 const Matrix& C, int rank, bool use_approx = false)
       : is_initialized_(false),
         X_(X),
         C_(C),
         As_(As),
         rank_(rank),
         dim(C.cols()),
-        ncons(As.size() + 1) {}
+        ncons(As.size() + 1),
+        use_approx_(use_approx) {}
 
   // Eigen's CG calls compute(mat) with the matrix-free operator
   LowRankPrecond& compute() {
@@ -250,14 +253,14 @@ class LowRankPrecond {
     build_constraint_mat();
     // decompose eigenspace
     auto [U, W0, tau] = decompose_soln(X_);
-    // Build sparse augmented system - Eqn 23
+    // Build sparse augmented system - Eqn 23 in Zhang and Lavaei 2017
     auto Sys = Matrix(ncons + rank_ * dim, ncons + rank_ * dim);
     Sys.block(0, 0, ncons, ncons) =
         A_bar_.transpose() * A_bar_ * std::pow(tau, 2.0);
-    Sys.block(0, ncons, ncons, rank_ * dim) = build_V_tilde(U, W0) * tau;
+    Sys.block(0, ncons, ncons, rank_ * dim) = build_top_right(U, W0, tau) * tau;
     Sys.block(ncons, ncons, rank_ * dim, rank_ * dim) =
         -Matrix::Identity(rank_ * dim, rank_ * dim) * std::pow(tau, 2);
-    
+
     // Prefactorize
     Factor.compute(Sys.selfadjointView<Eigen::Upper>());
     // Flag that we have initialized
@@ -276,38 +279,31 @@ class LowRankPrecond {
     return result.segment(0, ncons);
   }
 
-  // Build the top right matrix in the augmented preconditioner system
-  Matrix build_top_right(const Matrix& U) const {
+  // Build the top right matrix = A_bar^T(U otimes Z)
+  Matrix build_top_right(const Matrix& U, const Matrix& W0, double tau) const {
+    // Build the Z matrix s.t. Z Z^T = (2W0 + U U^T) = X + W0
+    Matrix Z;
+    if (!use_approx_) {
+      Eigen::LLT<Matrix> llt(X_ + W0);
+      Z = llt.matrixL();
+    } else {
+      // if approximation set then ZZ^T = 2tau I
+      // Note: we rely on eigen to optimize this below.
+      Z = Matrix::Identity(dim, dim) * std::sqrt(2 * tau);
+    }
+
+    // Build the top right block of the augmented system matrix
     auto top_right = Matrix(ncons, rank_ * dim);
     for (int i = 0; i < ncons; i++) {
       Matrix mat;
       if (i < ncons - 1) {
-        mat = As_[i] * U;
+        mat = Z.transpose() * As_[i].selfadjointView<Eigen::Upper>() * U;
       } else {
-        mat = C_ * U;
+        mat = Z.transpose() * C_.selfadjointView<Eigen::Upper>() * U;
       }
       top_right.row(i) = Eigen::Map<Vector>(mat.data(), mat.size());
     }
     return top_right;
-  }
-
-  // Build the V_tilde matrix = A_bar^T(U otimes Z)
-  Matrix build_V_tilde(const Matrix& U, const Matrix& W0) const {
-    // construct Z matrix s.t. Z Z^T = (2W0 + U U^T) = X + W0
-    Eigen::LLT<Matrix> llt(U * U.transpose() + 2 * W0);
-    Matrix Z = llt.matrixL();
-    // build V
-    auto V = Matrix(ncons, rank_ * dim);
-    for (int i = 0; i < ncons; i++) {
-      Matrix mat;
-      if (i < ncons - 1) {
-        mat = Z.transpose() * As_[i] * U;
-      } else {
-        mat = Z.transpose() * C_ * U;
-      }
-      V.row(i) = Eigen::Map<Vector>(mat.data(), mat.size());
-    }
-    return V;
   }
 
   // Construct the vectorized constraint matrix
@@ -381,6 +377,7 @@ class LowRankPrecond {
   int rank_;
   int dim;
   int ncons;
+  bool use_approx_;
 
   // built matrices
   Matrix A_bar_;
@@ -391,6 +388,9 @@ namespace RankTools {
 
 // Enumeration for linear solver types
 enum class LinearSolverType { LDLT, CG, MFCG };
+
+// Preconditioner types
+enum class PreconditionerType { Diagonal, LowRank, FixedLowRank, ApproxLowRank };
 
 // Nice printing for the linear solver types for debugging and display purposes
 inline std::string print_solver(LinearSolverType solver) {
@@ -405,4 +405,6 @@ inline std::string print_solver(LinearSolverType solver) {
       return "Unknown";
   }
 }
+
+
 }  // namespace RankTools

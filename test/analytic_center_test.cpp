@@ -4,15 +4,18 @@ Test file for Analytic Center implementation.
 #include "circle_problem.hpp"
 #include "interior_point_sdp.hpp"
 #include "lovasz_theta_problems.hpp"
+#include "generic_sdp_problems.hpp"
 
 using namespace RankTools;
 
-// Fixture Class
-class AnalyticCentParamTest : public ::testing::TestWithParam<SDPTestProblem> {
+// Fixture Classes
+class LovazsParamTest : public ::testing::TestWithParam<SDPTestProblem> {
+};
+class GenericParamTest : public ::testing::TestWithParam<GenericTestProblem> {
 };
 
 // Test that centering works as expected
-TEST_P(AnalyticCentParamTest, PrimalSolution) {
+TEST_P(LovazsParamTest, PrimalSolution) {
   const auto& sdp = GetParam();
   // parameters
   AnalyticCenterParams params;
@@ -68,7 +71,7 @@ TEST_P(AnalyticCentParamTest, PrimalSolution) {
 }
 
 // Test early stopping based on certificate found.
-TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
+TEST_P(LovazsParamTest, CertEarlyStopping) {
   const auto& sdp = GetParam();
   // parameters
   AnalyticCenterParams params;
@@ -110,7 +113,7 @@ TEST_P(AnalyticCentParamTest, CertEarlyStopping) {
 }
 
 // Test the Fixed perturbation and verify that the method converges.
-TEST_P(AnalyticCentParamTest, CertifyFixedPerturb) {
+TEST_P(LovazsParamTest, CertifyFixedPerturb) {
   const auto& sdp = GetParam();
   // parameters
   AnalyticCenterParams params;
@@ -135,7 +138,7 @@ TEST_P(AnalyticCentParamTest, CertifyFixedPerturb) {
 }
 
 // Test adapative perturbation. Ensure that we converge to a certificate.
-TEST_P(AnalyticCentParamTest, CertifyAdaptivePerturb) {
+TEST_P(LovazsParamTest, CertifyAdaptivePerturb) {
   const auto& sdp = GetParam();
   // parameters
   AnalyticCenterParams params;
@@ -164,7 +167,7 @@ TEST_P(AnalyticCentParamTest, CertifyAdaptivePerturb) {
 }
 
 // Test the LDLT linear solver on the system for computing multipliers
-TEST_P(AnalyticCentParamTest, CertifyLDLT) {
+TEST_P(LovazsParamTest, CertifyLDLT) {
   const auto& sdp = GetParam();
   // parameters
   AnalyticCenterParams params;
@@ -195,7 +198,7 @@ TEST_P(AnalyticCentParamTest, CertifyLDLT) {
 
 // Test the Conjugate Gradient linear solver on the system for computing
 // multipliers
-TEST_P(AnalyticCentParamTest, CertifyConjGrad) {
+TEST_P(LovazsParamTest, CertifyConjGrad) {
   const auto& sdp = GetParam();
   // parameters
   AnalyticCenterParams params;
@@ -345,13 +348,14 @@ TEST(MatrixFree, DiagonalPreconditioner) {
       << "Preconditioned CG residual too large";
 }
 
-TEST_P(AnalyticCentParamTest, LowRankPrecond) {
+// Test the low-rank preconditioner and verify that it improves conditioning of the system.
+TEST_P(LovazsParamTest, LowRankPrecond) {
   const auto& sdp = GetParam();
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
   params.rescale_lin_sys = false;
-  auto delta = 1e-3;
+  auto delta = 1e-8;
 
   // Build system at perturbed rank-1 solution X = Y Y^T + delta I
   auto problem = sdp.make_testable(params);
@@ -361,9 +365,9 @@ TEST_P(AnalyticCentParamTest, LowRankPrecond) {
   auto [alpha, L] = problem.line_search_factorization(
       X, Matrix::Identity(problem.dim, problem.dim) * delta);
   EXPECT_NEAR((X - Y_0 * Y_0.transpose() -
-             Matrix::Identity(problem.dim, problem.dim) * delta)
-                .norm(),
-            0.0, 1e-10);
+               Matrix::Identity(problem.dim, problem.dim) * delta)
+                  .norm(),
+              0.0, 1e-10);
 
   // Explicit system matrix B
   auto system = problem.build_ac_system(X, L, delta);
@@ -379,7 +383,7 @@ TEST_P(AnalyticCentParamTest, LowRankPrecond) {
   std::cout << "cond(B): " << cond_B << std::endl;
 
   // Build low-rank preconditioner with rank = 1 at the perturbed solution
-  LowRankPrecond precond(X, sdp.A, sdp.C, 1);
+  LowRankPrecond precond(X, sdp.A, sdp.C, 1, true);
   // Test descomposition
   auto [U, W0, tau] = precond.decompose_soln(X);
   EXPECT_NEAR(tau, delta, 1e-10);
@@ -422,7 +426,7 @@ TEST_P(AnalyticCentParamTest, LowRankPrecond) {
       << "Preconditioned operator PB is poorly conditioned.";
 }
 
-TEST_P(AnalyticCentParamTest, CertifyMatrixFree) {
+TEST_P(LovazsParamTest, CertifyMatrixFree) {
   const auto& sdp = GetParam();
   // parameters
   AnalyticCenterParams params;
@@ -452,7 +456,7 @@ TEST_P(AnalyticCentParamTest, CertifyMatrixFree) {
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    AnalyticCenterSuite, AnalyticCentParamTest,
+    AnalyticCenterSuite, LovazsParamTest,
     ::testing::Values(
         // CASE 1
         make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8}, "Clique1"),
@@ -463,6 +467,19 @@ INSTANTIATE_TEST_SUITE_P(
                               "Clique3_Large20x20"),
         // CASE 4
         make_lovasz_test_case(clique4_adj, {0, 1, 2}, "Clique4_Disconnected")),
-    [](const ::testing::TestParamInfo<AnalyticCentParamTest::ParamType>& info) {
+    [](const ::testing::TestParamInfo<LovazsParamTest::ParamType>& info) {
       return info.param.name;
+    });
+
+INSTANTIATE_TEST_SUITE_P(
+    AnalyticCenterSuite, GenericParamTest,
+    ::testing::ValuesIn(get_small_exported_cases()),
+    [](const ::testing::TestParamInfo<SDPTestProblem>& info) {
+      std::string s = info.param.name;
+      for (char& c : s) {
+        if (!std::isalnum(static_cast<unsigned char>(c))) {
+          c = '_';
+        }
+      }
+      return s;
     });
