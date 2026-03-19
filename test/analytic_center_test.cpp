@@ -351,31 +351,46 @@ TEST_P(AnalyticCentParamTest, LowRankPrecond) {
   AnalyticCenterParams params;
   params.verbose = true;
   params.rescale_lin_sys = false;
-  auto delta = 1e-5;
+  auto delta = 1e-3;
 
   // Build system at perturbed rank-1 solution X = Y Y^T + delta I
   auto problem = sdp.make_testable(params);
+
   Matrix Y_0 = sdp.make_solution(1);
   Matrix X = Y_0 * Y_0.transpose();
   auto [alpha, L] = problem.line_search_factorization(
       X, Matrix::Identity(problem.dim, problem.dim) * delta);
-  auto system = problem.build_ac_system(X, L, delta);
+  EXPECT_NEAR((X - Y_0 * Y_0.transpose() -
+             Matrix::Identity(problem.dim, problem.dim) * delta)
+                .norm(),
+            0.0, 1e-10);
 
   // Explicit system matrix B
+  auto system = problem.build_ac_system(X, L, delta);
   Matrix B = system.B.selfadjointView<Eigen::Upper>();
 
+  // Inspect conditioning of the original system matrix B.
+  Eigen::SelfAdjointEigenSolver<Matrix> es_B(B);
+  ASSERT_EQ(es_B.info(), Eigen::Success);
+  auto eigvals_B = es_B.eigenvalues();
+  const double max_eig_B = eigvals_B.maxCoeff();
+  const double min_eig_B = eigvals_B.minCoeff();
+  const double cond_B = max_eig_B / std::max(min_eig_B, 1e-16);
+  std::cout << "cond(B): " << cond_B << std::endl;
+
   // Build low-rank preconditioner with rank = 1 at the perturbed solution
-  MultSysLowRankPrecond precond(sdp.A, sdp.C, 1);
+  LowRankPrecond precond(X, sdp.A, sdp.C, 1);
   // Test descomposition
   auto [U, W0, tau] = precond.decompose_soln(X);
+  EXPECT_NEAR(tau, delta, 1e-10);
   // Verify that W0 + U*U.transpose() == X
   Matrix reconstructed = W0 + U * U.transpose();
   double reconstruction_error = (reconstructed - X).norm();
-  EXPECT_NEAR(reconstruction_error, 0.0, 1e-10) 
-    << "W0 + U*U^T does not equal X";
+  EXPECT_NEAR(reconstruction_error, 0.0, 1e-10)
+      << "W0 + U*U^T does not equal X";
 
   // Compute preconditioning precursers
-  precond.compute(X);
+  precond.compute();
   EXPECT_EQ(precond.info(), Eigen::Success);
 
   // Build explicit preconditioned operator PB by applying P to each column of
@@ -405,7 +420,6 @@ TEST_P(AnalyticCentParamTest, LowRankPrecond) {
   // Well-preconditioned systems should have condition number close to 1.
   EXPECT_LT(cond_est, 10.0)
       << "Preconditioned operator PB is poorly conditioned.";
-
 }
 
 TEST_P(AnalyticCentParamTest, CertifyMatrixFree) {

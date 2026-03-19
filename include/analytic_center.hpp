@@ -186,6 +186,7 @@ class AnalyticCenter {
     Vector violation;  // constraint violation (m)
     Matrix LAL;  // each col is vec(L^T * A_i * L) (L is the cholesky factor of
                  // the primal solution)
+    SpMatrix A_bar;
     std::vector<double> A_trace;  // diagonal traces of A_i
     std::unique_ptr<MultiplierLinSys>
         B_mf;  // Matrix-free operator for B (if using matrix-free solver)

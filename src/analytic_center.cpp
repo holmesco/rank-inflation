@@ -237,6 +237,7 @@ AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
   sys.d.resize(m);
   sys.violation.resize(m);
   sys.LAL.resize(dim * dim, m);
+  sys.A_bar.resize(dim * dim, m);
   sys.A_trace.resize(m);
   sys.B.resize(m, m);
   // Compute the L^T * A_i * L products and the constraint violations for the
