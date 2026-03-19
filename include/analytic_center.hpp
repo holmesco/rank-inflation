@@ -64,10 +64,14 @@ struct AnalyticCenterParams {
   // update factor for adjusting delta in adaptive centering
   double delta_dec = 0.6;
 
-  // Iterative Linear Solve Paramteres
+  // Iterative Linear Solve Parameters
   // -----------------
-  int lin_solve_max_iter = 200;
+  // max number of iterations for iterative linear solvers (CG and MFCG)
+    int lin_solve_max_iter = 200;
+  // tolerance for iterative linear solvers (CG and MFCG)
   double lin_solve_tol = 1e-4;
+  // preconditioner type for iterative linear solvers
+  PreconditionerType precond_type = PreconditionerType::LowRank;
 
   // Line search
   // ----------------
@@ -180,6 +184,7 @@ class AnalyticCenter {
                                             double delta) const;
 
   // Intermediate representation of the analytic center linear system
+  // Note: it may be more efficient to use references here.
   struct ACSystem {
     Matrix B;          // LHS matrix (m x m)
     Vector d;          // RHS vector (m)
@@ -190,6 +195,7 @@ class AnalyticCenter {
     std::vector<double> A_trace;  // diagonal traces of A_i
     std::unique_ptr<MultiplierLinSys>
         B_mf;  // Matrix-free operator for B (if using matrix-free solver)
+    Matrix X;  // current primal solution (for building matrix-free operator)
   };
 
   // Constructs the linear system (H, d, violation) for the analytic center step

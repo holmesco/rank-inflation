@@ -228,7 +228,8 @@ class ApproxLowRankPrecond {
 // Low Rank Preconditioner for the Lagrange multiplier system.
 // Definition of preconditioner follows equation 23 of Zhang and Lavaei 2017
 // use_approx applies the approximation ZZ^T = 2tau I instead of Z Z^T = X + W0,
-// which is cheaper to compute, but in our case may be less effective at improving conditioning.
+// which is cheaper to compute, but in our case may be less effective at
+// improving conditioning.
 class LowRankPrecond {
  public:
   typedef double Scalar;
@@ -236,23 +237,40 @@ class LowRankPrecond {
   using Matrix = Eigen::MatrixXd;
   using SpMatrix = Eigen::SparseMatrix<double>;
 
-  LowRankPrecond(const Matrix& X, const std::vector<SpMatrix>& As,
-                 const Matrix& C, int rank, bool use_approx = false)
+  // Default constructor - no problem data passed
+  LowRankPrecond()
       : is_initialized_(false),
-        X_(X),
-        C_(C),
-        As_(As),
-        rank_(rank),
-        dim(C.cols()),
-        ncons(As.size() + 1),
-        use_approx_(use_approx) {}
+        X_(nullptr),
+        C_(nullptr),
+        As_(nullptr),
+        rank_(1),
+        dim(0),
+        ncons(0),
+        use_approx_(false) {}
+
+  // Initialize the preconditioner with problem data
+  void init(const Matrix& X, const std::vector<SpMatrix>& As, const Matrix& C,
+            int rank, bool use_approx = false) {
+    X_ = &X;
+    C_ = &C;
+    As_ = &As;
+    rank_ = rank;
+    dim = C.cols();
+    ncons = As.size() + 1;
+    use_approx_ = use_approx;
+  }
 
   // Eigen's CG calls compute(mat) with the matrix-free operator
-  LowRankPrecond& compute() {
+  LowRankPrecond& compute(const MultiplierLinSys& op) {
+    if (!X_ || !C_ || !As_) {
+      throw std::runtime_error(
+          "LowRankPrecond: Problem data not set. Call init() before "
+          "compute().");
+    }
     // compute constraint matrix
     build_constraint_mat();
     // decompose eigenspace
-    auto [U, W0, tau] = decompose_soln(X_);
+    auto [U, W0, tau] = decompose_soln(*X_);
     // Build sparse augmented system - Eqn 23 in Zhang and Lavaei 2017
     auto Sys = Matrix(ncons + rank_ * dim, ncons + rank_ * dim);
     Sys.block(0, 0, ncons, ncons) =
@@ -284,7 +302,7 @@ class LowRankPrecond {
     // Build the Z matrix s.t. Z Z^T = (2W0 + U U^T) = X + W0
     Matrix Z;
     if (!use_approx_) {
-      Eigen::LLT<Matrix> llt(X_ + W0);
+      Eigen::LLT<Matrix> llt(*X_ + W0);
       Z = llt.matrixL();
     } else {
       // if approximation set then ZZ^T = 2tau I
@@ -297,9 +315,9 @@ class LowRankPrecond {
     for (int i = 0; i < ncons; i++) {
       Matrix mat;
       if (i < ncons - 1) {
-        mat = Z.transpose() * As_[i].selfadjointView<Eigen::Upper>() * U;
+        mat = Z.transpose() * (*As_)[i].selfadjointView<Eigen::Upper>() * U;
       } else {
-        mat = Z.transpose() * C_.selfadjointView<Eigen::Upper>() * U;
+        mat = Z.transpose() * (*C_).selfadjointView<Eigen::Upper>() * U;
       }
       top_right.row(i) = Eigen::Map<Vector>(mat.data(), mat.size());
     }
@@ -315,8 +333,8 @@ class LowRankPrecond {
     for (int i = 0; i < ncons; i++) {
       if (i < ncons - 1) {
         // Use an InnerIterator to move through non-zeros only
-        for (int k = 0; k < As_[i].outerSize(); ++k) {
-          for (Eigen::SparseMatrix<double>::InnerIterator it(As_[i], k); it;
+        for (int k = 0; k < (*As_)[i].outerSize(); ++k) {
+          for (Eigen::SparseMatrix<double>::InnerIterator it((*As_)[i], k); it;
                ++it) {
             // Calculate vectorized row index: col * total_rows + row
             if (it.col() > it.row()) {
@@ -334,7 +352,7 @@ class LowRankPrecond {
         }
       } else {
         // For dense matrix, just map
-        A_bar_.col(i) = Eigen::Map<const Vector>(C_.data(), C_.size());
+        A_bar_.col(i) = Eigen::Map<const Vector>(C_->data(), C_->size());
       }
     }
   }
@@ -365,15 +383,15 @@ class LowRankPrecond {
   }
 
   Matrix get_lin_sys_mat() const {
-    Matrix XkronX = Eigen::kroneckerProduct(X_, X_);
+    Matrix XkronX = Eigen::kroneckerProduct(*X_, *X_);
     return A_bar_.transpose() * XkronX * A_bar_;
   }
 
  private:
   bool is_initialized_;
-  const Matrix& X_;
-  const Matrix& C_;
-  const std::vector<Eigen::SparseMatrix<double>>& As_;
+  const Matrix* X_;
+  const Matrix* C_;
+  const std::vector<Eigen::SparseMatrix<double>>* As_;
   int rank_;
   int dim;
   int ncons;
@@ -390,7 +408,11 @@ namespace RankTools {
 enum class LinearSolverType { LDLT, CG, MFCG };
 
 // Preconditioner types
-enum class PreconditionerType { Diagonal, LowRank, FixedLowRank, ApproxLowRank };
+enum class PreconditionerType {
+  Diagonal,
+  LowRank,
+  FixedLowRank,
+};
 
 // Nice printing for the linear solver types for debugging and display purposes
 inline std::string print_solver(LinearSolverType solver) {
@@ -405,6 +427,5 @@ inline std::string print_solver(LinearSolverType solver) {
       return "Unknown";
   }
 }
-
 
 }  // namespace RankTools
