@@ -158,6 +158,9 @@ inline SDPTestProblem load_problem_from_file(const std::string& problem_name) {
   }
 
   sdp.rho = (sdp.soln.transpose() * sdp.C * sdp.soln).trace();
+  // register that the solution is globally optimal.
+  sdp.soln_is_global = sdp.name.find('L') == std::string::npos;
+
   return sdp;
 }
 

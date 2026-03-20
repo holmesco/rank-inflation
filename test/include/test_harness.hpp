@@ -41,6 +41,7 @@ struct SDPTestProblem {
   std::vector<double> b;
   Matrix soln;
   std::string name;
+  bool soln_is_global;
 
   // Retrieve zero padded solution for testing.
   Matrix make_solution(int rank) const {

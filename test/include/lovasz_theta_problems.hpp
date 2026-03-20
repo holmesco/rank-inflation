@@ -64,6 +64,7 @@ SDPTestProblem make_lovasz_test_case(const Eigen::MatrixXd& adj,
     sdp.soln(i, 0) = s;
   }
   sdp.name = "LovaszTheta_" + name;
+  sdp.soln_is_global = true;
   return sdp;
 }
 

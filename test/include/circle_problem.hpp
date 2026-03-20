@@ -68,6 +68,7 @@ SDPTestProblem make_two_sphere_sdp(int n, double r1, double r2, double d) {
   auto weights = Vector::Zero(n - 1).eval();
   weights(0) = 1.0;
   sdp.soln = make_two_sphere_soln(r1, r2, d, weights);
+  sdp.soln_is_global = true;
 
   sdp.name = "TwoSphereDim" + std::to_string(n);
 
