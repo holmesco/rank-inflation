@@ -2,17 +2,17 @@
 Test file for Analytic Center implementation.
 */
 #include "circle_problem.hpp"
-#include "interior_point_sdp.hpp"
-#include "lovasz_theta_problems.hpp"
 #include "generic_sdp_problems.hpp"
+#include "interior_point_sdp.hpp"
+#include "lin_alg_tools.hpp"
+#include "lovasz_theta_problems.hpp"
 
 using namespace RankTools;
 
 // Fixture Classes
-class LovazsParamTest : public ::testing::TestWithParam<SDPTestProblem> {
-};
-class GenericParamTest : public ::testing::TestWithParam<GenericTestProblem> {
-};
+class LovazsParamTest : public ::testing::TestWithParam<SDPTestProblem> {};
+
+class GenericParamTest : public ::testing::TestWithParam<SDPTestProblem> {};
 
 // Test that centering works as expected
 TEST_P(LovazsParamTest, PrimalSolution) {
@@ -78,7 +78,7 @@ TEST_P(LovazsParamTest, CertEarlyStopping) {
   params.verbose = true;
   params.check_cert = true;
   params.rescale_lin_sys = true;
-  params.lin_solver = LinearSolverType::MFCG;
+  params.lin_solver = LinearSolverType::MFCG_DP;
   auto delta = 1e-5;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
@@ -348,7 +348,8 @@ TEST(MatrixFree, DiagonalPreconditioner) {
       << "Preconditioned CG residual too large";
 }
 
-// Test the low-rank preconditioner and verify that it improves conditioning of the system.
+// Test the low-rank preconditioner and verify that it improves conditioning of
+// the system.
 TEST_P(LovazsParamTest, LowRankPrecond) {
   const auto& sdp = GetParam();
   // parameters
@@ -383,7 +384,8 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
   std::cout << "cond(B): " << cond_B << std::endl;
 
   // Build low-rank preconditioner with rank = 1 at the perturbed solution
-  LowRankPrecond precond(X, sdp.A, sdp.C, 1, true);
+  auto precond = LowRankPrecond();
+  precond.initialize(X, sdp.A, sdp.C, 1, true);
   // Test descomposition
   auto [U, W0, tau] = precond.decompose_soln(X);
   EXPECT_NEAR(tau, delta, 1e-10);
@@ -394,7 +396,6 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
       << "W0 + U*U^T does not equal X";
 
   // Compute preconditioning precursers
-  precond.compute();
   EXPECT_EQ(precond.info(), Eigen::Success);
 
   // Build explicit preconditioned operator PB by applying P to each column of
@@ -426,7 +427,7 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
       << "Preconditioned operator PB is poorly conditioned.";
 }
 
-TEST_P(LovazsParamTest, CertifyMatrixFree) {
+TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
   const auto& sdp = GetParam();
   // parameters
   AnalyticCenterParams params;
@@ -439,7 +440,8 @@ TEST_P(LovazsParamTest, CertifyMatrixFree) {
   params.max_iter = 50;
   // use rescaling to be consistent with the system in Sremac 2021
   params.rescale_lin_sys = true;
-  params.lin_solver = LinearSolverType::MFCG;  // Use Conjugate Gradient solver
+  params.lin_solver =
+      LinearSolverType::MFCG_DP;  // Use Conjugate Gradient solver
   auto delta = 1e-5;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
@@ -449,6 +451,44 @@ TEST_P(LovazsParamTest, CertifyMatrixFree) {
   auto result = problem.certify(Y_0, delta);
   // check that the solution is certified
   EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
+  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
+            << std::endl;
+  std::cout << "Complementarity (First Order Condition): "
+            << result.complementarity << std::endl;
+}
+
+TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
+  const auto& sdp = GetParam();
+  // Solve using Mosek to get analytic center solution
+  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b);
+  auto Y_mosek = get_positive_eigspace(mosek_soln.X, 1e-3);
+  auto rank_mosek = Y_mosek.cols();
+  std::cout << "Rank at IP Solution: " << rank_mosek << std::endl;
+
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.check_cert = true;  // Turn off early stopping based on certificate
+                             // for testing purposes
+  params.adaptive_perturb =
+      true;  // Turn on adaptive perturbation for testing purposes
+  params.delta_min = 1e-7;
+  params.max_iter = 50;
+  // Turn off rescaling (preconditioner should deal with this)
+  params.rescale_lin_sys = false;
+  params.lin_solver =
+      LinearSolverType::MFCG_LRP;  // Use Conjugate Gradient solver
+
+  auto delta = 1e-5;
+  // generate problem
+  AnalyticCenter problem = sdp.make(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  // Run certification method
+  auto result = problem.certify(Y_mosek, delta);
+  // check that the solution is certified
+  EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
+
   std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
             << std::endl;
   std::cout << "Complementarity (First Order Condition): "
@@ -470,6 +510,27 @@ INSTANTIATE_TEST_SUITE_P(
     [](const ::testing::TestParamInfo<LovazsParamTest::ParamType>& info) {
       return info.param.name;
     });
+
+static std::vector<SDPTestProblem> get_small_exported_cases() {
+  auto all = ExportedSDPProblems::make_exported_sdp_test_problems();
+  std::vector<SDPTestProblem> selected;
+  selected.reserve(30);
+
+  for (const auto& sdp : all) {
+    if (sdp.A.size() <= 100) {
+      selected.push_back(sdp);
+    }
+    if (selected.size() >= 30) {
+      break;
+    }
+  }
+  if (selected.empty()) {
+    const std::size_t n = std::min<std::size_t>(all.size(), 5);
+    selected.insert(selected.end(), all.begin(), all.begin() + n);
+  }
+
+  return selected;
+}
 
 INSTANTIATE_TEST_SUITE_P(
     AnalyticCenterSuite, GenericParamTest,

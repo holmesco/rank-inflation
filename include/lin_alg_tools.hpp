@@ -4,8 +4,108 @@
 #include <Eigen/Sparse>
 #include <iostream>
 
-// Forward declaration
+// -------------- SOLVER ENUM TYPES ---------------
+
+// Enumeration for linear solver types
+enum class LinearSolverType { LDLT, CG, MFCG_DP, MFCG_LRP };
+
+// Nice printing for the linear solver types for debugging and display purposes
+inline std::string print_solver(LinearSolverType solver) {
+  switch (solver) {
+    case LinearSolverType::LDLT:
+      return "LDLT Direct Solver";
+    case LinearSolverType::CG:
+      return "Conjugate Gradient";
+    case LinearSolverType::MFCG_DP:
+      return "Matrix-Free Conjugate Gradient - Diagonal Preconditioner";
+    case LinearSolverType::MFCG_LRP:
+      return "Matrix-Free Conjugate Gradient - Low Rank Preconditioner";
+    default:
+      return "Unknown";
+  }
+}
+
+// --------------- MATRIX-FREE METHODS -----------
+
+// declare class for matrix-free linear system
 class MultiplierLinSys;
+using Eigen::SparseMatrix;
+
+namespace Eigen {
+namespace internal {
+// MultiplierLinSys looks-like a dense matrix, so we inheret its traits:
+template <>
+struct traits<MultiplierLinSys> : public traits<Eigen::SparseMatrix<double>> {};
+}  // namespace internal
+}  // namespace Eigen
+
+// Multiplier Linear System for use in iterative solvers. This class allows us
+// to use Eigen's iterative solvers with a custom matrix-vector product defined
+// by the sparse matrix of the problem, without explicitly forming the dense
+// matrix.
+class MultiplierLinSys : public Eigen::EigenBase<MultiplierLinSys> {
+ public:
+  // Required typedefs, constants, and method:
+  typedef double Scalar;
+  typedef double RealScalar;
+  typedef int StorageIndex;
+  enum {
+    ColsAtCompileTime = Eigen::Dynamic,
+    MaxColsAtCompileTime = Eigen::Dynamic,
+    IsRowMajor = false
+  };
+  Index rows() const { return static_cast<Eigen::Index>(LAL_.cols()); }
+  Index cols() const { return static_cast<Eigen::Index>(LAL_.cols()); }
+
+  template <typename Rhs>
+  Eigen::Product<MultiplierLinSys, Rhs, Eigen::AliasFreeProduct> operator*(
+      const Eigen::MatrixBase<Rhs>& x) const {
+    return Eigen::Product<MultiplierLinSys, Rhs, Eigen::AliasFreeProduct>(
+        *this, x.derived());
+  }
+  // precomputed matrix where each col is vec(L^T * A_i * L)
+  const Eigen::MatrixXd& LAL_;
+  // perturbation parameter
+  double scale_;
+
+  // API to set the data of the linear system (the cost matrix and the
+  // constraint matrices)
+  MultiplierLinSys(const Eigen::MatrixXd& LAL, double scale)
+      : LAL_(LAL), scale_(scale) {}
+};
+
+// Implementation of MultiplierLinSys * Eigen::DenseVector though a
+// specialization of internal::generic_product_impl:
+namespace Eigen {
+namespace internal {
+
+template <typename Rhs>
+struct generic_product_impl<MultiplierLinSys, Rhs, SparseShape, DenseShape,
+                            GemvProduct>  // GEMV stands for matrix-vector
+    : generic_product_impl_base<MultiplierLinSys, Rhs,
+                                generic_product_impl<MultiplierLinSys, Rhs>> {
+  typedef typename Product<MultiplierLinSys, Rhs>::Scalar Scalar;
+
+  // Custom implementation of the matrix-vector product for our linear system.
+  // Computes a matrix vector product y = B*x = LAL_^T * (LAL_ * x) without
+  // explicitly forming the dense matrix.
+  // Complexity: O(n^2 m) where n is the dimension of the SDP and m is the
+  // number of constraints.
+  template <typename Dest>
+  static void scaleAndAddTo(Dest& dst, const MultiplierLinSys& lhs,
+                            const Rhs& rhs, const Scalar& alpha) {
+    // Rescale the input
+    auto rhs_scaled = rhs * alpha * lhs.scale_;
+    // Mult by matrix then by transpose
+    auto y = lhs.LAL_ * rhs_scaled;
+    dst += lhs.LAL_.transpose() * y;
+  }
+};
+
+}  // namespace internal
+}  // namespace Eigen
+
+// ----------- PRECONDITIONERS ------------------
 
 // Diagonal preconditioner for MultiplierLinSys.
 class MultiplierDiagPreconditioner {
@@ -173,8 +273,9 @@ class LowRankPrecond {
         use_approx_(false) {}
 
   // Initialize the preconditioner with problem data
-  void init(const Matrix& X, const std::vector<SpMatrix>& As, const Matrix& C,
-            int rank, bool use_approx = false) {
+  void initialize(const Matrix& X, const std::vector<SpMatrix>& As,
+                  const Matrix& C, int rank, bool use_approx = false) {
+    // Initialize variables with problem data
     X_ = &X;
     C_ = &C;
     As_ = &As;
@@ -182,10 +283,23 @@ class LowRankPrecond {
     dim = C.cols();
     ncons = As.size() + 1;
     use_approx_ = use_approx;
+    // Call function to build the preconditioner
+    build_preconditioner();
   }
 
   // Eigen's CG calls compute(mat) with the matrix-free operator
   LowRankPrecond& compute(const MultiplierLinSys& op) {
+    if (is_initialized_) {
+      // If already initialized, just return
+      return *this;
+    }
+    // Just call the internal build function that does the actual work
+    return build_preconditioner();
+  }
+
+  // Internal compute function that does the actual work of building the
+  // preconditioner
+  LowRankPrecond& build_preconditioner() {
     if (!X_ || !C_ || !As_) {
       throw std::runtime_error(
           "LowRankPrecond: Problem data not set. Call init() before "
@@ -205,7 +319,7 @@ class LowRankPrecond {
 
     // Prefactorize
     Factor.compute(Sys.selfadjointView<Eigen::Upper>());
-    // Flag that we have initialized
+    // Flag that we have initialized to eigen
     is_initialized_ = true;
     return *this;
   }

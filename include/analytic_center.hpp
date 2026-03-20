@@ -2,7 +2,7 @@
 #include <Eigen/IterativeLinearSolvers>
 #include <chrono>
 
-#include "matrix_free_methods.hpp"
+#include "lin_alg_tools.hpp"
 #include "utils.hpp"
 
 namespace RankTools {
@@ -67,7 +67,7 @@ struct AnalyticCenterParams {
   // Iterative Linear Solve Parameters
   // -----------------
   // max number of iterations for iterative linear solvers (CG and MFCG)
-    int lin_solve_max_iter = 200;
+  int lin_solve_max_iter = 200;
   // tolerance for iterative linear solvers (CG and MFCG)
   double lin_solve_tol = 1e-4;
   // preconditioner type for iterative linear solvers
@@ -172,6 +172,12 @@ class AnalyticCenter {
  protected:
   // Previous multipliers for iterative linear system solvers
   mutable Vector prev_multipliers_;
+  // Matrix Free, Low Rank Preconditioned Conjugate Gradient solver
+  mutable std::unique_ptr<Eigen::ConjugateGradient<
+      MultiplierLinSys, Eigen::Upper | Eigen::Lower, LowRankPrecond>>
+      lr_solver;
+  // Expected rank of the initial solution
+  mutable int rank_init;
 
   // Build weighted sum of constraint matrices: sum_i A_i * lambda_i
   // If the coefficient falls below `tol` then the corresponding constraint is
@@ -185,7 +191,7 @@ class AnalyticCenter {
 
   // Intermediate representation of the analytic center linear system
   // Note: it may be more efficient to use references here.
-  struct ACSystem {
+  struct LinSysData {
     Matrix B;          // LHS matrix (m x m)
     Vector d;          // RHS vector (m)
     Vector violation;  // constraint violation (m)
@@ -195,15 +201,26 @@ class AnalyticCenter {
     std::vector<double> A_trace;  // diagonal traces of A_i
     std::unique_ptr<MultiplierLinSys>
         B_mf;  // Matrix-free operator for B (if using matrix-free solver)
-    Matrix X;  // current primal solution (for building matrix-free operator)
+    const Matrix&
+        X_;  // current primal solution (for building matrix-free operator)
+
+    LinSysData(const Matrix& X, int dim, int m)
+        : B(Matrix(m, m)),
+          d(Vector(m)),
+          violation(Vector(m)),
+          LAL(Matrix(dim * dim, m)),
+          A_bar(SpMatrix(dim * dim, m)),
+          A_trace(std::vector<double>(m)),
+          B_mf(nullptr),
+          X_(X) {}
   };
 
   // Constructs the linear system (H, d, violation) for the analytic center step
-  ACSystem build_ac_system(const Matrix& Z, const Matrix& L,
-                           double delta) const;
+  LinSysData build_ac_system(const Matrix& Z, const Matrix& L,
+                             double delta) const;
 
   // Solves the linear system H * multipliers = d using the configured solver
-  Vector solve_ac_system(const ACSystem& system) const;
+  Vector solve_ac_system(const LinSysData& system) const;
 
   double get_analytic_center_objective(const Matrix& X, double delta) const {
     auto I = Matrix::Identity(X.rows(), X.cols());

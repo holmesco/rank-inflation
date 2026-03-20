@@ -6,12 +6,14 @@ AnalyticCenter::AnalyticCenter(
     const Matrix& C, double rho,
     const std::vector<Eigen::SparseMatrix<double>>& A,
     const std::vector<double>& b, AnalyticCenterParams params)
-    : C_(C), A_(A), rho_(rho), b_(b), params_(params) {
-  // dimension of the SDP
-  dim = C.rows();
-  // number of constraints to enforce during inflation
-  m = A.size() + 1;
-}
+    : C_(C),
+      A_(A),
+      rho_(rho),
+      b_(b),
+      params_(params),
+      dim(C.rows()),
+      m(A.size() + 1),
+      lr_solver(nullptr) {}
 
 Vector AnalyticCenter::eval_constraints(const Matrix& X) const {
   // Loop through constraints, evaluating gradient and constraint value
@@ -108,6 +110,8 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   int n_iter = 0;
   double delta = delta_init;
   Matrix Z = Y_0 * Y_0.transpose();
+  // store rank of candidate solution
+  rank_init = Y_0.cols();
   auto [alpha, L] = line_search_factorization(
       Z, Matrix::Identity(dim, dim) * delta);  // Initial line search to ensure
                                                // PSDness of the starting point
@@ -230,16 +234,11 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   return {Z, mult_scaled};
 }
 
-AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
-                                                         const Matrix& L,
-                                                         double delta) const {
-  ACSystem sys;
-  sys.d.resize(m);
-  sys.violation.resize(m);
-  sys.LAL.resize(dim * dim, m);
-  sys.A_bar.resize(dim * dim, m);
-  sys.A_trace.resize(m);
-  sys.B.resize(m, m);
+AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
+                                                           const Matrix& L,
+                                                           double delta) const {
+  // Initialize system data
+  LinSysData sys(X, dim, m);
   // Compute the L^T * A_i * L products and the constraint violations for the
   // current solution
   const int a_size = static_cast<int>(A_.size());
@@ -267,29 +266,28 @@ AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
   }
 
   // Only build the LHS matrix if not using matrix-free solver.
-  if (params_.lin_solver != LinearSolverType::MFCG) {
-    const double scale = params_.rescale_lin_sys ? (1.0 / delta) : 1.0;
-    sys.B.setZero();
-    // B += scale * (LAL^T) * (LAL^T)^T = scale * LAL^T * LAL
-    sys.B.selfadjointView<Eigen::Upper>().rankUpdate(sys.LAL.transpose(),
-                                                     scale);
 
-    // Optional: only if some code later expects full symmetric storage
-    // sys.B.template triangularView<Eigen::Lower>() =
-    //     sys.B.transpose().template triangularView<Eigen::Lower>();
-  } else {
+  if (params_.lin_solver == LinearSolverType::MFCG_DP ||
+      params_.lin_solver == LinearSolverType::MFCG_LRP) {
     // If using matrix-free solver, build the matrix-free operator for the LHS
     if (params_.rescale_lin_sys) {
       sys.B_mf = std::make_unique<MultiplierLinSys>(sys.LAL, 1 / delta);
     } else {
       sys.B_mf = std::make_unique<MultiplierLinSys>(sys.LAL, 1.0);
     }
-  }
 
+  } else {
+    // B += scale * (LAL^T) * (LAL^T)^T = scale * LAL^T * LAL
+    const double scale = params_.rescale_lin_sys ? (1.0 / delta) : 1.0;
+    sys.B.setZero();
+    sys.B.selfadjointView<Eigen::Upper>().rankUpdate(sys.LAL.transpose(),
+                                                     scale);
+  }
+  // Return system information and metrics
   return sys;
 }
 
-Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
+Vector AnalyticCenter::solve_ac_system(const LinSysData& sys) const {
   Vector multipliers(m);
 
   if (params_.lin_solver == LinearSolverType::CG) {
@@ -319,55 +317,88 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
     if (cg.info() != Eigen::Success) {
       std::cout << "Solving failed: " << cg.error() << std::endl;
     }
-  } else if (params_.lin_solver == LinearSolverType::MFCG) {
+  } else if (params_.lin_solver == LinearSolverType::MFCG_DP) {
     // Solve the linear system with Matrix-Free Conjugate Gradient (MFCG) method
-    // Note: This method is more scalable for large problems and can handle
-    // ill-conditioned systems better, but requires a well-designed matrix-free
-    // operator and may require tuning of parameters for convergence.
+    // with diagonal preconditioner.
     MultiplierLinSys& lin_op = *(sys.B_mf);
     Eigen::ConjugateGradient<MultiplierLinSys, Eigen::Upper | Eigen::Lower,
                              MultiplierDiagPreconditioner>
-        mfcg;
+        solver;
     // Set solve parameters
-    mfcg.setMaxIterations(
+    solver.setMaxIterations(
         params_.lin_solve_max_iter);  // Set a maximum number of iterations
-    mfcg.setTolerance(params_.lin_solve_tol);  // Set a convergence tolerance
+    solver.setTolerance(params_.lin_solve_tol);  // Set a convergence tolerance
 
-    mfcg.compute(lin_op);
-    if (mfcg.info() != Eigen::Success) {
-      std::cout << "Decomposition failed: " << mfcg.error() << std::endl;
+    solver.compute(lin_op);
+    if (solver.info() != Eigen::Success) {
+      std::cout << "Decomposition failed: " << solver.error() << std::endl;
     }
 
     // Use previous multipliers as initial guess if available to speed up
     // convergence
     if (prev_multipliers_.size() == m) {
-      multipliers = mfcg.solveWithGuess(sys.d, prev_multipliers_);
+      multipliers = solver.solveWithGuess(sys.d, prev_multipliers_);
     } else {
-      multipliers = mfcg.solve(sys.d);
+      multipliers = solver.solve(sys.d);
     }
     prev_multipliers_ = multipliers;  // Store the multipliers for the next
                                       // iteration's initial guess
-    if (mfcg.info() != Eigen::Success) {
-      std::cout << "Solving failed: " << mfcg.error() << std::endl;
+    if (solver.info() != Eigen::Success) {
+      std::cout << "Solving failed: " << solver.error() << std::endl;
+    }
+  } else if (params_.lin_solver == LinearSolverType::MFCG_LRP) {
+    // Solve the linear system with Matrix-Free Conjugate Gradient (MFCG) method
+    // with low rank preconditioner.
+    MultiplierLinSys& lin_op = *(sys.B_mf);
+    // To avoid repeatedly initializing the preconditioner in each iteration, we
+    // maintain a stored instance of the solver.
+    if (!lr_solver) {
+      lr_solver = std::make_unique<Eigen::ConjugateGradient<
+          MultiplierLinSys, Eigen::Upper | Eigen::Lower, LowRankPrecond>>();
+      // Initialize the preconditioner
+      LowRankPrecond& lr_precond = lr_solver->preconditioner();
+      lr_precond.initialize(sys.X_, A_, C_, rank_init);
+    }
+    auto& solver = *lr_solver;  // convenience definition
+    // Set solve parameters
+    solver.setMaxIterations(
+        params_.lin_solve_max_iter);  // Set a maximum number of iterations
+    solver.setTolerance(params_.lin_solve_tol);  // Set a convergence tolerance
+    // Call compute
+    solver.compute(lin_op);
+    if (solver.info() != Eigen::Success) {
+      std::cout << "Solver Failed: " << solver.error() << std::endl;
+    }
+    // Use previous multipliers as initial guess if available to speed up
+    // convergence
+    if (prev_multipliers_.size() == m) {
+      multipliers = solver.solveWithGuess(sys.d, prev_multipliers_);
+    } else {
+      multipliers = solver.solve(sys.d);
+    }
+    prev_multipliers_ = multipliers;  // Store the multipliers for the next
+                                      // iteration's initial guess
+    if (solver.info() != Eigen::Success) {
+      std::cout << "Solving failed: " << solver.error() << std::endl;
     }
   } else if (params_.lin_solver == LinearSolverType::LDLT) {
     // Solve the linear equation with LDLT decomposition (includes pivoting by
     // default) Note: This method is preferred because the system is PSD, but
     // can be ill-conditioned, especially in early iterations.
-    Eigen::LDLT<Eigen::MatrixXd> ldlt(sys.B.selfadjointView<Eigen::Upper>());
+    Eigen::LDLT<Eigen::MatrixXd> solver(sys.B.selfadjointView<Eigen::Upper>());
     // Check for success (critical for rank-deficient cases)
     if (params_.verbose) {
-      if (ldlt.info() == Eigen::NumericalIssue) {
+      if (solver.info() == Eigen::NumericalIssue) {
         std::cout << "LDLT SOLVE: The matrix is has severe numerical issues."
                   << std::endl;
       }
-      if (ldlt.isPositive() == false) {
+      if (solver.isPositive() == false) {
         std::cout << "LDLT SOLVE: The matrix is not positive semidefinite."
                   << std::endl;
       }
     }
     // Solve the linear system.
-    multipliers = ldlt.solve(sys.d);
+    multipliers = solver.solve(sys.d);
   }
 #ifdef DEBUG
   // print information about the linear system
@@ -428,9 +459,9 @@ std::pair<double, Matrix> AnalyticCenter::line_search_factorization(
       params_.ln_search_red_factor;  // step size reduction factor
   // Backtracking loop
   Matrix Z_new = Z + alpha * dZ;
-  Eigen::LDLT<Eigen::MatrixXd> ldlt(Z_new);
-  while (!ldlt.isPositive()) {
-    if (ldlt.info() == Eigen::NumericalIssue) {
+  Eigen::LDLT<Eigen::MatrixXd> solver(Z_new);
+  while (!solver.isPositive()) {
+    if (solver.info() == Eigen::NumericalIssue) {
       std::cout << "LINESEARCH: The matrix is has severe numerical issues."
                 << std::endl;
     }
@@ -442,15 +473,15 @@ std::pair<double, Matrix> AnalyticCenter::line_search_factorization(
       break;  // Stop if step size is too small
     }
     Z_new = Z + alpha * dZ;
-    ldlt.compute(Z_new);
+    solver.compute(Z_new);
   }
   // update Z with the new value that ensures PSDness
   Z = Z_new;
   // Return the Cholesky factorization of the new Z for use in the next
   // iteration's linear system
-  Eigen::MatrixXd L_chol = ldlt.matrixL();
-  L_chol.noalias() = L_chol * ldlt.vectorD().cwiseSqrt().asDiagonal();
-  L_chol.noalias() = ldlt.transpositionsP().transpose() * L_chol;
+  Eigen::MatrixXd L_chol = solver.matrixL();
+  L_chol.noalias() = L_chol * solver.vectorD().cwiseSqrt().asDiagonal();
+  L_chol.noalias() = solver.transpositionsP().transpose() * L_chol;
 
   return {alpha, L_chol};
 }
