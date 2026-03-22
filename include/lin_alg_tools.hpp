@@ -293,7 +293,7 @@ class LowRankPrecond {
       // If already initialized, just return
       return *this;
     }
-    // Just call the internal build function that does the actual work
+    // Call the internal build function that does the actual work
     return build_preconditioner();
   }
 
@@ -309,6 +309,7 @@ class LowRankPrecond {
     build_constraint_mat();
     // decompose eigenspace
     auto [U, W0, tau] = decompose_soln(*X_);
+    
     // Build sparse augmented system - Eqn 23 in Zhang and Lavaei 2017
     auto Sys = Matrix(ncons + rank_ * dim, ncons + rank_ * dim);
     Sys.block(0, 0, ncons, ncons) =
@@ -317,7 +318,7 @@ class LowRankPrecond {
     Sys.block(ncons, ncons, rank_ * dim, rank_ * dim) =
         -Matrix::Identity(rank_ * dim, rank_ * dim) * std::pow(tau, 2);
 
-    // Prefactorize
+    // Prefactorize (LDLT)
     Factor.compute(Sys.selfadjointView<Eigen::Upper>());
     // Flag that we have initialized to eigen
     is_initialized_ = true;

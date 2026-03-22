@@ -441,7 +441,7 @@ TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
   // use rescaling to be consistent with the system in Sremac 2021
   params.rescale_lin_sys = true;
   params.lin_solver =
-      LinearSolverType::MFCG_DP;  // Use Conjugate Gradient solver
+      LinearSolverType::MFCG_DP;  // Use Conjugate Gradient solver with diagonal preconditioner
   auto delta = 1e-5;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
@@ -457,6 +457,9 @@ TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
             << result.complementarity << std::endl;
 }
 
+// Run with the low-rank preconditioner and the Conjugate Gradient solver.
+// Note that this only works when the candidate solution is at the analytic center,
+// so we use the Mosek solution as the candidate solution to certify.
 TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   const auto& sdp = GetParam();
   // Solve using Mosek to get analytic center solution
@@ -464,26 +467,31 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   auto Y_mosek = get_positive_eigspace(mosek_soln.X, 1e-3);
   auto rank_mosek = Y_mosek.cols();
   std::cout << "Rank at IP Solution: " << rank_mosek << std::endl;
-
+  auto X_mosek = Y_mosek * Y_mosek.transpose();
+    
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
   params.check_cert = true;  // Turn off early stopping based on certificate
-                             // for testing purposes
+  // for testing purposes
   params.adaptive_perturb =
-      true;  // Turn on adaptive perturbation for testing purposes
+  true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-7;
   params.max_iter = 50;
   // Turn off rescaling (preconditioner should deal with this)
   params.rescale_lin_sys = false;
   params.lin_solver =
-      LinearSolverType::MFCG_LRP;  // Use Conjugate Gradient solver
-
+  LinearSolverType::MFCG_LRP;  // Use Conjugate Gradient solver
+  
   auto delta = 1e-5;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
-  // get current solution
-  Matrix Y_0 = sdp.make_solution(1);
+  // Update cost based on the mosek solution
+  problem.rho_ = (sdp.C * X_mosek).trace();
+  // // Check mosek solution
+  // std::cout << "Cost diff of solution: " << problem.rho_ - mosek_soln.obj_value << std::endl;
+  // std::cout << "Violation of solution: " << problem.eval_constraints(X_mosek).transpose() << std::endl;
+  // std::cout << "Complementarity of solution: " << (mosek_soln.S * X_mosek).trace() << std::endl;
   // Run certification method
   auto result = problem.certify(Y_mosek, delta);
   // check that the solution is certified

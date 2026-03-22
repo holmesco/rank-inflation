@@ -29,7 +29,7 @@ struct AnalyticCenterParams {
   bool verbose = true;
   // threshold for checking rank of the solution
   // (does not affect convergence, just for display)
-  double tol_rank_sol = 1.0E-6;
+  double tol_rank_sol = 1.0E-4;
   // tolerance for step size (terminate if below)
   double tol_step_norm = 1e-8;
   // reduce violation in centering step
@@ -123,7 +123,8 @@ class AnalyticCenter {
   // cost matrix
   const Matrix C_;
   // optimal cost value
-  const double rho_;
+  // NOTE: this is non-const because we may want to change it after the problem is defined.
+  double rho_;
   // constraint matrices
   const std::vector<Eigen::SparseMatrix<double>>& A_;
   // constraint values
