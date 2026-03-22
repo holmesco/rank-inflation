@@ -93,13 +93,13 @@ struct AnalyticCenterParams {
   // tolerance for low rank approximation of certificate matrix
   double low_rank_approx_tol = 1e-6;
 
-  // Certificate parameters
+  // Early stop parameters
   // -------------------------
   // enable for certificate check during centering
   // NOTE: can be used to terminate centering early if the certificate is PSD
   // within tolerance, which can be a good heuristic to avoid unnecessary
   // centering steps when the solution is already close to optimal
-  bool check_cert = true;
+  bool early_stop_cert = true;
   // tolerance for checking PSDness of certificate matrix
   double tol_cert_psd = 1e-5;
   // tolerance for checking first order condition of certificate matrix
@@ -107,6 +107,14 @@ struct AnalyticCenterParams {
   // primal feasibility tolerance for certificate check (i.e., tolerance for
   // violation of constraints)
   double tol_cert_primal_feas = 1e-5;
+  // Early stopping condition for deviation from the candidate solution.
+  // Violation of condition implies certificate failure.
+  // NOTE: This only detects if the solution is not the analytic center, which
+  // is a looser condition than if it is not globally optimal
+  bool early_stop_angle = false;
+  // Maximum allowable angle between the current solution and the candidate
+  // solution for early stopping (in radians).
+  double max_angle = 5e-4;
   // use the centrality metric from He et al. 1997
   bool use_cert_centrality_metric = false;
   // centrality metric tolerance
@@ -123,7 +131,8 @@ class AnalyticCenter {
   // cost matrix
   const Matrix C_;
   // optimal cost value
-  // NOTE: this is non-const because we may want to change it after the problem is defined.
+  // NOTE: this is non-const because we may want to change it after the problem
+  // is defined.
   double rho_;
   // constraint matrices
   const std::vector<Eigen::SparseMatrix<double>>& A_;

@@ -20,8 +20,8 @@ TEST_P(LovazsParamTest, PrimalSolution) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert = false;  // Turn off early stopping based on certificate
-                              // for testing purposes
+  params.early_stop_cert = false;  // Turn off early stopping based on
+                                   // certificate for testing purposes
   params.max_iter = 50;
   params.rescale_lin_sys = false;
   double delta = 1e-7;
@@ -76,7 +76,7 @@ TEST_P(LovazsParamTest, CertEarlyStopping) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert = true;
+  params.early_stop_cert = true;
   params.rescale_lin_sys = true;
   params.lin_solver = LinearSolverType::MFCG_DP;
   auto delta = 1e-5;
@@ -118,8 +118,8 @@ TEST_P(LovazsParamTest, CertifyFixedPerturb) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert = true;  // Turn off early stopping based on certificate for
-                             // testing purposes
+  params.early_stop_cert = true;  // Turn off early stopping based on
+                                  // certificate for testing purposes
   params.adaptive_perturb =
       false;  // Turn off adaptive perturbation for testing purposes
   auto delta = 1e-7;
@@ -143,8 +143,8 @@ TEST_P(LovazsParamTest, CertifyAdaptivePerturb) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert = false;  // Turn off early stopping based on certificate
-                              // for testing purposes
+  params.early_stop_cert = false;  // Turn off early stopping based on
+                                   // certificate for testing purposes
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-9;
@@ -172,8 +172,8 @@ TEST_P(LovazsParamTest, CertifyLDLT) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert = false;  // Turn off early stopping based on certificate
-                              // for testing purposes
+  params.early_stop_cert = false;  // Turn off early stopping based on
+                                   // certificate for testing purposes
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-8;
@@ -203,8 +203,8 @@ TEST_P(LovazsParamTest, CertifyConjGrad) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert = false;  // Turn off early stopping based on certificate
-                              // for testing purposes
+  params.early_stop_cert = false;  // Turn off early stopping based on
+                                   // certificate for testing purposes
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-8;
@@ -432,8 +432,12 @@ TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert = false;  // Turn off early stopping based on certificate
-                              // for testing purposes
+  params.early_stop_cert = false;  // Turn off early stopping based on
+                                   // certificate for testing purposes
+  params.early_stop_angle =
+      true;  // Turn off early stopping based on solution deviation
+  params.max_angle = 1e5;  // Set max solution deviation to be small to
+                           // ensure convergence to certificate
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-8;
@@ -441,7 +445,8 @@ TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
   // use rescaling to be consistent with the system in Sremac 2021
   params.rescale_lin_sys = true;
   params.lin_solver =
-      LinearSolverType::MFCG_DP;  // Use Conjugate Gradient solver with diagonal preconditioner
+      LinearSolverType::MFCG_DP;  // Use Conjugate Gradient solver with diagonal
+                                  // preconditioner
   auto delta = 1e-5;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
@@ -458,8 +463,8 @@ TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
 }
 
 // Run with the low-rank preconditioner and the Conjugate Gradient solver.
-// Note that this only works when the candidate solution is at the analytic center,
-// so we use the Mosek solution as the candidate solution to certify.
+// Note that this only works when the candidate solution is at the analytic
+// center, so we use the Mosek solution as the candidate solution to certify.
 TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   const auto& sdp = GetParam();
   // Solve using Mosek to get analytic center solution
@@ -468,35 +473,123 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   auto rank_mosek = Y_mosek.cols();
   std::cout << "Rank at IP Solution: " << rank_mosek << std::endl;
   auto X_mosek = Y_mosek * Y_mosek.transpose();
-    
+
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.check_cert = true;  // Turn off early stopping based on certificate
+  params.early_stop_cert =
+      true;  // Turn off early stopping based on certificate
   // for testing purposes
   params.adaptive_perturb =
-  true;  // Turn on adaptive perturbation for testing purposes
+      true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-7;
   params.max_iter = 50;
   // Turn off rescaling (preconditioner should deal with this)
   params.rescale_lin_sys = false;
   params.lin_solver =
-  LinearSolverType::MFCG_LRP;  // Use Conjugate Gradient solver
-  
+      LinearSolverType::MFCG_LRP;  // Use Conjugate Gradient solver
+
   auto delta = 1e-5;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // Update cost based on the mosek solution
   problem.rho_ = (sdp.C * X_mosek).trace();
   // // Check mosek solution
-  // std::cout << "Cost diff of solution: " << problem.rho_ - mosek_soln.obj_value << std::endl;
-  // std::cout << "Violation of solution: " << problem.eval_constraints(X_mosek).transpose() << std::endl;
-  // std::cout << "Complementarity of solution: " << (mosek_soln.S * X_mosek).trace() << std::endl;
-  // Run certification method
+  // std::cout << "Cost diff of solution: " << problem.rho_ -
+  // mosek_soln.obj_value << std::endl; std::cout << "Violation of solution: "
+  // << problem.eval_constraints(X_mosek).transpose() << std::endl; std::cout <<
+  // "Complementarity of solution: " << (mosek_soln.S * X_mosek).trace() <<
+  // std::endl; Run certification method
   auto result = problem.certify(Y_mosek, delta);
   // check that the solution is certified
   EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
 
+  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
+            << std::endl;
+  std::cout << "Complementarity (First Order Condition): "
+            << result.complementarity << std::endl;
+}
+
+// Run with the low-rank preconditioner and the Conjugate Gradient solver.
+// In this case, the certificate should fail when the primal deviation is too
+// high. This should work with our test problems because they are expected to be
+// rank tight.
+TEST_P(GenericParamTest, Certify_MFCG_LRP_EarlyStopLocal) {
+  const auto& sdp = GetParam();
+
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  // Certificate early stop on
+  params.early_stop_cert = true;
+  // Deviation early stop on
+  params.early_stop_angle = true;
+  params.max_angle = 1e-3;  
+  params.adaptive_perturb =
+      true;  // Turn on adaptive perturbation for testing purposes
+  params.delta_min = 1e-7;
+  params.max_iter = 50;
+  // Turn off rescaling (preconditioner should deal with this)
+  params.rescale_lin_sys = false;
+  params.lin_solver =
+      LinearSolverType::MFCG_DP;  // Use Conjugate Gradient solver
+
+  // set initial delta
+  auto delta = 1e-5;
+  // generate problem
+  AnalyticCenter problem = sdp.make(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  auto result = problem.certify(Y_0, delta);
+  // check that the solution is certified if globally optimal
+  if (sdp.soln_is_global) {
+    EXPECT_TRUE(result.certified)
+        << "Analytic center failed to certify solution";
+  } else {
+    EXPECT_FALSE(result.certified)
+        << "Analytic center incorrectly certified non-optimal solution";
+  }
+  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
+            << std::endl;
+  std::cout << "Complementarity (First Order Condition): "
+            << result.complementarity << std::endl;
+}
+
+TEST_P(GenericParamTest, testing) {
+  const auto& sdp = GetParam();
+
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  // Certificate early stop on
+  params.early_stop_cert = false;
+  // Deviation early stop on
+  params.early_stop_angle = true;
+  params.max_angle = 1e-4;  // Set max solution deviation to be small to
+                            // ensure convergence to certificate
+  params.adaptive_perturb =
+      true;  // Turn on adaptive perturbation for testing purposes
+  params.delta_min = 1e-7;
+  params.max_iter = 50;
+  // Turn off rescaling
+  params.rescale_lin_sys = true;
+  params.lin_solver = LinearSolverType::LDLT;
+
+  // set initial delta
+  auto delta = 1e-5;
+  // generate problem
+  AnalyticCenter problem = sdp.make(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  auto result = problem.certify(Y_0, delta);
+  // check that the solution is certified if globally optimal
+  if (sdp.soln_is_global) {
+    EXPECT_TRUE(result.certified)
+        << "Analytic center failed to certify solution";
+  } else {
+    EXPECT_FALSE(result.certified)
+        << "Analytic center incorrectly certified non-optimal solution";
+  }
   std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
             << std::endl;
   std::cout << "Complementarity (First Order Condition): "

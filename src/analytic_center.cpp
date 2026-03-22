@@ -122,6 +122,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   double min_eig = std::nan("");
   double barrier_param = std::nan("");
   double cent_metric = std::nan("");
+  double angle = std::nan("");
   // Main loop
   while (n_iter < params_.max_iter) {
     // Get system of equations
@@ -150,6 +151,11 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     // can be used as an early stopping condition for the centering iterations.
     cent_metric =
         (L.transpose() * adjoint * L - Matrix::Identity(dim, dim)).norm();
+    // Compute the angle between the current solution and the initial solution
+    // as a measure of deviation from the initial solution for early stopping.
+    double cos_angle = (Y_0.transpose() * Z * Y_0).trace() /
+                       (Y_0.transpose() * Y_0).norm() / Z.norm();
+    angle = std::acos(cos_angle);
     // Print update
     n_iter++;
     if (params_.verbose) {
@@ -158,20 +164,19 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
         std::cout << "Running with Linear Solver: "
                   << print_solver(params_.lin_solver) << std::endl;
       }
-      // get rank of solution
-      int sol_rank = get_rank(Z, params_.tol_rank_sol);
       if (n_iter % 10 == 1) {
-        std::printf("%6s %6s %12s %12s %12s %12s %12s %12s %12s\n", "Iter",
-                    "SolRank", "ViolNorm", "StepNorm", "Complement.",
-                    "BarrParam", "Alpha", "Delta", "CentMetric");
+        std::printf("%6s %12s %12s %12s %12s %12s %12s %12s %12s\n", "Iter",
+                    "ViolNorm", "StepNorm", "Complement.", "BarrParam", "Alpha",
+                    "Delta", "CentMetric", "Angle (rad)");
       }
-      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e\n",
-                  n_iter, sol_rank, violation.norm(), deltaZ.norm(),
-                  complementarity, barrier_param, alpha, delta, cent_metric);
+      std::printf(
+          "%6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e\n",
+          n_iter, violation.norm(), deltaZ.norm(), complementarity,
+          barrier_param, alpha, delta, cent_metric, angle);
     }
 
     // Certificate Checking (Early stopping condition if the certificate is PSD)
-    if (params_.check_cert) {
+    if (params_.early_stop_cert) {
       if (params_.use_cert_centrality_metric) {
         if (cent_metric <= 1 + params_.tol_cert_centrality) {
           if (params_.verbose) {
@@ -198,6 +203,21 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
             break;
           }
         }
+      }
+    }
+    // Early stop for deviation from the solution
+    if (params_.early_stop_angle) {
+      if (angle > params_.max_angle) {
+        if (params_.verbose) {
+          std::cout
+              << "Solution has deviated by an angle of " << angle
+              << " radians from the initial solution, which is above the "
+              << "threshold of " << params_.max_angle
+              << " radians. "
+                 "Stopping centering. Candidate was not at the analytic center."
+              << std::endl;
+        }
+        break;
       }
     }
     // Perturbation update for next iteration (if enabled)
@@ -250,16 +270,21 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
     double val;
     if (i < a_size) {
       mat = L.transpose() * A_[i].selfadjointView<Eigen::Upper>() * L;
-      val = b_[i];
       sys.A_trace[i] = A_[i].diagonal().sum();
+      val = b_[i] - delta * sys.A_trace[i];
     } else {
       mat = L.transpose() * C_.selfadjointView<Eigen::Upper>() * L;
-      val = rho_;
       sys.A_trace[i] = C_.diagonal().sum();
+      // add delta perturbation for cost
+      val = rho_ - delta * sys.A_trace[i];
     }
+    // Set RHS of the system
     sys.d(i) = mat.trace();
-    sys.violation(i) = sys.d(i) - val - delta * sys.A_trace[i];
+    // compute violation
+    sys.violation(i) = sys.d(i) - val;
+    // vectorize columns
     sys.LAL.col(i) = Eigen::Map<Vector>(mat.data(), dim * dim);
+    // adjusted rhs to include violation if enabled
     if (params_.reduce_violation) {
       sys.d(i) += sys.violation(i);
     }

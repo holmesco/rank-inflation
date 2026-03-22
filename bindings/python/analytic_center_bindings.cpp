@@ -79,8 +79,8 @@ PYBIND11_MODULE(ranktools, m) {
       "rank_reduction, solve_sdp_mosek)";
 
   // ---- LinearSolverType ----
-  py::enum_<LinearSolverType>(m, "LinearSolverType",
-                              "Linear solver type for the analytic center step.")
+  py::enum_<LinearSolverType>(
+      m, "LinearSolverType", "Linear solver type for the analytic center step.")
       .value("LDLT", LinearSolverType::LDLT, "Cholesky-based LDLT solver")
       .value("CG", LinearSolverType::CG, "Conjugate gradient solver")
       .value("MFCG", LinearSolverType::MFCG,
@@ -97,8 +97,7 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("reduce_violation",
                      &AnalyticCenterParams::reduce_violation)
       .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
-      .def_readwrite("rescale_lin_sys",
-                     &AnalyticCenterParams::rescale_lin_sys)
+      .def_readwrite("rescale_lin_sys", &AnalyticCenterParams::rescale_lin_sys)
       .def_readwrite("lin_solver", &AnalyticCenterParams::lin_solver)
       // Iterative linear solve
       .def_readwrite("lin_solve_max_iter",
@@ -125,7 +124,7 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("alpha_min", &AnalyticCenterParams::alpha_min)
       .def_readwrite("tol_bisect", &AnalyticCenterParams::tol_bisect)
       // Certificate
-      .def_readwrite("check_cert", &AnalyticCenterParams::check_cert)
+      .def_readwrite("early_stop_cert", &AnalyticCenterParams::early_stop_cert)
       .def_readwrite("tol_cert_psd", &AnalyticCenterParams::tol_cert_psd)
       .def_readwrite("tol_cert_complementarity",
                      &AnalyticCenterParams::tol_cert_complementarity)

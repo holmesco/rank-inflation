@@ -309,7 +309,6 @@ class LowRankPrecond {
     build_constraint_mat();
     // decompose eigenspace
     auto [U, W0, tau] = decompose_soln(*X_);
-    
     // Build sparse augmented system - Eqn 23 in Zhang and Lavaei 2017
     auto Sys = Matrix(ncons + rank_ * dim, ncons + rank_ * dim);
     Sys.block(0, 0, ncons, ncons) =
