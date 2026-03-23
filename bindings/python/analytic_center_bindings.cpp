@@ -83,8 +83,12 @@ PYBIND11_MODULE(ranktools, m) {
       m, "LinearSolverType", "Linear solver type for the analytic center step.")
       .value("LDLT", LinearSolverType::LDLT, "Cholesky-based LDLT solver")
       .value("CG", LinearSolverType::CG, "Conjugate gradient solver")
-      .value("MFCG", LinearSolverType::MFCG,
-             "Matrix-free conjugate gradient solver")
+      .value(
+          "MFCG_DP", LinearSolverType::MFCG_DP,
+          "Matrix-free conjugate gradient solver with diagonal preconditioner")
+      .value(
+          "MFCG_LRP", LinearSolverType::MFCG_LRP,
+          "Matrix-free conjugate gradient solver with low-rank preconditioner")
       .export_values();
 
   // ---- AnalyticCenterParams ----
@@ -103,6 +107,8 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("lin_solve_max_iter",
                      &AnalyticCenterParams::lin_solve_max_iter)
       .def_readwrite("lin_solve_tol", &AnalyticCenterParams::lin_solve_tol)
+      .def_readwrite("lin_solve_precond_perturb",
+                     &AnalyticCenterParams::lin_solve_precond_perturb)
       // Adaptive perturbation
       .def_readwrite("adaptive_perturb",
                      &AnalyticCenterParams::adaptive_perturb)
@@ -116,13 +122,10 @@ PYBIND11_MODULE(ranktools, m) {
       // Line search
       .def_readwrite("enable_line_search",
                      &AnalyticCenterParams::enable_line_search)
-      .def_readwrite("ln_search_suff_dec",
-                     &AnalyticCenterParams::ln_search_suff_dec)
       .def_readwrite("ln_search_red_factor",
                      &AnalyticCenterParams::ln_search_red_factor)
       .def_readwrite("alpha_init", &AnalyticCenterParams::alpha_init)
       .def_readwrite("alpha_min", &AnalyticCenterParams::alpha_min)
-      .def_readwrite("tol_bisect", &AnalyticCenterParams::tol_bisect)
       // Certificate
       .def_readwrite("early_stop_cert", &AnalyticCenterParams::early_stop_cert)
       .def_readwrite("tol_cert_psd", &AnalyticCenterParams::tol_cert_psd)
@@ -130,6 +133,13 @@ PYBIND11_MODULE(ranktools, m) {
                      &AnalyticCenterParams::tol_cert_complementarity)
       .def_readwrite("tol_cert_primal_feas",
                      &AnalyticCenterParams::tol_cert_primal_feas)
+      .def_readwrite("early_stop_angle",
+                     &AnalyticCenterParams::early_stop_angle)
+      .def_readwrite("max_angle", &AnalyticCenterParams::max_angle)
+      .def_readwrite("use_cert_centrality_metric",
+                     &AnalyticCenterParams::use_cert_centrality_metric)
+      .def_readwrite("tol_cert_centrality",
+                     &AnalyticCenterParams::tol_cert_centrality)
       .def("__repr__", [](const AnalyticCenterParams& p) {
         return "<AnalyticCenterParams max_iter=" + std::to_string(p.max_iter) +
                " verbose=" + (p.verbose ? "True" : "False") + ">";

@@ -134,11 +134,11 @@ class MaxCliqueProblem:
         else:
             self.params = AnalyticCenterParams()
             self.params.verbose = True
-            self.params.check_cert= True
+            self.params.early_stop_cert= True
             self.params.delta_min = 1e-9
             self.params.delta_dec = 0.6
             self.params.max_iter = 50
-            self.params.lin_solver = LinearSolverType.MFCG
+            self.params.lin_solver = LinearSolverType.MFCG_LRP
             self.params.lin_solve_max_iter = 200
             self.params.lin_solve_tol = 1e-4
         

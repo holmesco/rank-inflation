@@ -126,7 +126,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   // Main loop
   while (n_iter < params_.max_iter) {
     // Get system of equations
-    auto [multipliers, violation] = get_multipliers(Z, L, Y_0, delta);
+    auto [multipliers, violation] = get_multipliers(Z, Y_0, delta);
 
     // get the barrier parameter value
     barrier_param = 1 / multipliers(m - 1);
@@ -134,6 +134,8 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     mult_scaled = multipliers.segment(0, m - 1) * barrier_param;
 
     // Dual matrix (adjoint of constraints with multipliers + cost term )
+    // TODO: This is not the most efficient way to implement this, should start
+    // with dense and add sparse to it.
     auto adjoint_sp = build_adjoint(multipliers);
     Matrix adjoint = C_ * multipliers(m - 1) + adjoint_sp;
     if (params_.rescale_lin_sys) {
@@ -255,58 +257,48 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
 }
 
 AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
-                                                           const Matrix& L,
                                                            double delta) const {
   // Initialize system data
   LinSysData sys(X, dim, m);
-  // Compute the L^T * A_i * L products and the constraint violations for the
-  // current solution
   const int a_size = static_cast<int>(A_.size());
 #ifdef RANKTOOLS_PARALLEL
 #pragma omp parallel for schedule(dynamic)
 #endif
   for (int i = 0; i < m; i++) {
-    Matrix mat(dim, dim);
     double val;
     if (i < a_size) {
-      mat = L.transpose() * A_[i].selfadjointView<Eigen::Upper>() * L;
+      sys.AX[i] = A_[i].selfadjointView<Eigen::Upper>() * X;
       sys.A_trace[i] = A_[i].diagonal().sum();
       val = b_[i] + delta * sys.A_trace[i];
     } else {
-      mat = L.transpose() * C_.selfadjointView<Eigen::Upper>() * L;
+      sys.AX[i] = C_.selfadjointView<Eigen::Upper>() * X;
       sys.A_trace[i] = C_.diagonal().sum();
-      // add delta perturbation for cost
       val = rho_ + delta * sys.A_trace[i];
     }
     // Set RHS of the system
-    sys.d(i) = mat.trace();
+    sys.d(i) = sys.AX[i].trace();
     // compute violation
     sys.violation(i) = sys.d(i) - val;
-    // vectorize columns
-    sys.LAL.col(i) = Eigen::Map<Vector>(mat.data(), dim * dim);
     // adjusted rhs to include violation if enabled
     if (params_.reduce_violation) {
       sys.d(i) += sys.violation(i);
     }
   }
-
+  // Rescaling for linear system
+  const double scale = params_.rescale_lin_sys ? (1.0 / delta) : 1.0;
   // Only build the LHS matrix if not using matrix-free solver.
 
   if (params_.lin_solver == LinearSolverType::MFCG_DP ||
       params_.lin_solver == LinearSolverType::MFCG_LRP) {
     // If using matrix-free solver, build the matrix-free operator for the LHS
-    if (params_.rescale_lin_sys) {
-      sys.B_mf = std::make_unique<MultiplierLinSys>(sys.LAL, 1 / delta);
-    } else {
-      sys.B_mf = std::make_unique<MultiplierLinSys>(sys.LAL, 1.0);
-    }
-
+    sys.B_mf = std::make_unique<MultiplierLinSys>(X, A_, C_, sys.AX, scale);
   } else {
-    // B += scale * (LAL^T) * (LAL^T)^T = scale * LAL^T * LAL
-    const double scale = params_.rescale_lin_sys ? (1.0 / delta) : 1.0;
     sys.B.setZero();
-    sys.B.selfadjointView<Eigen::Upper>().rankUpdate(sys.LAL.transpose(),
-                                                     scale);
+    for (int i = 0; i < m; i++) {
+      for (int j = i; j < m; j++) {
+        sys.B(i, j) = scale * (sys.AX[i] * sys.AX[j]).trace();
+      }
+    }
   }
   // Return system information and metrics
   return sys;
@@ -442,7 +434,6 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
 }
 
 std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
-                                                          const Matrix& L,
                                                           const Matrix& Y_0,
                                                           double delta) const {
   // Build the system of equations for the current solution
@@ -450,7 +441,7 @@ std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
   // start a timer for building the system
   auto start = std::chrono::high_resolution_clock::now();
 #endif
-  auto sys = build_ac_system(Z, L, delta);
+  auto sys = build_ac_system(Z, delta);
 
 #ifdef TIMING
   auto end = std::chrono::high_resolution_clock::now();

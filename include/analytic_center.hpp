@@ -196,7 +196,7 @@ class AnalyticCenter {
 
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
-  std::pair<Vector, Vector> get_multipliers(const Matrix& Z, const Matrix& L, const Matrix& Y_0,
+  std::pair<Vector, Vector> get_multipliers(const Matrix& Z, const Matrix& Y_0,
                                             double delta) const;
 
   // Intermediate representation of the analytic center linear system
@@ -205,10 +205,10 @@ class AnalyticCenter {
     Matrix B;          // LHS matrix (m x m)
     Vector d;          // RHS vector (m)
     Vector violation;  // constraint violation (m)
-    Matrix LAL;  // each col is vec(L^T * A_i * L) (L is the cholesky factor of
-                 // the primal solution)
     SpMatrix A_bar;
     std::vector<double> A_trace;  // diagonal traces of A_i
+    std::vector<Matrix>
+        AX;  // A_i * X for each constraint (for efficient matrix-free ops)
     std::unique_ptr<MultiplierLinSys>
         B_mf;  // Matrix-free operator for B (if using matrix-free solver)
     const Matrix&
@@ -218,19 +218,18 @@ class AnalyticCenter {
         : B(Matrix(m, m)),
           d(Vector(m)),
           violation(Vector(m)),
-          LAL(Matrix(dim * dim, m)),
           A_bar(SpMatrix(dim * dim, m)),
           A_trace(std::vector<double>(m)),
+          AX(std::vector<Matrix>(m)),
           B_mf(nullptr),
           X_(X) {}
   };
 
   // Constructs the linear system (H, d, violation) for the analytic center step
-  LinSysData build_ac_system(const Matrix& Z, const Matrix& L,
-                             double delta) const;
+  LinSysData build_ac_system(const Matrix& X, double delta) const;
 
   // Solves the linear system H * multipliers = d using the configured solver
-  Vector solve_ac_system(const LinSysData& system,  const Matrix& Y_0) const;
+  Vector solve_ac_system(const LinSysData& system, const Matrix& Y_0) const;
 
   double get_analytic_center_objective(const Matrix& X, double delta) const {
     auto I = Matrix::Identity(X.rows(), X.cols());

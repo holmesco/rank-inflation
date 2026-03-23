@@ -51,7 +51,7 @@ SEED = 0
 # All solver types to benchmark.  MFCG is always run; CG and LDLT are
 # restricted to the first N_FULL_MAT outlier-ratio trials.
 ALL_SOLVERS = {
-    "MFCG": LinearSolverType.MFCG,
+    "MFCG": LinearSolverType.MFCG_DP,
     "CG":   LinearSolverType.CG,
     "LDLT": LinearSolverType.LDLT,
 }
@@ -63,7 +63,7 @@ def make_ac_params(solver_type: LinearSolverType) -> AnalyticCenterParams:
     """Return a default AnalyticCenterParams with the given linear solver."""
     params = AnalyticCenterParams()
     params.verbose = True
-    params.check_cert = True
+    params.early_stop_cert = True
     params.delta_min = 1e-9
     params.delta_dec = 0.6
     params.max_iter = 50
@@ -125,7 +125,7 @@ def run_analysis(
 
         # ---- Solve the SDP relaxation (once per outrat) ----------------------
         # Use MFCG params for the problem setup (solver only matters for AC)
-        prob = MaxCliqueProblem(clipper, params=make_ac_params(LinearSolverType.MFCG))
+        prob = MaxCliqueProblem(clipper, params=make_ac_params(LinearSolverType.MFCG_DP))
 
         t_sdp_start = time.time()
         X_sdp, u_sdp, sdp_rank = prob.solve_sdp()
@@ -237,7 +237,7 @@ if __name__ == "__main__":
     print(df.to_string(index=False))
 
     # Persist to CSV for later inspection
-    out_path = "/workspace/python/results/max_clique_analysis.csv"
+    out_path = "/workspace/python/results/max_clique_analysis_lrp.csv"
     df.to_csv(out_path, index=False)
     print(f"\nResults saved to {out_path}")
 

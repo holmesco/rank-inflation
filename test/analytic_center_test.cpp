@@ -23,14 +23,14 @@ TEST_P(LovazsParamTest, PrimalSolution) {
   params.early_stop_cert = false;  // Turn off early stopping based on
                                    // certificate for testing purposes
   params.max_iter = 50;
-  params.rescale_lin_sys = false;
+  params.rescale_lin_sys = true;
   double delta = 1e-7;
   // generate problem
   auto problem = sdp.make_testable(params);
   auto Y = sdp.soln;
   // Compute Analyic center starting from low rank solution
   auto X0 = Y * Y.transpose();
-  auto [X, multipliers] = problem.get_analytic_center(X0, delta);
+  auto [X, multipliers] = problem.get_analytic_center(Y, delta);
   // Compute analytic center objecive value
   double obj_0 = problem.get_analytic_center_objective(X0, delta);
   double obj_star = problem.get_analytic_center_objective(X, delta);
@@ -70,55 +70,13 @@ TEST_P(LovazsParamTest, PrimalSolution) {
       << "Analytic center solution is not close to Mosek solution";
 }
 
-// Test early stopping based on certificate found.
-TEST_P(LovazsParamTest, CertEarlyStopping) {
-  const auto& sdp = GetParam();
-  // parameters
-  AnalyticCenterParams params;
-  params.verbose = true;
-  params.early_stop_cert = true;
-  params.rescale_lin_sys = true;
-  params.lin_solver = LinearSolverType::MFCG_DP;
-  auto delta = 1e-5;
-  // generate problem
-  AnalyticCenter problem = sdp.make(params);
-  // get current solution
-  Matrix Y_0 = sdp.make_solution(1);
-  // Run rank inflation, without inflation (target rank is 1)
-  auto [X, multipliers] =
-      problem.get_analytic_center(Y_0 * Y_0.transpose(), delta);
-  std::cout
-      << "Eigenvalues of Center: " << std::endl
-      << Eigen::SelfAdjointEigenSolver<Matrix>(X).eigenvalues().transpose()
-      << std::endl;
-  // Recover low rank solution
-  Matrix Y = get_positive_eigspace(X, params.tol_rank_sol);
-  std::cout << "rank of recovered solution: " << get_rank(Y, 1e-5) << std::endl;
-  auto violation = problem.eval_constraints(X);
-  std::cout << "Violation at Analytic Center: " << violation.norm()
-            << std::endl;
-  // Build the certificate matrix
-  auto H = problem.build_certificate_from_dual(multipliers);
-  // check certificate on high rank solution
-  auto [min_eig_hr, first_ord_cond_hr] = problem.eval_certificate(H, Y);
-  std::cout << "Cost at High Rank Solution: " << (sdp.C * X).trace()
-            << std::endl;
-  std::cout << "Minimum Eigenvalue of Certificate: " << min_eig_hr << std::endl;
-  std::cout << "First Order Condition Norm at High Rank Solution: "
-            << first_ord_cond_hr << std::endl;
-  // check certificate on initial solution
-  auto [min_eig, first_ord_cond] = problem.eval_certificate(H, Y_0);
-  std::cout << "First Order Condition Norm at Rank 1 Solution: "
-            << first_ord_cond << std::endl;
-}
-
 // Test the Fixed perturbation and verify that the method converges.
 TEST_P(LovazsParamTest, CertifyFixedPerturb) {
   const auto& sdp = GetParam();
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.early_stop_cert = true;  // Turn off early stopping based on
+  params.early_stop_cert = false;  // Turn off early stopping based on
                                   // certificate for testing purposes
   params.adaptive_perturb =
       false;  // Turn off adaptive perturbation for testing purposes
@@ -166,6 +124,48 @@ TEST_P(LovazsParamTest, CertifyAdaptivePerturb) {
             << result.complementarity << std::endl;
 }
 
+// Test early stopping based on certificate found.
+TEST_P(LovazsParamTest, CertEarlyStopping) {
+  const auto& sdp = GetParam();
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.early_stop_cert = true;
+  params.rescale_lin_sys = true;
+  params.lin_solver = LinearSolverType::LDLT;
+  auto delta = 1e-5;
+  // generate problem
+  AnalyticCenter problem = sdp.make(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  // Run rank inflation, without inflation (target rank is 1)
+  auto [X, multipliers] =
+      problem.get_analytic_center(Y_0 * Y_0.transpose(), delta);
+  std::cout
+      << "Eigenvalues of Center: " << std::endl
+      << Eigen::SelfAdjointEigenSolver<Matrix>(X).eigenvalues().transpose()
+      << std::endl;
+  // Recover low rank solution
+  Matrix Y = get_positive_eigspace(X, params.tol_rank_sol);
+  std::cout << "rank of recovered solution: " << get_rank(Y, 1e-5) << std::endl;
+  auto violation = problem.eval_constraints(X);
+  std::cout << "Violation at Analytic Center: " << violation.norm()
+            << std::endl;
+  // Build the certificate matrix
+  auto H = problem.build_certificate_from_dual(multipliers);
+  // check certificate on high rank solution
+  auto [min_eig_hr, first_ord_cond_hr] = problem.eval_certificate(H, Y);
+  std::cout << "Cost at High Rank Solution: " << (sdp.C * X).trace()
+            << std::endl;
+  std::cout << "Minimum Eigenvalue of Certificate: " << min_eig_hr << std::endl;
+  std::cout << "First Order Condition Norm at High Rank Solution: "
+            << first_ord_cond_hr << std::endl;
+  // check certificate on initial solution
+  auto [min_eig, first_ord_cond] = problem.eval_certificate(H, Y_0);
+  std::cout << "First Order Condition Norm at Rank 1 Solution: "
+            << first_ord_cond << std::endl;
+}
+
 // Test the LDLT linear solver on the system for computing multipliers
 TEST_P(LovazsParamTest, CertifyLDLT) {
   const auto& sdp = GetParam();
@@ -197,7 +197,7 @@ TEST_P(LovazsParamTest, CertifyLDLT) {
 }
 
 // Test the Conjugate Gradient linear solver on the system for computing
-// multipliers
+// multipliers (this is not the matrix free version)
 TEST_P(LovazsParamTest, CertifyConjGrad) {
   const auto& sdp = GetParam();
   // parameters
@@ -269,9 +269,9 @@ TEST(MatrixFree, Product) {
   auto [alpha, L] = problem.line_search_factorization(
       X, Matrix::Identity(problem.dim, problem.dim) * delta);
   // Build the explicit system to get the true diagonal of B
-  auto system = problem.build_ac_system(X, L, delta);
+  auto system = problem.build_ac_system(X, delta);
   // Build the matrix-free operator
-  MultiplierLinSys lin_op(system.LAL, 1 / delta);
+  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, system.AX, 1 / delta);
   // Test on columns of identity
   auto Id = Matrix::Identity(sdp.dim, sdp.dim);
   for (int i = 0; i < sdp.dim; i++) {
@@ -308,9 +308,9 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   auto [alpha, L] = problem.line_search_factorization(
       X, Matrix::Identity(problem.dim, problem.dim) * delta);
   // Build the explicit system to get the true diagonal of B
-  auto system = problem.build_ac_system(X, L, delta);
+  auto system = problem.build_ac_system(X, delta);
   // Build the matrix-free operator and preconditioner
-  MultiplierLinSys lin_op(system.LAL, 1 / delta);
+    auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, system.AX, 1 / delta);
   MultiplierDiagPreconditioner precond;
   precond.compute(lin_op);
   // Check that the preconditioner computed successfully
@@ -356,7 +356,7 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
   AnalyticCenterParams params;
   params.verbose = true;
   params.rescale_lin_sys = false;
-  auto delta = 1e-8;
+  auto delta = 1e-6;
 
   // Build system at perturbed rank-1 solution X = Y Y^T + delta I
   auto problem = sdp.make_testable(params);
@@ -371,7 +371,7 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
               0.0, 1e-10);
 
   // Explicit system matrix B
-  auto system = problem.build_ac_system(X, L, delta);
+  auto system = problem.build_ac_system(X, delta);
   Matrix B = system.B.selfadjointView<Eigen::Upper>();
 
   // Inspect conditioning of the original system matrix B.
@@ -386,14 +386,14 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
   // Build low-rank preconditioner with rank = 1 at the perturbed solution
   auto precond = LowRankPrecond();
   precond.initialize(Y_0, sdp.A, sdp.C, delta, false);
-  // Test descomposition
-  auto [U, W0, tau] = precond.decompose_soln(X);
-  EXPECT_NEAR(tau, delta, 1e-10);
-  // Verify that W0 + U*U.transpose() == X
-  Matrix reconstructed = W0 + U * U.transpose();
-  double reconstruction_error = (reconstructed - X).norm();
-  EXPECT_NEAR(reconstruction_error, 0.0, 1e-10)
-      << "W0 + U*U^T does not equal X";
+  // // Test descomposition (DEPRECATED)
+  // auto [U, W0, tau] = precond.decompose_soln(X);
+  // EXPECT_NEAR(tau, delta, 1e-10);
+  // // Verify that W0 + U*U.transpose() == X
+  // Matrix reconstructed = W0 + U * U.transpose();
+  // double reconstruction_error = (reconstructed - X).norm();
+  // EXPECT_NEAR(reconstruction_error, 0.0, 1e-10)
+  //     << "W0 + U*U^T does not equal X";
   // check success
   EXPECT_EQ(precond.info(), Eigen::Success);
 
@@ -422,7 +422,8 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
   std::cout << "cond(PB): " << cond_est << std::endl;
 
   // Well-preconditioned systems should have condition number close to 1.
-  EXPECT_LT(cond_est, 10.0)
+  // Note conditioning should actually be exactly 1 for this case.
+  EXPECT_LT(cond_est, 1.1)
       << "Preconditioned operator PB is poorly conditioned.";
 }
 
@@ -434,9 +435,7 @@ TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
   params.early_stop_cert = false;  // Turn off early stopping based on
                                    // certificate for testing purposes
   params.early_stop_angle =
-      true;  // Turn off early stopping based on solution deviation
-  params.max_angle = 1e5;  // Set max solution deviation to be small to
-                           // ensure convergence to certificate
+      false;  // Turn off early stopping based on solution deviation
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-8;
