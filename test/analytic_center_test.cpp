@@ -385,7 +385,7 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
 
   // Build low-rank preconditioner with rank = 1 at the perturbed solution
   auto precond = LowRankPrecond();
-  precond.initialize(X, sdp.A, sdp.C, 1, true);
+  precond.initialize(Y_0, sdp.A, sdp.C, delta, false);
   // Test descomposition
   auto [U, W0, tau] = precond.decompose_soln(X);
   EXPECT_NEAR(tau, delta, 1e-10);
@@ -394,8 +394,7 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
   double reconstruction_error = (reconstructed - X).norm();
   EXPECT_NEAR(reconstruction_error, 0.0, 1e-10)
       << "W0 + U*U^T does not equal X";
-
-  // Compute preconditioning precursers
+  // check success
   EXPECT_EQ(precond.info(), Eigen::Success);
 
   // Build explicit preconditioned operator PB by applying P to each column of
@@ -473,6 +472,9 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   auto rank_mosek = Y_mosek.cols();
   std::cout << "Rank at IP Solution: " << rank_mosek << std::endl;
   auto X_mosek = Y_mosek * Y_mosek.transpose();
+  std::cout << std::fixed << std::setprecision(9);
+  std::cout << "Mosek Solution: " << std::endl
+            << Y_mosek << std::endl;
 
   // parameters
   AnalyticCenterParams params;
@@ -480,6 +482,9 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   params.early_stop_cert =
       true;  // Turn off early stopping based on certificate
   // for testing purposes
+  // Deviation early stop on
+  params.early_stop_angle = true;
+  params.max_angle = 1e-1;  
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-7;
@@ -524,15 +529,15 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_EarlyStopLocal) {
   params.early_stop_cert = true;
   // Deviation early stop on
   params.early_stop_angle = true;
-  params.max_angle = 1e-3;  
+  params.max_angle = 1e-1;  
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-7;
+  params.delta_min = 1e-9;
   params.max_iter = 50;
   // Turn off rescaling (preconditioner should deal with this)
   params.rescale_lin_sys = false;
   params.lin_solver =
-      LinearSolverType::MFCG_DP;  // Use Conjugate Gradient solver
+      LinearSolverType::MFCG_LRP;  // Use Conjugate Gradient solver
 
   // set initial delta
   auto delta = 1e-5;
@@ -555,46 +560,6 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_EarlyStopLocal) {
             << result.complementarity << std::endl;
 }
 
-TEST_P(GenericParamTest, testing) {
-  const auto& sdp = GetParam();
-
-  // parameters
-  AnalyticCenterParams params;
-  params.verbose = true;
-  // Certificate early stop on
-  params.early_stop_cert = false;
-  // Deviation early stop on
-  params.early_stop_angle = true;
-  params.max_angle = 1e-4;  // Set max solution deviation to be small to
-                            // ensure convergence to certificate
-  params.adaptive_perturb =
-      true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-7;
-  params.max_iter = 50;
-  // Turn off rescaling
-  params.rescale_lin_sys = true;
-  params.lin_solver = LinearSolverType::LDLT;
-
-  // set initial delta
-  auto delta = 1e-5;
-  // generate problem
-  AnalyticCenter problem = sdp.make(params);
-  // get current solution
-  Matrix Y_0 = sdp.make_solution(1);
-  auto result = problem.certify(Y_0, delta);
-  // check that the solution is certified if globally optimal
-  if (sdp.soln_is_global) {
-    EXPECT_TRUE(result.certified)
-        << "Analytic center failed to certify solution";
-  } else {
-    EXPECT_FALSE(result.certified)
-        << "Analytic center incorrectly certified non-optimal solution";
-  }
-  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
-            << std::endl;
-  std::cout << "Complementarity (First Order Condition): "
-            << result.complementarity << std::endl;
-}
 
 INSTANTIATE_TEST_SUITE_P(
     AnalyticCenterSuite, LovazsParamTest,

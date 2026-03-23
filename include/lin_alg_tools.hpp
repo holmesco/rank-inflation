@@ -264,22 +264,23 @@ class LowRankPrecond {
   // Default constructor - no problem data passed
   LowRankPrecond()
       : is_initialized_(false),
-        X_(nullptr),
+        U_(nullptr),
         C_(nullptr),
         As_(nullptr),
-        rank_(1),
+        tau_(0),
         dim(0),
         ncons(0),
         use_approx_(false) {}
 
   // Initialize the preconditioner with problem data
-  void initialize(const Matrix& X, const std::vector<SpMatrix>& As,
-                  const Matrix& C, int rank, bool use_approx = false) {
+  void initialize(const Matrix& U, const std::vector<SpMatrix>& As,
+                  const Matrix& C, double tau, bool use_approx = false) {
     // Initialize variables with problem data
-    X_ = &X;
+    U_ = &U;
     C_ = &C;
     As_ = &As;
-    rank_ = rank;
+    tau_ = tau;
+    rank_ = U.cols();
     dim = C.cols();
     ncons = As.size() + 1;
     use_approx_ = use_approx;
@@ -300,22 +301,23 @@ class LowRankPrecond {
   // Internal compute function that does the actual work of building the
   // preconditioner
   LowRankPrecond& build_preconditioner() {
-    if (!X_ || !C_ || !As_) {
+    if (!U_ || !C_ || !As_) {
       throw std::runtime_error(
           "LowRankPrecond: Problem data not set. Call init() before "
           "compute().");
     }
     // compute constraint matrix
     build_constraint_mat();
-    // decompose eigenspace
-    auto [U, W0, tau] = decompose_soln(*X_);
+    // Set W0 residual
+    auto W0 = Matrix::Identity(dim, dim) * tau_;
     // Build sparse augmented system - Eqn 23 in Zhang and Lavaei 2017
     auto Sys = Matrix(ncons + rank_ * dim, ncons + rank_ * dim);
     Sys.block(0, 0, ncons, ncons) =
-        A_bar_.transpose() * A_bar_ * std::pow(tau, 2.0);
-    Sys.block(0, ncons, ncons, rank_ * dim) = build_top_right(U, W0, tau) * tau;
+        A_bar_.transpose() * A_bar_ * std::pow(tau_, 2.0);
+    Sys.block(0, ncons, ncons, rank_ * dim) =
+        build_top_right(*U_, W0, tau_) * tau_;
     Sys.block(ncons, ncons, rank_ * dim, rank_ * dim) =
-        -Matrix::Identity(rank_ * dim, rank_ * dim) * std::pow(tau, 2);
+        -Matrix::Identity(rank_ * dim, rank_ * dim) * std::pow(tau_, 2);
 
     // Prefactorize (LDLT)
     Factor.compute(Sys.selfadjointView<Eigen::Upper>());
@@ -340,7 +342,7 @@ class LowRankPrecond {
     // Build the Z matrix s.t. Z Z^T = (2W0 + U U^T) = X + W0
     Matrix Z;
     if (!use_approx_) {
-      Eigen::LLT<Matrix> llt(*X_ + W0);
+      Eigen::LLT<Matrix> llt(U * U.transpose() + 2 * W0);
       Z = llt.matrixL();
     } else {
       // if approximation set then ZZ^T = 2tau I
@@ -422,9 +424,10 @@ class LowRankPrecond {
 
  private:
   bool is_initialized_;
-  const Matrix* X_;
+  const Matrix* U_;
   const Matrix* C_;
   const std::vector<Eigen::SparseMatrix<double>>* As_;
+  double tau_;
   int rank_;
   int dim;
   int ncons;
