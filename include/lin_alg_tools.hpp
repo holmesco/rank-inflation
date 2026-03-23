@@ -66,15 +66,18 @@ class MultiplierLinSys : public Eigen::EigenBase<MultiplierLinSys> {
   const Eigen::MatrixXd& X_;
   const std::vector<Eigen::SparseMatrix<double>>& As_;
   const Eigen::MatrixXd& C_;
-  const std::vector<Eigen::MatrixXd>& AX_;  // precomputed A_i * X and C * X products
+  const std::vector<Eigen::MatrixXd>&
+      AX_;  // precomputed A_i * X and C * X products
   const int ncons;
   // perturbation parameter
   double scale_;
 
   // API to set the data of the linear system (the cost matrix and the
   // constraint matrices)
-  MultiplierLinSys(const Eigen::MatrixXd& X, const std::vector<Eigen::SparseMatrix<double>>& As,
-                   const Eigen::MatrixXd& C, const std::vector<Eigen::MatrixXd>& AX, double scale)
+  MultiplierLinSys(const Eigen::MatrixXd& X,
+                   const std::vector<Eigen::SparseMatrix<double>>& As,
+                   const Eigen::MatrixXd& C,
+                   const std::vector<Eigen::MatrixXd>& AX, double scale)
       : X_(X), As_(As), C_(C), AX_(AX), ncons(As.size() + 1), scale_(scale) {}
 };
 
@@ -91,10 +94,9 @@ struct generic_product_impl<MultiplierLinSys, Rhs, SparseShape, DenseShape,
   typedef typename Product<MultiplierLinSys, Rhs>::Scalar Scalar;
 
   // Custom implementation of the matrix-vector product for our linear system.
-  // Computes a matrix vector product y = B*x = A_bar^T (X kron X) A_bar *x without
-  // explicitly forming the dense matrix.
-  // Complexity: O(n^2 m) where n is the dimension of the SDP and m is the
-  // number of constraints.
+  // Computes a matrix vector product y = B*x = A_bar^T (X kron X) A_bar *x
+  // without explicitly forming the dense matrix. Complexity: O(n^2 m) where n
+  // is the dimension of the SDP and m is the number of constraints.
   template <typename Dest>
   static void scaleAndAddTo(Dest& dst, const MultiplierLinSys& lhs,
                             const Rhs& rhs, const Scalar& alpha) {
@@ -103,13 +105,16 @@ struct generic_product_impl<MultiplierLinSys, Rhs, SparseShape, DenseShape,
     for (int i = 0; i < rhs.size() - 1; i++) {
       S += rhs(i) * lhs.As_[i];
     }
-    //Compute (S*X)^T = X*S
+    // Compute (S*X)^T = X*S
     Eigen::MatrixXd XS = lhs.X_ * S.selfadjointView<Eigen::Upper>();
-    // Compute trace(Ai X S X) = trace((X*S)^T A_i X) = vec(X*S)^T vec(A_i X) = vec(X*S)^T AX_[i]
+    // Compute trace(Ai X S X) = trace((X*S)^T A_i X) = vec(X*S)^T vec(A_i X) =
+    // vec(X*S)^T AX_[i]
     for (int i = 0; i < lhs.ncons; i++) {
       Eigen::Map<const Eigen::VectorXd> sxt(XS.data(), XS.size());
-      Eigen::Map<const Eigen::VectorXd> ax(lhs.AX_[i].data(), lhs.AX_[i].size());
-      dst(i) += sxt.dot(ax)* alpha * lhs.scale_;; 
+      Eigen::Map<const Eigen::VectorXd> ax(lhs.AX_[i].data(),
+                                           lhs.AX_[i].size());
+      dst(i) += sxt.dot(ax) * alpha * lhs.scale_;
+      ;
     }
   }
 };
@@ -179,7 +184,8 @@ class LowRankPrecond {
 
   // Initialize the preconditioner with problem data
   void initialize(const Matrix& U, const std::vector<SpMatrix>& As,
-                  const Matrix& C, double tau, bool use_approx = false) {
+                  const Matrix& C, double tau, bool use_sparse_factor = true,
+                  bool use_approx = false) {
     // Initialize variables with problem data
     U_ = &U;
     C_ = &C;
@@ -189,8 +195,13 @@ class LowRankPrecond {
     dim = C.cols();
     ncons = As.size() + 1;
     use_approx_ = use_approx;
+    use_sparse_factor_ = use_sparse_factor;
     // Call function to build the preconditioner
-    build_preconditioner();
+    if (use_sparse_factor_) {
+      build_preconditioner_sparse();
+    } else {
+      build_preconditioner_dense();
+    }
   }
 
   // Eigen's CG calls compute(mat) with the matrix-free operator
@@ -200,12 +211,17 @@ class LowRankPrecond {
       return *this;
     }
     // Call the internal build function that does the actual work
-    return build_preconditioner();
+    if (use_sparse_factor_) {
+      return build_preconditioner_sparse();
+    } else {
+      return build_preconditioner_dense();
+    }
   }
 
   // Internal compute function that does the actual work of building the
-  // preconditioner
-  LowRankPrecond& build_preconditioner() {
+  // preconditioner. This version builds the dense augmented system and
+  // factorizes it with LDLT. We could
+  LowRankPrecond& build_preconditioner_dense() {
     if (!U_ || !C_ || !As_) {
       throw std::runtime_error(
           "LowRankPrecond: Problem data not set. Call init() before "
@@ -232,14 +248,75 @@ class LowRankPrecond {
     return *this;
   }
 
+  // Internal compute function that does the actual work of building the
+  // preconditioner. This version builds the augmented system sparsely and
+  // factorizes it with SimplicialLDLT. We could
+  LowRankPrecond& build_preconditioner_sparse() {
+    if (!U_ || !C_ || !As_) {
+      throw std::runtime_error(
+          "LowRankPrecond: Problem data not set. Call init() before "
+          "compute().");
+    }
+    // compute constraint matrix
+    build_constraint_mat();
+
+    const Matrix W0 = Matrix::Identity(dim, dim) * tau_;
+    const Matrix top_right_dense = build_top_right(*U_, W0, tau_) * tau_;
+
+    const int rdim = rank_ * dim;
+    const int nsys = ncons + rdim;
+    const double tau2 = std::pow(tau_, 2.0);
+
+    // Top-left block: tau^2 * (A_bar^T A_bar)
+    SpMatrix AtA = A_bar_.transpose() * A_bar_;
+
+    std::vector<Eigen::Triplet<double>> trips;
+    trips.reserve(static_cast<size_t>(AtA.nonZeros()) +
+                  static_cast<size_t>(2 * ncons * rdim + rdim));
+
+    for (int k = 0; k < AtA.outerSize(); ++k) {
+      for (SpMatrix::InnerIterator it(AtA, k); it; ++it) {
+        trips.emplace_back(it.row(), it.col(), tau2 * it.value());
+      }
+    }
+
+    // Top-right and symmetric bottom-left blocks
+    for (int i = 0; i < ncons; ++i) {
+      for (int j = 0; j < rdim; ++j) {
+        const double v = top_right_dense(i, j);
+        if (v != 0.0) {
+          trips.emplace_back(i, ncons + j, v);
+          trips.emplace_back(ncons + j, i, v);
+        }
+      }
+    }
+
+    // Bottom-right block: -tau^2 * I
+    for (int i = 0; i < rdim; ++i) {
+      trips.emplace_back(ncons + i, ncons + i, -tau2);
+    }
+
+    SpMatrix Sys(nsys, nsys);
+    Sys.setFromTriplets(trips.begin(), trips.end());
+    Sys.makeCompressed();
+
+    SparseFactor.compute(Sys);
+    is_initialized_ = (SparseFactor.info() == Eigen::Success);
+    return *this;
+  }
+
   // Apply the preconditioner by solving the augmented system
   template <typename Rhs>
   Eigen::VectorXd solve(const Eigen::MatrixBase<Rhs>& b) const {
-    // Augment rhs
     auto rhs = Vector(ncons + rank_ * dim);
     rhs << b, Vector::Zero(rank_ * dim);
-    // Apply LDLT inverse
-    auto result = Factor.solve(rhs);
+
+    Vector result;
+    if (use_sparse_factor_) {
+      result = SparseFactor.solve(rhs);
+    } else {
+      result = Factor.solve(rhs);
+    }
     return result.segment(0, ncons);
   }
 
@@ -351,10 +428,12 @@ class LowRankPrecond {
   int dim;
   int ncons;
   bool use_approx_;
+  bool use_sparse_factor_ = false;
 
   // built matrices
   Eigen::SparseMatrix<double> A_bar_;
   Eigen::LDLT<Matrix> Factor;
+  Eigen::SimplicialLDLT<SpMatrix> SparseFactor;
 };
 
 // Add preconditioner types to RankTools namespace for use in analytic center

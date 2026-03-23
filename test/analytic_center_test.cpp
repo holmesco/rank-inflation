@@ -385,7 +385,7 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
 
   // Build low-rank preconditioner with rank = 1 at the perturbed solution
   auto precond = LowRankPrecond();
-  precond.initialize(Y_0, sdp.A, sdp.C, delta, false);
+  precond.initialize(Y_0, sdp.A, sdp.C, delta, true, false);
   // // Test descomposition (DEPRECATED)
   // auto [U, W0, tau] = precond.decompose_soln(X);
   // EXPECT_NEAR(tau, delta, 1e-10);
@@ -498,12 +498,7 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   AnalyticCenter problem = sdp.make(params);
   // Update cost based on the mosek solution
   problem.rho_ = (sdp.C * X_mosek).trace();
-  // // Check mosek solution
-  // std::cout << "Cost diff of solution: " << problem.rho_ -
-  // mosek_soln.obj_value << std::endl; std::cout << "Violation of solution: "
-  // << problem.eval_constraints(X_mosek).transpose() << std::endl; std::cout <<
-  // "Complementarity of solution: " << (mosek_soln.S * X_mosek).trace() <<
-  // std::endl; Run certification method
+  
   auto result = problem.certify(Y_mosek, delta);
   // check that the solution is certified
   EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
