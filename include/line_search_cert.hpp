@@ -2,7 +2,7 @@
 #include <Eigen/IterativeLinearSolvers>
 #include <chrono>
 
-#include "matrix_free_methods.hpp"
+#include "lin_alg_tools.hpp"
 #include "utils.hpp"
 
 namespace RankTools {

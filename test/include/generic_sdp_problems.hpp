@@ -17,7 +17,6 @@
 namespace RankTools {
 namespace ExportedSDPProblems {
 
-
 inline void expect_key(std::istream& in, const std::string& expected,
                        const std::string& file_name) {
   std::string key;
@@ -93,7 +92,7 @@ inline SDPTestProblem load_problem_from_file(const std::string& problem_name) {
     }
   }
   // remove homogenization offset
-  sdp.C(0,0) = 0.0;
+  sdp.C(0, 0) = 0.0;
   // Rescale C to have norm 1, to avoid numerical issues in testing.
   sdp.C /= sdp.C.norm();
 
@@ -158,6 +157,9 @@ inline SDPTestProblem load_problem_from_file(const std::string& problem_name) {
   }
 
   sdp.rho = (sdp.soln.transpose() * sdp.C * sdp.soln).trace();
+  // register that the solution is globally optimal.
+  sdp.soln_is_global = sdp.name.find('L') == std::string::npos;
+
   return sdp;
 }
 
@@ -221,15 +223,15 @@ inline SDPTestProblem make_test_prob_15G() {
 inline SDPTestProblem make_test_prob_16G() {
   return load_problem_from_file("test_prob_16G");
 }
-inline SDPTestProblem make_test_prob_16Gc() {
-  return load_problem_from_file("test_prob_16Gc");
-}
+// inline SDPTestProblem make_test_prob_16Gc() {
+//   return load_problem_from_file("test_prob_16Gc");
+// }
 inline SDPTestProblem make_test_prob_16L() {
   return load_problem_from_file("test_prob_16L");
 }
-inline SDPTestProblem make_test_prob_16Lc() {
-  return load_problem_from_file("test_prob_16Lc");
-}
+// inline SDPTestProblem make_test_prob_16Lc() {
+//   return load_problem_from_file("test_prob_16Lc");
+// }
 inline SDPTestProblem make_test_prob_2() {
   return load_problem_from_file("test_prob_2");
 }
@@ -251,9 +253,9 @@ inline SDPTestProblem make_test_prob_7() {
 inline SDPTestProblem make_test_prob_8G() {
   return load_problem_from_file("test_prob_8G");
 }
-inline SDPTestProblem make_test_prob_8Gc() {
-  return load_problem_from_file("test_prob_8Gc");
-}
+// inline SDPTestProblem make_test_prob_8Gc() {
+//   return load_problem_from_file("test_prob_8Gc");
+// }
 inline SDPTestProblem make_test_prob_8L1() {
   return load_problem_from_file("test_prob_8L1");
 }
@@ -292,18 +294,19 @@ inline SDPTestProblem make_test_prob_9c() {
 }
 
 inline std::vector<SDPTestProblem> make_exported_sdp_test_problems() {
-  static constexpr std::array<const char*, 43> kProblemNames = {
-      "test_prob_1",    "test_prob_10G", "test_prob_10Gc", "test_prob_10L",
-      "test_prob_10Lc", "test_prob_11G", "test_prob_11Gc", "test_prob_11L",
-      "test_prob_11Lc", "test_prob_12G", "test_prob_12Gc", "test_prob_12L",
-      "test_prob_12Lc", "test_prob_13G", "test_prob_13Gc", "test_prob_13L",
-      "test_prob_13Lc", "test_prob_14G", "test_prob_15G",  "test_prob_16G",
-      "test_prob_16Gc", "test_prob_16L", "test_prob_16Lc", "test_prob_2",
-      "test_prob_3",    "test_prob_4",   "test_prob_5",    "test_prob_6",
-      "test_prob_7",    "test_prob_8G",  "test_prob_8Gc",  "test_prob_8L1",
-      "test_prob_8L1c", "test_prob_8L2", "test_prob_8L2c", "test_prob_9",
-      "test_prob_9G",   "test_prob_9Gc", "test_prob_9L",   "test_prob_9L1",
-      "test_prob_9L1c", "test_prob_9Lc", "test_prob_9c"};
+  // Note: Problem files "test_prob_16Gc","test_prob_16Lc","test_prob_8Gc", are
+  // corrupted.
+  static constexpr std::array<const char*, 40> kProblemNames = {
+      "test_prob_1",    "test_prob_10G",  "test_prob_10Gc", "test_prob_10L",
+      "test_prob_10Lc", "test_prob_11G",  "test_prob_11Gc", "test_prob_11L",
+      "test_prob_11Lc", "test_prob_12G",  "test_prob_12Gc", "test_prob_12L",
+      "test_prob_12Lc", "test_prob_13G",  "test_prob_13Gc", "test_prob_13L",
+      "test_prob_13Lc", "test_prob_14G",  "test_prob_15G",  "test_prob_16G",
+      "test_prob_16L",  "test_prob_2",    "test_prob_3",    "test_prob_4",
+      "test_prob_5",    "test_prob_6",    "test_prob_7",    "test_prob_8G",
+      "test_prob_8L1",  "test_prob_8L1c", "test_prob_8L2",  "test_prob_8L2c",
+      "test_prob_9",    "test_prob_9G",   "test_prob_9Gc",  "test_prob_9L",
+      "test_prob_9L1",  "test_prob_9L1c", "test_prob_9Lc",  "test_prob_9c"};
 
   std::vector<SDPTestProblem> out;
   out.reserve(kProblemNames.size());

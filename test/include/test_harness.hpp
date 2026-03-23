@@ -1,5 +1,5 @@
-// This file defines the test harness for SDP unit tests, including the test case
-// data structure and a subclass of AnalyticCenter that promotes protected
+// This file defines the test harness for SDP unit tests, including the test
+// case data structure and a subclass of AnalyticCenter that promotes protected
 // methods to public for testing purposes.
 
 #pragma once
@@ -23,13 +23,12 @@ using namespace RankTools;
 // can exercise internal logic without friend declarations in production code.
 class AnalyticCenterTestable : public AnalyticCenter {
  public:
-  using AnalyticCenter::analytic_center_bisect;
-  using AnalyticCenter::analytic_center_line_search_func;
   using AnalyticCenter::AnalyticCenter;  // inherit all constructors
   using AnalyticCenter::build_ac_system;
   using AnalyticCenter::build_adjoint;
   using AnalyticCenter::get_analytic_center_objective;
   using AnalyticCenter::get_multipliers;
+  using AnalyticCenter::line_search_factorization;
   using AnalyticCenter::solve_ac_system;
 };
 
@@ -42,6 +41,7 @@ struct SDPTestProblem {
   std::vector<double> b;
   Matrix soln;
   std::string name;
+  bool soln_is_global;
 
   // Retrieve zero padded solution for testing.
   Matrix make_solution(int rank) const {

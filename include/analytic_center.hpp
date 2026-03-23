@@ -1,10 +1,9 @@
 #pragma once
+#include <Eigen/IterativeLinearSolvers>
 #include <chrono>
 
+#include "lin_alg_tools.hpp"
 #include "utils.hpp"
-#include "matrix_free_methods.hpp"
-#include <Eigen/IterativeLinearSolvers>
-
 
 namespace RankTools {
 
@@ -30,7 +29,7 @@ struct AnalyticCenterParams {
   bool verbose = true;
   // threshold for checking rank of the solution
   // (does not affect convergence, just for display)
-  double tol_rank_sol = 1.0E-6;
+  double tol_rank_sol = 1.0E-4;
   // tolerance for step size (terminate if below)
   double tol_step_norm = 1e-8;
   // reduce violation in centering step
@@ -38,7 +37,8 @@ struct AnalyticCenterParams {
   // max number of iterations for centering
   int max_iter = 50;
   // Rescale linear system for centering
-  // This rescaling is consistent with the system in Sremac 2021
+  // Rescaling is akin to scaling the log det objective by delta and improves
+  // conditioning.
   bool rescale_lin_sys = true;
   // Select linear solver for centering step
   LinearSolverType lin_solver = LinearSolverType::LDLT;
@@ -64,34 +64,42 @@ struct AnalyticCenterParams {
   // update factor for adjusting delta in adaptive centering
   double delta_dec = 0.6;
 
-  // Iterative Linear Solve Paramteres
+  // Iterative Linear Solve Parameters
   // -----------------
-  int lin_solve_max_iter = 100;
-  double lin_solve_tol = 1e-5;
+  // max number of iterations for iterative linear solvers (CG and MFCG)
+  int lin_solve_max_iter = 200;
+  // tolerance for iterative linear solvers (CG and MFCG)
+  double lin_solve_tol = 1e-4;
+  // preconditioner perturbation for iterative solver
+  double lin_solve_precond_perturb = 1e-4;
 
   // Line search
   // ----------------
   // line search enable for analytic center
   bool enable_line_search = true;
-  // Line search sufficient decrease parameter (should be between zero and one)
-  double ln_search_suff_dec = 1e-4;
   // Line search reduction factor (should be between zero and one)
   double ln_search_red_factor = 0.5;
   // Line search initialization
   double alpha_init = 1.0;
   // Line search lower bound
   double alpha_min = 1e-10;
-  // line search (bisection) parameters for centering
-  // NOTE: line search param will be certain to 1/2^k for k = ls_iter_ac
-  double tol_bisect = 1e-6;
 
-  // Certificate parameters
+  // Low Rank Approximation
+  // ----------------
+  // enable low rank approximation for certificate matrix in centering step
+  bool low_rank_approx = false;
+  // rank for low rank approximation of certificate matrix
+  int low_rank_approx_rank = 5;
+  // tolerance for low rank approximation of certificate matrix
+  double low_rank_approx_tol = 1e-6;
+
+  // Early stop parameters
   // -------------------------
   // enable for certificate check during centering
   // NOTE: can be used to terminate centering early if the certificate is PSD
   // within tolerance, which can be a good heuristic to avoid unnecessary
   // centering steps when the solution is already close to optimal
-  bool check_cert = true;
+  bool early_stop_cert = true;
   // tolerance for checking PSDness of certificate matrix
   double tol_cert_psd = 1e-5;
   // tolerance for checking first order condition of certificate matrix
@@ -99,6 +107,18 @@ struct AnalyticCenterParams {
   // primal feasibility tolerance for certificate check (i.e., tolerance for
   // violation of constraints)
   double tol_cert_primal_feas = 1e-5;
+  // Early stopping condition for deviation from the candidate solution.
+  // Violation of condition implies certificate failure.
+  // NOTE: This only detects if the solution is not the analytic center, which
+  // is a looser condition than if it is not globally optimal
+  bool early_stop_angle = false;
+  // Maximum allowable angle between the current solution and the candidate
+  // solution for early stopping (in radians).
+  double max_angle = 5e-4;
+  // use the centrality metric from He et al. 1997
+  bool use_cert_centrality_metric = false;
+  // centrality metric tolerance
+  double tol_cert_centrality = 1e-5;
 };
 
 class AnalyticCenter {
@@ -111,7 +131,9 @@ class AnalyticCenter {
   // cost matrix
   const Matrix C_;
   // optimal cost value
-  const double rho_;
+  // NOTE: this is non-const because we may want to change it after the problem
+  // is defined.
+  double rho_;
   // constraint matrices
   const std::vector<Eigen::SparseMatrix<double>>& A_;
   // constraint values
@@ -160,6 +182,12 @@ class AnalyticCenter {
  protected:
   // Previous multipliers for iterative linear system solvers
   mutable Vector prev_multipliers_;
+  // Matrix Free, Low Rank Preconditioned Conjugate Gradient solver
+  mutable std::unique_ptr<Eigen::ConjugateGradient<
+      MultiplierLinSys, Eigen::Upper | Eigen::Lower, LowRankPrecond>>
+      lr_solver;
+  // Expected rank of the initial solution
+  mutable int rank_init;
 
   // Build weighted sum of constraint matrices: sum_i A_i * lambda_i
   // If the coefficient falls below `tol` then the corresponding constraint is
@@ -168,25 +196,41 @@ class AnalyticCenter {
 
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
-  std::pair<Vector, Vector> get_multipliers(const Matrix& Z,
+  std::pair<Vector, Vector> get_multipliers(const Matrix& Z, const Matrix& L, const Matrix& Y_0,
                                             double delta) const;
 
   // Intermediate representation of the analytic center linear system
-  struct ACSystem {
-    Matrix B;                     // LHS matrix (m x m)
-    Vector d;                     // RHS vector (m)
-    Vector violation;             // constraint violation (m)
-    std::vector<Matrix> AZ;       // A_i * Z products
-    std::vector<Matrix> AZt;      // (A_i * Z)^T products
+  // Note: it may be more efficient to use references here.
+  struct LinSysData {
+    Matrix B;          // LHS matrix (m x m)
+    Vector d;          // RHS vector (m)
+    Vector violation;  // constraint violation (m)
+    Matrix LAL;  // each col is vec(L^T * A_i * L) (L is the cholesky factor of
+                 // the primal solution)
+    SpMatrix A_bar;
     std::vector<double> A_trace;  // diagonal traces of A_i
-    std::unique_ptr<MultiplierLinSys> B_mf;       // Matrix-free operator for B (if using matrix-free solver)
+    std::unique_ptr<MultiplierLinSys>
+        B_mf;  // Matrix-free operator for B (if using matrix-free solver)
+    const Matrix&
+        X_;  // current primal solution (for building matrix-free operator)
+
+    LinSysData(const Matrix& X, int dim, int m)
+        : B(Matrix(m, m)),
+          d(Vector(m)),
+          violation(Vector(m)),
+          LAL(Matrix(dim * dim, m)),
+          A_bar(SpMatrix(dim * dim, m)),
+          A_trace(std::vector<double>(m)),
+          B_mf(nullptr),
+          X_(X) {}
   };
 
   // Constructs the linear system (H, d, violation) for the analytic center step
-  ACSystem build_ac_system(const Matrix& Z, double delta) const;
+  LinSysData build_ac_system(const Matrix& Z, const Matrix& L,
+                             double delta) const;
 
   // Solves the linear system H * multipliers = d using the configured solver
-  Vector solve_ac_system(const ACSystem& system) const;
+  Vector solve_ac_system(const LinSysData& system,  const Matrix& Y_0) const;
 
   double get_analytic_center_objective(const Matrix& X, double delta) const {
     auto I = Matrix::Identity(X.rows(), X.cols());
@@ -194,21 +238,11 @@ class AnalyticCenter {
   }
 
   // Line search to ensure PSDness of the solution for the analytic center step
-  double line_search_psd(Matrix& Z, const Matrix& dZ) const;
-
-  // Line search based on determinant increase for analytic center
-  std::pair<double, double> line_search_det(const Matrix& Z,
-                                            const Matrix& Aw) const;
-
-  // Perform bisection line search to find optimal step size for analytic
-  // center
-  double analytic_center_bisect(const Matrix& Z, const Matrix& Aw) const;
-
-  // Line search function and derivative for analytic center
-  // NOTE: it was shown in Boyd that this function is convex, so simple
-  // bisection on the derivative is sufficient
-  std::pair<ScalarFunc, ScalarFunc> analytic_center_line_search_func(
-      const Matrix& Z, const Matrix& Aw) const;
+  // This function will update Z with the new solution after line search.
+  // Returns the final step size alpha used for the update and the Cholesky
+  // factorization of the updated solution for free reuse in the next iteration.
+  std::pair<double, Matrix> line_search_factorization(Matrix& Z,
+                                                      const Matrix& dZ) const;
 };
 
 }  // namespace RankTools

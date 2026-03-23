@@ -6,12 +6,14 @@ AnalyticCenter::AnalyticCenter(
     const Matrix& C, double rho,
     const std::vector<Eigen::SparseMatrix<double>>& A,
     const std::vector<double>& b, AnalyticCenterParams params)
-    : C_(C), A_(A), rho_(rho), b_(b), params_(params) {
-  // dimension of the SDP
-  dim = C.rows();
-  // number of constraints to enforce during inflation
-  m = A.size() + 1;
-}
+    : C_(C),
+      A_(A),
+      rho_(rho),
+      b_(b),
+      params_(params),
+      dim(C.rows()),
+      m(A.size() + 1),
+      lr_solver(nullptr) {}
 
 Vector AnalyticCenter::eval_constraints(const Matrix& X) const {
   // Loop through constraints, evaluating gradient and constraint value
@@ -107,40 +109,53 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   // Initialize
   int n_iter = 0;
   double delta = delta_init;
-  Matrix Z = Y_0 * Y_0.transpose() + Matrix::Identity(dim, dim) * delta;
-  double f_val = logdet(Z);
+  Matrix Z = Y_0 * Y_0.transpose();
+  // store rank of candidate solution
+  rank_init = Y_0.cols();
+  auto [alpha, L] = line_search_factorization(
+      Z, Matrix::Identity(dim, dim) * delta);  // Initial line search to ensure
+                                               // PSDness of the starting point
   Vector mult_scaled(m - 1);
   // Optimality certificate
   Matrix H;
   double complementarity = std::nan("");
   double min_eig = std::nan("");
   double barrier_param = std::nan("");
+  double cent_metric = std::nan("");
+  double angle = std::nan("");
   // Main loop
   while (n_iter < params_.max_iter) {
     // Get system of equations
-    auto [multipliers, violation] = get_multipliers(Z, delta);
+    auto [multipliers, violation] = get_multipliers(Z, L, Y_0, delta);
 
     // get the barrier parameter value
-    barrier_param = multipliers(m - 1);
+    barrier_param = 1 / multipliers(m - 1);
     // compute scaled multipliers for certificate checking
-    mult_scaled = multipliers.segment(0, m - 1) / barrier_param;
+    mult_scaled = multipliers.segment(0, m - 1) * barrier_param;
 
-    // Get step direction
+    // Dual matrix (adjoint of constraints with multipliers + cost term )
     auto adjoint_sp = build_adjoint(multipliers);
     Matrix adjoint = C_ * multipliers(m - 1) + adjoint_sp;
     if (params_.rescale_lin_sys) {
       adjoint = adjoint / delta;
     }
+    // Get Newton step direction towards analytic center
     auto deltaZ = Z - Z * adjoint * Z;
     // Line search to find step that ensures PSDness of the solution
     // NOTE: Could replace with exact line search based on determinant increase,
     // but this backtracking
-    double alpha = 1.0;
-    if (params_.enable_line_search) {
-      alpha = line_search_psd(Z, deltaZ);
-    } else {
-      Z.noalias() += alpha * deltaZ;
-    }
+    alpha = 1.0;
+    std::tie(alpha, L) = line_search_factorization(Z, deltaZ);
+    // Compute centrality metric from He et al. 1997
+    // When this is below 1, the dual matrix is guaranteed to be PSD, so this
+    // can be used as an early stopping condition for the centering iterations.
+    cent_metric =
+        (L.transpose() * adjoint * L - Matrix::Identity(dim, dim)).norm();
+    // Compute the angle between the current solution and the initial solution
+    // as a measure of deviation from the initial solution for early stopping.
+    double cos_angle = (Y_0.transpose() * Z * Y_0).trace() /
+                       (Y_0.transpose() * Y_0).norm() / Z.norm();
+    angle = std::acos(cos_angle);
     // Print update
     n_iter++;
     if (params_.verbose) {
@@ -149,36 +164,60 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
         std::cout << "Running with Linear Solver: "
                   << print_solver(params_.lin_solver) << std::endl;
       }
-      // Objective value
-      f_val = logdet(Z);
-      // get rank of solution
-      int sol_rank = get_rank(Z, params_.tol_rank_sol);
       if (n_iter % 10 == 1) {
-        std::printf("%6s %6s %12s %12s %12s %12s %12s %12s %8s\n", "Iter",
-                    "SolRank", "ViolNorm", "StepNorm", "Complement.",
-                    "BarrParam", "Alpha", "Delta", "Obj Val.");
+        std::printf("%6s %12s %12s %12s %12s %12s %12s %12s %12s\n", "Iter",
+                    "ViolNorm", "StepNorm", "Complement.", "BarrParam", "Alpha",
+                    "Delta", "CentMetric", "Angle (rad)");
       }
-      std::printf("%6d %6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %8.3e\n",
-                  n_iter, sol_rank, violation.norm(), deltaZ.norm(),
-                  complementarity, barrier_param, alpha, delta, f_val);
+      std::printf(
+          "%6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e\n",
+          n_iter, violation.norm(), deltaZ.norm(), complementarity,
+          barrier_param, alpha, delta, cent_metric, angle);
     }
 
     // Certificate Checking (Early stopping condition if the certificate is PSD)
-    if (params_.check_cert) {
-      // Build certificate matrix
-      H = build_certificate_from_dual(mult_scaled);
-      // Check complementarity condition for first order optimality
-      complementarity = (Y_0.transpose() * H * Y_0).norm();
-      if (complementarity <= params_.tol_cert_complementarity) {
-        // Use a cholesky decomposition for a quick check of PSDness.
-        Eigen::LLT<Matrix> llt(H + Matrix::Identity(H.rows(), H.cols()) *
-                                       params_.tol_cert_psd);
-        if (llt.info() == Eigen::Success) {
+    if (params_.early_stop_cert) {
+      if (params_.use_cert_centrality_metric) {
+        if (cent_metric <= 1 + params_.tol_cert_centrality) {
           if (params_.verbose) {
-            std::cout << "Certificate Found! Stopping centering." << std::endl;
+            std::cout << "Certificate Centrality Metric below threshold! "
+                         "Stopping centering."
+                      << std::endl;
           }
           break;
         }
+      } else {
+        // Build certificate matrix
+        H = build_certificate_from_dual(mult_scaled);
+        // Check complementarity condition for first order optimality
+        complementarity = (Y_0.transpose() * H * Y_0).norm();
+        if (complementarity <= params_.tol_cert_complementarity) {
+          // Use a cholesky decomposition for a quick check of PSDness.
+          Eigen::LLT<Matrix> llt(H + Matrix::Identity(H.rows(), H.cols()) *
+                                         params_.tol_cert_psd);
+          if (llt.info() == Eigen::Success) {
+            if (params_.verbose) {
+              std::cout << "Certificate Found! Stopping centering."
+                        << std::endl;
+            }
+            break;
+          }
+        }
+      }
+    }
+    // Early stop for deviation from the solution
+    if (params_.early_stop_angle) {
+      if (angle > params_.max_angle) {
+        if (params_.verbose) {
+          std::cout
+              << "Solution has deviated by an angle of " << angle
+              << " radians from the initial solution, which is above the "
+              << "threshold of " << params_.max_angle
+              << " radians. "
+                 "Stopping centering. Candidate was not at the analytic center."
+              << std::endl;
+        }
+        break;
       }
     }
     // Perturbation update for next iteration (if enabled)
@@ -215,65 +254,66 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   return {Z, mult_scaled};
 }
 
-AnalyticCenter::ACSystem AnalyticCenter::build_ac_system(const Matrix& Z,
-                                                         double delta) const {
-  ACSystem sys;
-  sys.d.resize(m);
-  sys.violation.resize(m);
-  sys.AZ.resize(m);
-  sys.AZt.resize(m);
-  sys.A_trace.resize(m);
-  // Compute the A_i * Z products and the constraint violations for the current
-  // solution
+AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
+                                                           const Matrix& L,
+                                                           double delta) const {
+  // Initialize system data
+  LinSysData sys(X, dim, m);
+  // Compute the L^T * A_i * L products and the constraint violations for the
+  // current solution
   const int a_size = static_cast<int>(A_.size());
 #ifdef RANKTOOLS_PARALLEL
 #pragma omp parallel for schedule(dynamic)
 #endif
   for (int i = 0; i < m; i++) {
+    Matrix mat(dim, dim);
+    double val;
     if (i < a_size) {
-      sys.AZ[i] = A_[i].selfadjointView<Eigen::Upper>() * Z;
-      sys.AZt[i] = sys.AZ[i].transpose();  // O(n²) each, done once
+      mat = L.transpose() * A_[i].selfadjointView<Eigen::Upper>() * L;
       sys.A_trace[i] = A_[i].diagonal().sum();
-      sys.violation(i) = sys.AZ[i].trace() - b_[i] - delta * sys.A_trace[i];
+      val = b_[i] + delta * sys.A_trace[i];
     } else {
-      sys.AZ[i] = C_ * Z;
-      sys.AZt[i] = sys.AZ[i].transpose();  // O(n²) each, done once
+      mat = L.transpose() * C_.selfadjointView<Eigen::Upper>() * L;
       sys.A_trace[i] = C_.diagonal().sum();
-      sys.violation(i) = sys.AZ[i].trace() - rho_ - delta * sys.A_trace[i];
+      // add delta perturbation for cost
+      val = rho_ + delta * sys.A_trace[i];
     }
-    sys.d(i) = sys.AZ[i].trace();
+    // Set RHS of the system
+    sys.d(i) = mat.trace();
+    // compute violation
+    sys.violation(i) = sys.d(i) - val;
+    // vectorize columns
+    sys.LAL.col(i) = Eigen::Map<Vector>(mat.data(), dim * dim);
+    // adjusted rhs to include violation if enabled
     if (params_.reduce_violation) {
       sys.d(i) += sys.violation(i);
     }
   }
 
   // Only build the LHS matrix if not using matrix-free solver.
-  if (params_.lin_solver != LinearSolverType::MFCG) {
-    // Construct the LHS matrix
-    sys.B.resize(m, m);
-    // Build H with O(n²) dot products instead of O(n³) matmuls (AZ[i] *
-    // AZ[j]).trace
-#ifdef RANKTOOLS_PARALLEL
-#pragma omp parallel for schedule(dynamic)
-#endif
-    for (int i = 0; i < m; i++) {
-      Eigen::Map<const Vector> vi(sys.AZt[i].data(), dim * dim);
-      for (int j = i; j < m; j++) {
-        Eigen::Map<const Vector> vj(sys.AZ[j].data(), dim * dim);
-        double val = vi.dot(vj);  // = trace(AZ[i] * AZ[j])
-        sys.B(i, j) = params_.rescale_lin_sys ? val / delta : val;
-      }
-    }
-  } else {
-    // If using matrix-free solver, build the matrix-free operator for the LHS
-    sys.B_mf =
-        std::make_unique<MultiplierLinSys>(C_, A_, Z, sys.AZ, sys.AZt, delta);
-  }
 
+  if (params_.lin_solver == LinearSolverType::MFCG_DP ||
+      params_.lin_solver == LinearSolverType::MFCG_LRP) {
+    // If using matrix-free solver, build the matrix-free operator for the LHS
+    if (params_.rescale_lin_sys) {
+      sys.B_mf = std::make_unique<MultiplierLinSys>(sys.LAL, 1 / delta);
+    } else {
+      sys.B_mf = std::make_unique<MultiplierLinSys>(sys.LAL, 1.0);
+    }
+
+  } else {
+    // B += scale * (LAL^T) * (LAL^T)^T = scale * LAL^T * LAL
+    const double scale = params_.rescale_lin_sys ? (1.0 / delta) : 1.0;
+    sys.B.setZero();
+    sys.B.selfadjointView<Eigen::Upper>().rankUpdate(sys.LAL.transpose(),
+                                                     scale);
+  }
+  // Return system information and metrics
   return sys;
 }
 
-Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
+Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
+                                       const Matrix& Y_0) const {
   Vector multipliers(m);
 
   if (params_.lin_solver == LinearSolverType::CG) {
@@ -303,51 +343,88 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
     if (cg.info() != Eigen::Success) {
       std::cout << "Solving failed: " << cg.error() << std::endl;
     }
-  } else if (params_.lin_solver == LinearSolverType::MFCG) {
+  } else if (params_.lin_solver == LinearSolverType::MFCG_DP) {
     // Solve the linear system with Matrix-Free Conjugate Gradient (MFCG) method
-    // Note: This method is more scalable for large problems and can handle
-    // ill-conditioned systems better, but requires a well-designed matrix-free
-    // operator and may require tuning of parameters for convergence.
+    // with diagonal preconditioner.
     MultiplierLinSys& lin_op = *(sys.B_mf);
     Eigen::ConjugateGradient<MultiplierLinSys, Eigen::Upper | Eigen::Lower,
                              MultiplierDiagPreconditioner>
-        mfcg;
+        solver;
     // Set solve parameters
-    mfcg.setMaxIterations(
+    solver.setMaxIterations(
         params_.lin_solve_max_iter);  // Set a maximum number of iterations
-    mfcg.setTolerance(params_.lin_solve_tol);  // Set a convergence tolerance
+    solver.setTolerance(params_.lin_solve_tol);  // Set a convergence tolerance
 
-    mfcg.compute(lin_op);
-    if (mfcg.info() != Eigen::Success) {
-      std::cout << "Decomposition failed: " << mfcg.error() << std::endl;
+    solver.compute(lin_op);
+    if (solver.info() != Eigen::Success) {
+      std::cout << "Decomposition failed: " << solver.error() << std::endl;
     }
 
     // Use previous multipliers as initial guess if available to speed up
     // convergence
     if (prev_multipliers_.size() == m) {
-      multipliers = mfcg.solveWithGuess(sys.d, prev_multipliers_);
+      multipliers = solver.solveWithGuess(sys.d, prev_multipliers_);
     } else {
-      multipliers = mfcg.solve(sys.d);
+      multipliers = solver.solve(sys.d);
     }
     prev_multipliers_ = multipliers;  // Store the multipliers for the next
                                       // iteration's initial guess
-    if (mfcg.info() != Eigen::Success) {
-      std::cout << "Solving failed: " << mfcg.error() << std::endl;
+    if (solver.info() != Eigen::Success) {
+      std::cout << "Solving failed: " << solver.error() << std::endl;
+    }
+  } else if (params_.lin_solver == LinearSolverType::MFCG_LRP) {
+    // Solve the linear system with Matrix-Free Conjugate Gradient (MFCG) method
+    // with low rank preconditioner.
+    MultiplierLinSys& lin_op = *(sys.B_mf);
+    // To avoid repeatedly initializing the preconditioner in each iteration, we
+    // maintain a stored instance of the solver.
+    if (!lr_solver) {
+      lr_solver = std::make_unique<Eigen::ConjugateGradient<
+          MultiplierLinSys, Eigen::Upper | Eigen::Lower, LowRankPrecond>>();
+      // Initialize the preconditioner
+      LowRankPrecond& lr_precond = lr_solver->preconditioner();
+      lr_precond.initialize(Y_0, A_, C_, params_.lin_solve_precond_perturb);
+    }
+    auto& solver = *lr_solver;  // convenience definition
+    // Set solve parameters
+    solver.setMaxIterations(
+        params_.lin_solve_max_iter);  // Set a maximum number of iterations
+    solver.setTolerance(params_.lin_solve_tol);  // Set a convergence tolerance
+    // Call compute
+    solver.compute(lin_op);
+    if (solver.info() != Eigen::Success) {
+      std::cout << "Solver Failed: " << solver.error() << std::endl;
+    }
+    // Use previous multipliers as initial guess if available to speed up
+    // convergence
+    if (prev_multipliers_.size() == m) {
+      multipliers = solver.solveWithGuess(sys.d, prev_multipliers_);
+    } else {
+      multipliers = solver.solve(sys.d);
+    }
+    prev_multipliers_ = multipliers;  // Store the multipliers for the next
+                                      // iteration's initial guess
+    if (solver.info() != Eigen::Success) {
+      std::cout << "Solving failed: " << solver.error() << std::endl;
     }
   } else if (params_.lin_solver == LinearSolverType::LDLT) {
     // Solve the linear equation with LDLT decomposition (includes pivoting by
     // default) Note: This method is preferred because the system is PSD, but
     // can be ill-conditioned, especially in early iterations.
-    Eigen::LDLT<Eigen::MatrixXd> ldlt(sys.B.selfadjointView<Eigen::Upper>());
+    Eigen::LDLT<Eigen::MatrixXd> solver(sys.B.selfadjointView<Eigen::Upper>());
     // Check for success (critical for rank-deficient cases)
-    if (ldlt.info() == Eigen::NumericalIssue) {
-      std::cout << "The matrix is has severe numerical issues." << std::endl;
-    }
-    if (ldlt.isPositive() == false) {
-      std::cout << "The matrix is not positive semidefinite." << std::endl;
+    if (params_.verbose) {
+      if (solver.info() == Eigen::NumericalIssue) {
+        std::cout << "LDLT SOLVE: The matrix is has severe numerical issues."
+                  << std::endl;
+      }
+      if (solver.isPositive() == false) {
+        std::cout << "LDLT SOLVE: The matrix is not positive semidefinite."
+                  << std::endl;
+      }
     }
     // Solve the linear system.
-    multipliers = ldlt.solve(sys.d);
+    multipliers = solver.solve(sys.d);
   }
 #ifdef DEBUG
   // print information about the linear system
@@ -365,13 +442,15 @@ Vector AnalyticCenter::solve_ac_system(const ACSystem& sys) const {
 }
 
 std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
+                                                          const Matrix& L,
+                                                          const Matrix& Y_0,
                                                           double delta) const {
   // Build the system of equations for the current solution
 #ifdef TIMING
   // start a timer for building the system
   auto start = std::chrono::high_resolution_clock::now();
 #endif
-  auto sys = build_ac_system(Z, delta);
+  auto sys = build_ac_system(Z, L, delta);
 
 #ifdef TIMING
   auto end = std::chrono::high_resolution_clock::now();
@@ -380,7 +459,7 @@ std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
             << " seconds" << std::endl;
 #endif
   // solve the system to get the multipliers
-  Vector multipliers = solve_ac_system(sys);
+  Vector multipliers = solve_ac_system(sys, Y_0);
 #ifdef TIMING
   // print time taken to solve the system
   auto end_solve = std::chrono::high_resolution_clock::now();
@@ -398,8 +477,8 @@ std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
   return {multipliers, sys.violation};
 }
 
-double AnalyticCenter::line_search_psd(Matrix& Z, const Matrix& dZ) const {
-  // NOTE: Should make this function generic for any line search function
+std::pair<double, Matrix> AnalyticCenter::line_search_factorization(
+    Matrix& Z, const Matrix& dZ) const {
   //  Initial step size
   double alpha = params_.alpha_init;
   // Backtracking parameters
@@ -407,9 +486,9 @@ double AnalyticCenter::line_search_psd(Matrix& Z, const Matrix& dZ) const {
       params_.ln_search_red_factor;  // step size reduction factor
   // Backtracking loop
   Matrix Z_new = Z + alpha * dZ;
-  Eigen::LDLT<Eigen::MatrixXd> ldlt(Z_new);
-  while (!ldlt.isPositive()) {
-    if (ldlt.info() == Eigen::NumericalIssue) {
+  Eigen::LDLT<Eigen::MatrixXd> solver(Z_new);
+  while (!solver.isPositive()) {
+    if (solver.info() == Eigen::NumericalIssue) {
       std::cout << "LINESEARCH: The matrix is has severe numerical issues."
                 << std::endl;
     }
@@ -421,94 +500,17 @@ double AnalyticCenter::line_search_psd(Matrix& Z, const Matrix& dZ) const {
       break;  // Stop if step size is too small
     }
     Z_new = Z + alpha * dZ;
-    ldlt.compute(Z_new);
+    solver.compute(Z_new);
   }
   // update Z with the new value that ensures PSDness
   Z = Z_new;
-  return alpha;
+  // Return the Cholesky factorization of the new Z for use in the next
+  // iteration's linear system
+  Eigen::MatrixXd L_chol = solver.matrixL();
+  L_chol.noalias() = L_chol * solver.vectorD().cwiseSqrt().asDiagonal();
+  L_chol.noalias() = solver.transpositionsP().transpose() * L_chol;
+
+  return {alpha, L_chol};
 }
 
-std::pair<double, double> AnalyticCenter::line_search_det(
-    const Matrix& Z, const Matrix& Aw) const {
-  // NOTE: Should make this function generic for any line search function
-  //  Initial step size
-  double alpha = params_.alpha_init;
-  // Current objective and gradient
-  auto [f, df] = analytic_center_line_search_func(Z, Aw);
-  double df_0 = df(0.0);
-  double f_val = f(0.0);
-  // Backtracking parameters
-  const double beta =
-      params_.ln_search_red_factor;             // step size reduction factor
-  const double c = params_.ln_search_suff_dec;  // sufficient decrease parameter
-  // Backtracking loop
-  while (true) {
-    // Evaluate objective at new solution
-    double f_val_new = f(alpha);
-    // Check Armijo condition
-    if (f_val_new <= f_val + c * alpha * df_0) {
-      break;  // Sufficient decrease achieved
-    }
-    // Reduce step size
-    alpha *= beta;
-    // Prevent too small step sizes
-    if (alpha < params_.alpha_min) {
-      alpha = params_.alpha_min;
-      break;  // Stop if step size is too small
-    }
-  }
-  return {alpha, f(alpha)};
-}
-
-double AnalyticCenter::analytic_center_bisect(const Matrix& Z,
-                                              const Matrix& Aw) const {
-  // Create the objective function and deriviative
-  auto [f, df] = analytic_center_line_search_func(Z, Aw);
-  // Bisection parameters
-  double alpha_low = 0.0;
-  double alpha_high = 1.0;
-  double tol = params_.tol_bisect;
-  // Perform bisection line search
-  return bisection_line_search(df, alpha_low, alpha_high, tol);
-}
-
-std::pair<ScalarFunc, ScalarFunc>
-AnalyticCenter::analytic_center_line_search_func(const Matrix& Z,
-                                                 const Matrix& Aw) const {
-  // Cholesky decomposition of augmented solution
-  Eigen::LLT<Matrix> cholZ(Z);
-  if (cholZ.info() == Eigen::NumericalIssue) {
-    throw std::runtime_error("Matrix Z is not positive definite.");
-  }
-  Matrix L = cholZ.matrixL();
-  // Compute eigenvalues of L^T * Aw * L
-  Matrix M = L.transpose() * Aw * L;
-  Eigen::SelfAdjointEigenSolver<Matrix> es(M);
-  if (es.info() != Eigen::Success) {
-    throw std::runtime_error("Eigenvalue decomposition failed.");
-  }
-  Vector eigs = es.eigenvalues();
-
-  // Define the line search functions
-  auto f = [eigs](double alpha) {
-    double val = 0.0;
-    for (int i = 0; i < eigs.size(); i++) {
-      val -= std::log(1.0 + alpha * (1 - eigs(i)));
-    }
-    if (std::isnan(val)) {
-      val = std::numeric_limits<double>::infinity();
-    }
-    return val;
-  };
-  // Define the derivative function
-  auto df = [eigs](double alpha) {
-    double val = 0.0;
-    for (int i = 0; i < eigs.size(); i++) {
-      val -= (1 - eigs(i)) / (1.0 + alpha * (1 - eigs(i)));
-    }
-    return val;
-  };
-
-  return {f, df};
-}
 }  // namespace RankTools
