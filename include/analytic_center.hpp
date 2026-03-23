@@ -70,8 +70,8 @@ struct AnalyticCenterParams {
   int lin_solve_max_iter = 200;
   // tolerance for iterative linear solvers (CG and MFCG)
   double lin_solve_tol = 1e-4;
-  // preconditioner type for iterative linear solvers
-  PreconditionerType precond_type = PreconditionerType::LowRank;
+  // preconditioner perturbation for iterative solver
+  double lin_solve_precond_perturb = 1e-4;
 
   // Line search
   // ----------------
@@ -196,7 +196,7 @@ class AnalyticCenter {
 
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
-  std::pair<Vector, Vector> get_multipliers(const Matrix& Z, const Matrix& L,
+  std::pair<Vector, Vector> get_multipliers(const Matrix& Z, const Matrix& L, const Matrix& Y_0,
                                             double delta) const;
 
   // Intermediate representation of the analytic center linear system
@@ -230,7 +230,7 @@ class AnalyticCenter {
                              double delta) const;
 
   // Solves the linear system H * multipliers = d using the configured solver
-  Vector solve_ac_system(const LinSysData& system) const;
+  Vector solve_ac_system(const LinSysData& system,  const Matrix& Y_0) const;
 
   double get_analytic_center_objective(const Matrix& X, double delta) const {
     auto I = Matrix::Identity(X.rows(), X.cols());

@@ -126,7 +126,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   // Main loop
   while (n_iter < params_.max_iter) {
     // Get system of equations
-    auto [multipliers, violation] = get_multipliers(Z, L, delta);
+    auto [multipliers, violation] = get_multipliers(Z, L, Y_0, delta);
 
     // get the barrier parameter value
     barrier_param = 1 / multipliers(m - 1);
@@ -271,12 +271,12 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
     if (i < a_size) {
       mat = L.transpose() * A_[i].selfadjointView<Eigen::Upper>() * L;
       sys.A_trace[i] = A_[i].diagonal().sum();
-      val = b_[i] - delta * sys.A_trace[i];
+      val = b_[i] + delta * sys.A_trace[i];
     } else {
       mat = L.transpose() * C_.selfadjointView<Eigen::Upper>() * L;
       sys.A_trace[i] = C_.diagonal().sum();
       // add delta perturbation for cost
-      val = rho_ - delta * sys.A_trace[i];
+      val = rho_ + delta * sys.A_trace[i];
     }
     // Set RHS of the system
     sys.d(i) = mat.trace();
@@ -312,7 +312,8 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
   return sys;
 }
 
-Vector AnalyticCenter::solve_ac_system(const LinSysData& sys) const {
+Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
+                                       const Matrix& Y_0) const {
   Vector multipliers(m);
 
   if (params_.lin_solver == LinearSolverType::CG) {
@@ -382,7 +383,7 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys) const {
           MultiplierLinSys, Eigen::Upper | Eigen::Lower, LowRankPrecond>>();
       // Initialize the preconditioner
       LowRankPrecond& lr_precond = lr_solver->preconditioner();
-      lr_precond.initialize(sys.X_, A_, C_, rank_init);
+      lr_precond.initialize(Y_0, A_, C_, params_.lin_solve_precond_perturb);
     }
     auto& solver = *lr_solver;  // convenience definition
     // Set solve parameters
@@ -442,6 +443,7 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys) const {
 
 std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
                                                           const Matrix& L,
+                                                          const Matrix& Y_0,
                                                           double delta) const {
   // Build the system of equations for the current solution
 #ifdef TIMING
@@ -457,7 +459,7 @@ std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
             << " seconds" << std::endl;
 #endif
   // solve the system to get the multipliers
-  Vector multipliers = solve_ac_system(sys);
+  Vector multipliers = solve_ac_system(sys, Y_0);
 #ifdef TIMING
   // print time taken to solve the system
   auto end_solve = std::chrono::high_resolution_clock::now();
