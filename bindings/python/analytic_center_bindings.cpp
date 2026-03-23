@@ -107,8 +107,7 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("lin_solve_max_iter",
                      &AnalyticCenterParams::lin_solve_max_iter)
       .def_readwrite("lin_solve_tol", &AnalyticCenterParams::lin_solve_tol)
-      .def_readwrite("lin_solve_precond_perturb",
-                     &AnalyticCenterParams::lin_solve_precond_perturb)
+      .def_readwrite("tau_lrp", &AnalyticCenterParams::tau_lrp)
       // Adaptive perturbation
       .def_readwrite("adaptive_perturb",
                      &AnalyticCenterParams::adaptive_perturb)

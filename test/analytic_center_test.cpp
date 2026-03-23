@@ -77,7 +77,7 @@ TEST_P(LovazsParamTest, CertifyFixedPerturb) {
   AnalyticCenterParams params;
   params.verbose = true;
   params.early_stop_cert = false;  // Turn off early stopping based on
-                                  // certificate for testing purposes
+                                   // certificate for testing purposes
   params.adaptive_perturb =
       false;  // Turn off adaptive perturbation for testing purposes
   auto delta = 1e-7;
@@ -271,7 +271,8 @@ TEST(MatrixFree, Product) {
   // Build the explicit system to get the true diagonal of B
   auto system = problem.build_ac_system(X, delta);
   // Build the matrix-free operator
-  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, system.AX, 1 / delta);
+  auto lin_op =
+      MultiplierLinSys(X, problem.A_, problem.C_, system.AX, 1 / delta);
   // Test on columns of identity
   auto Id = Matrix::Identity(sdp.dim, sdp.dim);
   for (int i = 0; i < sdp.dim; i++) {
@@ -310,7 +311,8 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   // Build the explicit system to get the true diagonal of B
   auto system = problem.build_ac_system(X, delta);
   // Build the matrix-free operator and preconditioner
-    auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, system.AX, 1 / delta);
+  auto lin_op =
+      MultiplierLinSys(X, problem.A_, problem.C_, system.AX, 1 / delta);
   MultiplierDiagPreconditioner precond;
   precond.compute(lin_op);
   // Check that the preconditioner computed successfully
@@ -471,9 +473,8 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   auto rank_mosek = Y_mosek.cols();
   std::cout << "Rank at IP Solution: " << rank_mosek << std::endl;
   auto X_mosek = Y_mosek * Y_mosek.transpose();
-  std::cout << std::fixed << std::setprecision(9);
-  std::cout << "Mosek Solution: " << std::endl
-            << Y_mosek << std::endl;
+  // std::cout << std::fixed << std::setprecision(9);
+  // std::cout << "Mosek Solution: " << std::endl << Y_mosek << std::endl;
 
   // parameters
   AnalyticCenterParams params;
@@ -483,7 +484,7 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   // for testing purposes
   // Deviation early stop on
   params.early_stop_angle = true;
-  params.max_angle = 1e-1;  
+  params.max_angle = 1e-1;
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-7;
@@ -492,13 +493,14 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   params.rescale_lin_sys = false;
   params.lin_solver =
       LinearSolverType::MFCG_LRP;  // Use Conjugate Gradient solver
+  params.tau_lrp = 1e-5;
 
   auto delta = 1e-5;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // Update cost based on the mosek solution
   problem.rho_ = (sdp.C * X_mosek).trace();
-  
+
   auto result = problem.certify(Y_mosek, delta);
   // check that the solution is certified
   EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
@@ -523,7 +525,7 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_EarlyStopLocal) {
   params.early_stop_cert = true;
   // Deviation early stop on
   params.early_stop_angle = true;
-  params.max_angle = 1e-1;  
+  params.max_angle = 1e-1;
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-9;
@@ -553,7 +555,6 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_EarlyStopLocal) {
   std::cout << "Complementarity (First Order Condition): "
             << result.complementarity << std::endl;
 }
-
 
 INSTANTIATE_TEST_SUITE_P(
     AnalyticCenterSuite, LovazsParamTest,

@@ -375,7 +375,7 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
           MultiplierLinSys, Eigen::Upper | Eigen::Lower, LowRankPrecond>>();
       // Initialize the preconditioner
       LowRankPrecond& lr_precond = lr_solver->preconditioner();
-      lr_precond.initialize(Y_0, A_, C_, params_.lin_solve_precond_perturb);
+      lr_precond.initialize(Y_0, A_, C_, params_.tau_lrp);
     }
     auto& solver = *lr_solver;  // convenience definition
     // Set solve parameters
