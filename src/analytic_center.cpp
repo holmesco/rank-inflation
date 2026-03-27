@@ -285,18 +285,18 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
     }
   }
   // Rescaling for linear system
-  const double scale = params_.rescale_lin_sys ? (1.0 / delta) : 1.0;
+  sys.scale_ = params_.rescale_lin_sys ? (1.0 / delta) : 1.0;
   // Only build the LHS matrix if not using matrix-free solver.
-
   if (params_.lin_solver == LinearSolverType::MFCG_DP ||
       params_.lin_solver == LinearSolverType::MFCG_LRP) {
     // If using matrix-free solver, build the matrix-free operator for the LHS
-    sys.B_mf = std::make_unique<MultiplierLinSys>(X, A_, C_, sys.AX, scale);
+    sys.B_mf =
+        std::make_unique<MultiplierLinSys>(X, A_, C_, sys.AX, sys.scale_);
   } else {
     sys.B.setZero();
     for (int i = 0; i < m; i++) {
       for (int j = i; j < m; j++) {
-        sys.B(i, j) = scale * (sys.AX[i] * sys.AX[j]).trace();
+        sys.B(i, j) = sys.scale_ * (sys.AX[i] * sys.AX[j]).trace();
       }
     }
   }
@@ -377,10 +377,11 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
       LowRankPrecond& lr_precond = lr_solver->preconditioner();
       lr_precond.initialize(Y_0, A_, C_, params_.tau_lrp);
     }
-    auto& solver = *lr_solver;  // convenience definition
-    // Set solve parameters
+    // convenience definition
+    auto& solver = *lr_solver;  
+    // Set a maximum number of iterations
     solver.setMaxIterations(
-        params_.lin_solve_max_iter);  // Set a maximum number of iterations
+        params_.lin_solve_max_iter);  
     solver.setTolerance(params_.lin_solve_tol);  // Set a convergence tolerance
     // Call compute
     solver.compute(lin_op);

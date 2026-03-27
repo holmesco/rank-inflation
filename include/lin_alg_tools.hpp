@@ -180,12 +180,13 @@ class LowRankPrecond {
         tau_(0),
         dim(0),
         ncons(0),
+        scale_(1.0),
         use_approx_(false) {}
 
   // Initialize the preconditioner with problem data
   void initialize(const Matrix& U, const std::vector<SpMatrix>& As,
-                  const Matrix& C, double tau, bool use_sparse_factor = true,
-                  bool use_approx = false) {
+                  const Matrix& C, double tau, double scale = 1.0,
+                   bool use_sparse_factor = true, bool use_approx = false) {
     // Initialize variables with problem data
     U_ = &U;
     C_ = &C;
@@ -194,8 +195,9 @@ class LowRankPrecond {
     rank_ = U.cols();
     dim = C.cols();
     ncons = As.size() + 1;
-    use_approx_ = use_approx;
+    scale_ = scale;
     use_sparse_factor_ = use_sparse_factor;
+    use_approx_ = use_approx;
     // Call function to build the preconditioner
     if (use_sparse_factor_) {
       build_preconditioner_sparse();
@@ -204,8 +206,12 @@ class LowRankPrecond {
     }
   }
 
+  void set_scale(double scale) { scale_ = scale; }  
+
   // Eigen's CG calls compute(mat) with the matrix-free operator
   LowRankPrecond& compute(const MultiplierLinSys& op) {
+    // Store scaling factor of linear operator
+    scale_ = op.scale_;
     if (is_initialized_) {
       // If already initialized, just return
       return *this;
@@ -306,10 +312,11 @@ class LowRankPrecond {
   }
 
   // Apply the preconditioner by solving the augmented system
+  // that is, invert the preconditioner matrix and apply it to the input vector
   template <typename Rhs>
   Eigen::VectorXd solve(const Eigen::MatrixBase<Rhs>& b) const {
     auto rhs = Vector(ncons + rank_ * dim);
-    rhs << b, Vector::Zero(rank_ * dim);
+    rhs << b / scale_, Vector::Zero(rank_ * dim);
 
     Vector result;
     if (use_sparse_factor_) {
@@ -317,7 +324,7 @@ class LowRankPrecond {
     } else {
       result = Factor.solve(rhs);
     }
-    return result.segment(0, ncons);
+    return result.segment(0, ncons) ;
   }
 
   // Build the top right matrix = A_bar^T(U otimes Z)
@@ -427,6 +434,7 @@ class LowRankPrecond {
   int rank_;
   int dim;
   int ncons;
+  double scale_;
   bool use_approx_;
   bool use_sparse_factor_ = false;
 

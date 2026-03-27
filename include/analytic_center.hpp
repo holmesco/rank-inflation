@@ -214,6 +214,7 @@ class AnalyticCenter {
         B_mf;  // Matrix-free operator for B (if using matrix-free solver)
     const Matrix&
         X_;  // current primal solution (for building matrix-free operator)
+    double scale_;  // scaling factor for linear system (for rescaling)
 
     LinSysData(const Matrix& X, int dim, int m)
         : B(Matrix(m, m)),
