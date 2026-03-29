@@ -70,9 +70,8 @@ struct AnalyticCenterParams {
   int lin_solve_max_iter = 200;
   // tolerance for iterative linear solvers (CG and MFCG)
   double lin_solve_tol = 1e-4;
-  // Low Rank preconditioner perturbation parameter
-  // Note: As a rule of thumb, this should be set to the perturbation used to initialize
-  double tau_lrp = 1e-5;
+  // Low rank preconditioner parameters
+  LowRankPrecondParams lrp_params = LowRankPrecondParams();
 
   // Line search
   // ----------------

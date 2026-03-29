@@ -373,15 +373,18 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
     if (!lr_solver) {
       lr_solver = std::make_unique<Eigen::ConjugateGradient<
           MultiplierLinSys, Eigen::Upper | Eigen::Lower, LowRankPrecond>>();
-      // Initialize the preconditioner
+      // Retrieve the preconditioner
       LowRankPrecond& lr_precond = lr_solver->preconditioner();
-      lr_precond.initialize(Y_0, A_, C_, params_.tau_lrp);
+      // Intialize parameters
+      lr_precond.params_ = params_.lrp_params;
+      // Intialize the preconditioner with problem data. This builds the
+      // preconditioner
+      lr_precond.initialize(Y_0, A_, C_);
     }
     // convenience definition
-    auto& solver = *lr_solver;  
+    auto& solver = *lr_solver;
     // Set a maximum number of iterations
-    solver.setMaxIterations(
-        params_.lin_solve_max_iter);  
+    solver.setMaxIterations(params_.lin_solve_max_iter);
     solver.setTolerance(params_.lin_solve_tol);  // Set a convergence tolerance
     // Call compute
     solver.compute(lin_op);
