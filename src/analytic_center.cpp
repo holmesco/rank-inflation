@@ -269,11 +269,11 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
     if (i < a_size) {
       sys.AX[i] = A_[i].selfadjointView<Eigen::Upper>() * X;
       sys.A_trace[i] = A_[i].diagonal().sum();
-      val = b_[i] + delta * sys.A_trace[i];
+      val = b_[i];// + delta * sys.A_trace[i];
     } else {
       sys.AX[i] = C_.selfadjointView<Eigen::Upper>() * X;
       sys.A_trace[i] = C_.diagonal().sum();
-      val = rho_ + delta * sys.A_trace[i];
+      val = rho_;// + delta * sys.A_trace[i];
     }
     // Set RHS of the system
     sys.d(i) = sys.AX[i].trace();
