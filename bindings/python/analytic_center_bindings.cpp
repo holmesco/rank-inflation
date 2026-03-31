@@ -41,13 +41,12 @@ class PyAnalyticCenter {
     return ac_.eval_constraints(X);
   }
 
-  AnalyticCenterResult certify(const Matrix& Y_0, double delta_init) const {
-    return ac_.certify(Y_0, delta_init);
+  AnalyticCenterResult certify(const Matrix& Y_0) const {
+    return ac_.certify(Y_0);
   }
 
-  std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0,
-                                                double delta_init) const {
-    return ac_.get_analytic_center(Y_0, delta_init);
+  std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0) const {
+    return ac_.get_analytic_center(Y_0);
   }
 
   Matrix build_certificate_from_dual(const Vector& multipliers) const {
@@ -111,6 +110,7 @@ PYBIND11_MODULE(ranktools, m) {
       // Adaptive perturbation
       .def_readwrite("adaptive_perturb",
                      &AnalyticCenterParams::adaptive_perturb)
+      .def_readwrite("delta_init", &AnalyticCenterParams::delta_init)
       .def_readwrite("delta_min", &AnalyticCenterParams::delta_min)
       .def_readwrite("delta_inc_step_max",
                      &AnalyticCenterParams::delta_inc_step_max)
@@ -188,32 +188,31 @@ params : AnalyticCenterParams, optional
       .def("eval_constraints", &PyAnalyticCenter::eval_constraints,
            py::arg("X"), "Evaluate constraint violations at X.")
       .def("certify", &PyAnalyticCenter::certify, py::arg("Y_0"),
-           py::arg("delta_init"),
            R"pbdoc(
 Run analytic centering to certify the local solution Y_0.
+
+Uses the initial perturbation value from params.delta_init.
 
 Parameters
 ----------
 Y_0 : numpy.ndarray (n, r)
     Initial low-rank factor.
-delta_init : float
-    Initial perturbation parameter.
 
 Returns
 -------
 AnalyticCenterResult
 )pbdoc")
       .def("get_analytic_center", &PyAnalyticCenter::get_analytic_center,
-           py::arg("Y_0"), py::arg("delta_init"),
+           py::arg("Y_0"),
            R"pbdoc(
 Compute the analytic center starting from Y_0.
+
+Uses the initial perturbation value from params.delta_init.
 
 Parameters
 ----------
 Y_0 : numpy.ndarray (n, r)
     Initial point (low-rank factor; X_0 = Y_0 @ Y_0.T).
-delta_init : float
-    Initial perturbation parameter.
 
 Returns
 -------

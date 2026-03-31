@@ -84,10 +84,9 @@ std::pair<double, double> AnalyticCenter::check_certificate(
   return {psd, complementarity};
 }
 
-AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0,
-                                             double delta_init) const {
+AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0) const {
   // Run analtyic center solve
-  auto [X, mult_scaled] = get_analytic_center(Y_0, delta_init);
+  auto [X, mult_scaled] = get_analytic_center(Y_0);
   auto H = build_certificate_from_dual(mult_scaled);
   // Check certificate at the final solution
   auto [min_eig, complementarity] = eval_certificate(H, Y_0);
@@ -105,10 +104,10 @@ AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0,
 }
 
 std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
-    const Matrix& Y_0, double delta_init) const {
+    const Matrix& Y_0) const {
   // Initialize
   int n_iter = 0;
-  double delta = delta_init;
+  double delta = params_.delta_init;
   Matrix Z = Y_0 * Y_0.transpose();
   // store rank of candidate solution
   rank_init = Y_0.cols();

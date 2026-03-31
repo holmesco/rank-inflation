@@ -199,7 +199,8 @@ class MaxCliqueProblem:
         ac = AnalyticCenter(C=-self.M, rho=cost, A=self.As, b=self.bs, params=self.params)
         print("Running analytic center certifier...")
         t1 = time.time()
-        result = ac.certify(x_cand, delta)
+        self.params.delta_init = delta
+        result = ac.certify(x_cand)
         time_ac = (time.time() - t1)
         print(f"------- time for AC: {time_ac*1e3:.0f} ms")
         print(f"AC Result: certified={result.certified}  min_eig={result.min_eig:.6e}  complementarity={result.complementarity:.6e}")

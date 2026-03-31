@@ -50,6 +50,8 @@ struct AnalyticCenterParams {
   // final delta for centering (should be small to get close to boundary, but
   // not too small to cause numerical issues)
   double delta_min = 1e-9;
+  // initial perturbation value for centering/certification
+  double delta_init = 1e-5;
   // Max step size for increasing perturbation. If the step size is above this
   // threshold, then we consider that the step size is too large and we increase
   // the perturbation parameter to encourage more central steps.
@@ -153,15 +155,14 @@ class AnalyticCenter {
   // Returns the final result, including the centered primal solution, the
   // certificate matrix, the optimal multipliers, and the certificate
   // information (minimum eigenvalue and complementarity).
-  AnalyticCenterResult certify(const Matrix& Y_0, double delta_init) const;
+  AnalyticCenterResult certify(const Matrix& Y_0) const;
 
   // Centering method to compute the analytic center of the current
   // feasible region starting from X_0.
-  // Delta represents a perturbation parameter to ensure we stay in the interior
-  // of the PSD cone even when the solution is low rank. If delta is zero then
-  // no perturbation is applied.
-  std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0,
-                                                double delta_init) const;
+  // The initial perturbation is taken from params_.delta_init. Delta is used
+  // to ensure we stay in the interior of the PSD cone even when the solution
+  // is low rank. If delta is zero then no perturbation is applied.
+  std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0) const;
 
   // Build the optimality certificate for the problem using the optimal
   // multipliers

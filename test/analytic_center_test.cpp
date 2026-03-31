@@ -25,12 +25,13 @@ TEST_P(LovazsParamTest, PrimalSolution) {
   params.max_iter = 50;
   params.rescale_lin_sys = true;
   double delta = 1e-7;
+  params.delta_init = delta;
   // generate problem
   auto problem = sdp.make_testable(params);
   auto Y = sdp.soln;
   // Compute Analyic center starting from low rank solution
   auto X0 = Y * Y.transpose();
-  auto [X, multipliers] = problem.get_analytic_center(Y, delta);
+  auto [X, multipliers] = problem.get_analytic_center(Y);
   // Compute analytic center objecive value
   double obj_0 = problem.get_analytic_center_objective(X0, delta);
   double obj_star = problem.get_analytic_center_objective(X, delta);
@@ -81,12 +82,13 @@ TEST_P(LovazsParamTest, CertifyFixedPerturb) {
   params.adaptive_perturb =
       false;  // Turn off adaptive perturbation for testing purposes
   auto delta = 1e-7;
+  params.delta_init = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
   // Run certification method
-  auto result = problem.certify(Y_0, delta);
+  auto result = problem.certify(Y_0);
   // check that the solution is certified
   EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
   std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
@@ -110,12 +112,13 @@ TEST_P(LovazsParamTest, CertifyAdaptivePerturb) {
   // use rescaling to be consistent with the system in Sremac 2021
   params.rescale_lin_sys = true;
   auto delta = 1e-5;
+  params.delta_init = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
   // Run certification method
-  auto result = problem.certify(Y_0, delta);
+  auto result = problem.certify(Y_0);
   // check that the solution is certified
   EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
   std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
@@ -134,13 +137,14 @@ TEST_P(LovazsParamTest, CertEarlyStopping) {
   params.rescale_lin_sys = true;
   params.lin_solver = LinearSolverType::LDLT;
   auto delta = 1e-5;
+  params.delta_init = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
   // Run rank inflation, without inflation (target rank is 1)
-  auto [X, multipliers] =
-      problem.get_analytic_center(Y_0 * Y_0.transpose(), delta);
+    auto [X, multipliers] =
+      problem.get_analytic_center(Y_0 * Y_0.transpose());
   std::cout
       << "Eigenvalues of Center: " << std::endl
       << Eigen::SelfAdjointEigenSolver<Matrix>(X).eigenvalues().transpose()
@@ -182,12 +186,13 @@ TEST_P(LovazsParamTest, CertifyLDLT) {
   params.rescale_lin_sys = true;
   params.lin_solver = LinearSolverType::LDLT;  // Use Conjugate Gradient solver
   auto delta = 1e-5;
+  params.delta_init = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
   // Run certification method
-  auto result = problem.certify(Y_0, delta);
+  auto result = problem.certify(Y_0);
   // check that the solution is certified
   EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
   std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
@@ -213,12 +218,13 @@ TEST_P(LovazsParamTest, CertifyConjGrad) {
   params.rescale_lin_sys = true;
   params.lin_solver = LinearSolverType::CG;  // Use Conjugate Gradient solver
   auto delta = 1e-5;
+  params.delta_init = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
   // Run certification method
-  auto result = problem.certify(Y_0, delta);
+  auto result = problem.certify(Y_0);
   // check that the solution is certified
   EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
   std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
@@ -466,12 +472,13 @@ TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
       LinearSolverType::MFCG_DP;  // Use Conjugate Gradient solver with diagonal
                                   // preconditioner
   auto delta = 1e-5;
+  params.delta_init = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
   // Run certification method
-  auto result = problem.certify(Y_0, delta);
+  auto result = problem.certify(Y_0);
   // check that the solution is certified
   EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
   std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
@@ -511,12 +518,13 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   params.lrp_params.tau = 1e-5;
   // Initialize delta
   auto delta = 1e-5;
+  params.delta_init = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // Update cost based on the mosek solution
   problem.rho_ = (sdp.C * mosek_soln.X).trace();
   // run certification
-  auto result = problem.certify(Y_mosek, delta);
+  auto result = problem.certify(Y_mosek);
   // check that the solution is certified
   EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
 
@@ -554,11 +562,12 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_wLocal) {
   params.lrp_params.tau = 1e-5;
   // set initial delta
   auto delta = 1e-5;
+  params.delta_init = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
-  auto result = problem.certify(Y_0, delta);
+  auto result = problem.certify(Y_0);
   // check that the solution is certified if globally optimal
   if (sdp.soln_is_global) {
     EXPECT_TRUE(result.certified)

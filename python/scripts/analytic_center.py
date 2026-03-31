@@ -29,6 +29,7 @@ def run_analytic_center(
     params.max_iter = 50
     params.lin_solver = LinearSolverType.MFCG
     delta = 1e-5
+    params.delta_init = delta
     As, bs = [], []
     for constraint in Constraints:
         A, b = constraint
@@ -44,7 +45,7 @@ def run_analytic_center(
     ac = AnalyticCenter(C=Q_adj, rho=cost_adj, A=As, b=bs, params=params)
     # Run certifier
     t1 = time.time()
-    result = ac.certify(x_cand, delta)
+    result = ac.certify(x_cand)
     time_ac = (time.time() - t1)
     print(f"------- time for AC: {time_ac*1e3:.0f} ms")
     print(f"AC Result: certified={result.certified}  min_eig={result.min_eig:.6e}  complementarity={result.complementarity:.6e}")
