@@ -143,8 +143,7 @@ TEST_P(LovazsParamTest, CertEarlyStopping) {
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
   // Run rank inflation, without inflation (target rank is 1)
-    auto [X, multipliers] =
-      problem.get_analytic_center(Y_0 * Y_0.transpose());
+  auto [X, multipliers] = problem.get_analytic_center(Y_0 * Y_0.transpose());
   std::cout
       << "Eigenvalues of Center: " << std::endl
       << Eigen::SelfAdjointEigenSolver<Matrix>(X).eigenvalues().transpose()
@@ -255,6 +254,28 @@ TEST(General, CholeskyFactorization) {
   Matrix reconstructed = L * L.transpose();
   double reconstruction_error = (reconstructed - X).norm();
   EXPECT_NEAR(reconstruction_error, 0.0, 1e-10) << "L*L^T does not equal X";
+}
+
+TEST(General, LowRankApproximation) {
+  // Load a test problem
+  auto sdp = make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8}, "Clique1");
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.rescale_lin_sys =
+      true;  // Use rescaling for consistency with Sremac 2021
+  auto delta = 1e-7;
+  params.low_rank_approx_rank = 1;
+  // generate problem
+  auto problem = sdp.make_testable(params);
+  // get current solution
+  Matrix Y_0 = sdp.make_solution(1);
+  Matrix X = Y_0 * Y_0.transpose() +
+             Matrix::Identity(problem.dim, problem.dim) * delta;
+  auto X_approx = problem.low_rank_approximation(X);
+  // check approximation error
+  double approx_err = (X_approx - X).norm();
+  EXPECT_NEAR(approx_err, 0.0, 1e-10) << "Low rank approx does not equal X";
 }
 
 // Test the matrix-free operator product
@@ -581,6 +602,54 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_wLocal) {
   std::cout << "Complementarity (First Order Condition): "
             << result.complementarity << std::endl;
 }
+
+TEST_P(GenericParamTest, Certify_LRApprox) {
+  const auto& sdp = GetParam();
+  // Solve using Mosek to get analytic center solution
+  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b);
+  auto Y_mosek = get_positive_eigspace(mosek_soln.X, 1e-3);
+  auto rank_mosek = Y_mosek.cols();
+  std::cout << "Rank at IP Solution: " << rank_mosek << std::endl;
+  auto X_mosek = Y_mosek * Y_mosek.transpose();
+  // std::cout << std::fixed << std::setprecision(9);
+  // std::cout << "Mosek Solution: " << std::endl << Y_mosek << std::endl;
+
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.early_stop_cert = true;
+  // Deviation early stop on
+  params.early_stop_angle = false;
+  params.max_angle = 1e-3;
+  params.adaptive_perturb =
+      true;  // Turn on adaptive perturbation for testing purposes
+  params.delta_min = 1e-7;
+  params.max_iter = 50;
+  // Turn off rescaling (preconditioner should deal with this)
+  params.rescale_lin_sys = true;
+  params.lin_solver = LinearSolverType::LDLT;
+  params.lrp_params.tau = 1e-5;
+  // Set up low rank approximation
+  params.low_rank_approx_rank = 5;
+  params.low_rank_approx = true;
+  // Initialize delta
+  auto delta = 1e-5;
+  params.delta_init = delta;
+  // generate problem
+  AnalyticCenter problem = sdp.make(params);
+  // Update cost based on the mosek solution
+  problem.rho_ = (sdp.C * mosek_soln.X).trace();
+  // run certification
+  auto result = problem.certify(Y_mosek);
+  // check that the solution is certified
+  EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
+
+  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
+            << std::endl;
+  std::cout << "Complementarity (First Order Condition): "
+            << result.complementarity << std::endl;
+}
+
 
 INSTANTIATE_TEST_SUITE_P(
     AnalyticCenterSuite, LovazsParamTest,

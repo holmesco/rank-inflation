@@ -200,6 +200,9 @@ class AnalyticCenter {
   std::pair<Vector, Vector> get_multipliers(const Matrix& Z, const Matrix& Y_0,
                                             double delta) const;
 
+// Compute low rank approximation of a PSD matrix by keeping the top rank eigenvalues.
+  Matrix low_rank_approximation(const Matrix& M) const;
+
   // Intermediate representation of the analytic center linear system
   // Note: it may be more efficient to use references here.
   struct LinSysData {

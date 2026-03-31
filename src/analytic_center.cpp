@@ -114,6 +114,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   auto [alpha, L] = line_search_factorization(
       Z, Matrix::Identity(dim, dim) * delta);  // Initial line search to ensure
                                                // PSDness of the starting point
+  Matrix Z_approx = Z;  // Low rank approximation
   Vector mult_scaled(m - 1);
   // Optimality certificate
   Matrix H;
@@ -124,8 +125,14 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   double angle = std::nan("");
   // Main loop
   while (n_iter < params_.max_iter) {
+    // Apply low rank approximation if enabled
+    if (params_.low_rank_approx) {
+      Z_approx = low_rank_approximation(Z);
+    } else {
+      Z_approx = Z;
+    }
     // Get system of equations
-    auto [multipliers, violation] = get_multipliers(Z, Y_0, delta);
+    auto [multipliers, violation] = get_multipliers(Z_approx, Y_0, delta);
 
     // get the barrier parameter value
     barrier_param = 1 / multipliers(m - 1);
@@ -268,11 +275,11 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
     if (i < a_size) {
       sys.AX[i] = A_[i].selfadjointView<Eigen::Upper>() * X;
       sys.A_trace[i] = A_[i].diagonal().sum();
-      val = b_[i];// + delta * sys.A_trace[i];
+      val = b_[i];  // + delta * sys.A_trace[i];
     } else {
       sys.AX[i] = C_.selfadjointView<Eigen::Upper>() * X;
       sys.A_trace[i] = C_.diagonal().sum();
-      val = rho_;// + delta * sys.A_trace[i];
+      val = rho_;  // + delta * sys.A_trace[i];
     }
     // Set RHS of the system
     sys.d(i) = sys.AX[i].trace();
@@ -507,4 +514,26 @@ std::pair<double, Matrix> AnalyticCenter::line_search_factorization(
   return {alpha, L_chol};
 }
 
+Matrix AnalyticCenter::low_rank_approximation(const Matrix& H) const {
+  // Compute the eigenvalue decomposition of H
+  Eigen::SelfAdjointEigenSolver<Matrix> es(H);
+  // Get the eigenvalues and eigenvectors
+  Eigen::VectorXd eigenvalues = es.eigenvalues();
+  Eigen::MatrixXd eigenvectors = es.eigenvectors();
+  // Get the threshold value for the low rank approximation
+  int thresh_index = dim - 1 - params_.low_rank_approx_rank;
+  if (thresh_index < 0) {
+    throw std::invalid_argument(
+        "Low rank approximation rank is larger than the dimension of the "
+        "matrix.");
+  }
+  double thresh = eigenvalues(thresh_index);
+  // Build the low rank approximation by setting a lower bound on the
+  // eigenvalues
+  Eigen::VectorXd eigenvalues_approx = eigenvalues.cwiseMax(thresh);
+  // Reconstruct the low rank approximation of H
+  Matrix H_approx =
+      eigenvectors * eigenvalues_approx.asDiagonal() * eigenvectors.transpose();
+  return H_approx;
+}
 }  // namespace RankTools

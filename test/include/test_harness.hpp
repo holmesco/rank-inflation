@@ -30,6 +30,7 @@ class AnalyticCenterTestable : public AnalyticCenter {
   using AnalyticCenter::get_multipliers;
   using AnalyticCenter::line_search_factorization;
   using AnalyticCenter::solve_ac_system;
+  using AnalyticCenter::low_rank_approximation;
 };
 
 // Test case data structure
