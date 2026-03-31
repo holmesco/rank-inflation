@@ -41,13 +41,12 @@ class PyAnalyticCenter {
     return ac_.eval_constraints(X);
   }
 
-  AnalyticCenterResult certify(const Matrix& Y_0, double delta_init) const {
-    return ac_.certify(Y_0, delta_init);
+  AnalyticCenterResult certify(const Matrix& Y_0) const {
+    return ac_.certify(Y_0);
   }
 
-  std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0,
-                                                double delta_init) const {
-    return ac_.get_analytic_center(Y_0, delta_init);
+  std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0) const {
+    return ac_.get_analytic_center(Y_0);
   }
 
   Matrix build_certificate_from_dual(const Vector& multipliers) const {
@@ -83,9 +82,26 @@ PYBIND11_MODULE(ranktools, m) {
       m, "LinearSolverType", "Linear solver type for the analytic center step.")
       .value("LDLT", LinearSolverType::LDLT, "Cholesky-based LDLT solver")
       .value("CG", LinearSolverType::CG, "Conjugate gradient solver")
-      .value("MFCG", LinearSolverType::MFCG,
-             "Matrix-free conjugate gradient solver")
+      .value(
+          "MFCG_DP", LinearSolverType::MFCG_DP,
+          "Matrix-free conjugate gradient solver with diagonal preconditioner")
+      .value(
+          "MFCG_LRP", LinearSolverType::MFCG_LRP,
+          "Matrix-free conjugate gradient solver with low-rank preconditioner")
       .export_values();
+
+    // ---- LowRankPrecondParams ----
+    py::class_<LowRankPrecondParams>(m, "LowRankPrecondParams")
+            .def(py::init<>())
+            .def_readwrite("tau", &LowRankPrecondParams::tau)
+            .def_readwrite("use_sparse_factor", &LowRankPrecondParams::use_sparse_factor)
+            .def_readwrite("use_approx", &LowRankPrecondParams::use_approx)
+            .def_readwrite("ldlt_zero_thresh", &LowRankPrecondParams::ldlt_zero_thresh)
+            .def("__repr__", [](const LowRankPrecondParams& p) {
+                return "<LowRankPrecondParams tau=" + std::to_string(p.tau) +
+                             " use_sparse_factor=" +
+                             (p.use_sparse_factor ? "True" : "False") + ">";
+            });
 
   // ---- AnalyticCenterParams ----
   py::class_<AnalyticCenterParams>(m, "AnalyticCenterParams")
@@ -103,9 +119,22 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("lin_solve_max_iter",
                      &AnalyticCenterParams::lin_solve_max_iter)
       .def_readwrite("lin_solve_tol", &AnalyticCenterParams::lin_solve_tol)
+      .def_readwrite("lrp_params", &AnalyticCenterParams::lrp_params)
+      // Backward-compatible alias for older scripts.
+      .def_property(
+          "tau_lrp",
+          [](const AnalyticCenterParams& p) { return p.lrp_params.tau; },
+          [](AnalyticCenterParams& p, double tau) { p.lrp_params.tau = tau; })
+      // Low rank approximation
+      .def_readwrite("low_rank_approx", &AnalyticCenterParams::low_rank_approx)
+      .def_readwrite("low_rank_approx_rank",
+                     &AnalyticCenterParams::low_rank_approx_rank)
+      .def_readwrite("low_rank_approx_tol",
+                     &AnalyticCenterParams::low_rank_approx_tol)
       // Adaptive perturbation
       .def_readwrite("adaptive_perturb",
                      &AnalyticCenterParams::adaptive_perturb)
+      .def_readwrite("delta_init", &AnalyticCenterParams::delta_init)
       .def_readwrite("delta_min", &AnalyticCenterParams::delta_min)
       .def_readwrite("delta_inc_step_max",
                      &AnalyticCenterParams::delta_inc_step_max)
@@ -116,13 +145,10 @@ PYBIND11_MODULE(ranktools, m) {
       // Line search
       .def_readwrite("enable_line_search",
                      &AnalyticCenterParams::enable_line_search)
-      .def_readwrite("ln_search_suff_dec",
-                     &AnalyticCenterParams::ln_search_suff_dec)
       .def_readwrite("ln_search_red_factor",
                      &AnalyticCenterParams::ln_search_red_factor)
       .def_readwrite("alpha_init", &AnalyticCenterParams::alpha_init)
       .def_readwrite("alpha_min", &AnalyticCenterParams::alpha_min)
-      .def_readwrite("tol_bisect", &AnalyticCenterParams::tol_bisect)
       // Certificate
       .def_readwrite("early_stop_cert", &AnalyticCenterParams::early_stop_cert)
       .def_readwrite("tol_cert_psd", &AnalyticCenterParams::tol_cert_psd)
@@ -130,6 +156,13 @@ PYBIND11_MODULE(ranktools, m) {
                      &AnalyticCenterParams::tol_cert_complementarity)
       .def_readwrite("tol_cert_primal_feas",
                      &AnalyticCenterParams::tol_cert_primal_feas)
+      .def_readwrite("early_stop_angle",
+                     &AnalyticCenterParams::early_stop_angle)
+      .def_readwrite("max_angle", &AnalyticCenterParams::max_angle)
+      .def_readwrite("use_cert_centrality_metric",
+                     &AnalyticCenterParams::use_cert_centrality_metric)
+      .def_readwrite("tol_cert_centrality",
+                     &AnalyticCenterParams::tol_cert_centrality)
       .def("__repr__", [](const AnalyticCenterParams& p) {
         return "<AnalyticCenterParams max_iter=" + std::to_string(p.max_iter) +
                " verbose=" + (p.verbose ? "True" : "False") + ">";
@@ -179,32 +212,31 @@ params : AnalyticCenterParams, optional
       .def("eval_constraints", &PyAnalyticCenter::eval_constraints,
            py::arg("X"), "Evaluate constraint violations at X.")
       .def("certify", &PyAnalyticCenter::certify, py::arg("Y_0"),
-           py::arg("delta_init"),
            R"pbdoc(
 Run analytic centering to certify the local solution Y_0.
+
+Uses the initial perturbation value from params.delta_init.
 
 Parameters
 ----------
 Y_0 : numpy.ndarray (n, r)
     Initial low-rank factor.
-delta_init : float
-    Initial perturbation parameter.
 
 Returns
 -------
 AnalyticCenterResult
 )pbdoc")
       .def("get_analytic_center", &PyAnalyticCenter::get_analytic_center,
-           py::arg("Y_0"), py::arg("delta_init"),
+           py::arg("Y_0"),
            R"pbdoc(
 Compute the analytic center starting from Y_0.
+
+Uses the initial perturbation value from params.delta_init.
 
 Parameters
 ----------
 Y_0 : numpy.ndarray (n, r)
     Initial point (low-rank factor; X_0 = Y_0 @ Y_0.T).
-delta_init : float
-    Initial perturbation parameter.
 
 Returns
 -------

@@ -71,12 +71,13 @@ def test_get_analytic_center():
     C, rho, A, b = make_simple_sdp(n)
     params = ranktools.AnalyticCenterParams()
     params.verbose = False
-    params.max_iter_ac = 100
+    params.max_iter = 100
+    params.delta_init = 1e-7
     ac = ranktools.AnalyticCenter(C, rho, A, b, params)
 
     # Start from identity (feasible)
     Y0 = np.eye(n) / np.sqrt(n)
-    X, mult = ac.get_analytic_center(Y0, delta_obj=1e-7)
+    X, mult = ac.get_analytic_center(Y0)
     assert X.shape == (n, n)
     # X should be close to I/n
     np.testing.assert_allclose(X, np.eye(n) / n, atol=1e-4)
@@ -88,10 +89,11 @@ def test_build_and_check_certificate():
     C, rho, A, b = make_simple_sdp(n)
     params = ranktools.AnalyticCenterParams()
     params.verbose = False
+    params.delta_init = 1e-7
     ac = ranktools.AnalyticCenter(C, rho, A, b, params)
 
     Y0 = np.eye(n) / np.sqrt(n)
-    X, mult = ac.get_analytic_center(Y0, delta_obj=1e-7)
+    X, mult = ac.get_analytic_center(Y0)
 
     H = ac.build_certificate_from_dual(mult)
     assert H.shape == (n, n)
@@ -105,10 +107,11 @@ def test_certify():
     C, rho, A, b = make_simple_sdp(n)
     params = ranktools.AnalyticCenterParams()
     params.verbose = False
+    params.delta_init = 1e-7
     ac = ranktools.AnalyticCenter(C, rho, A, b, params)
 
     Y0 = np.eye(n) / np.sqrt(n)
-    result = ac.certify(Y0, delta=1e-7)
+    result = ac.certify(Y0)
 
     assert isinstance(result, ranktools.AnalyticCenterResult)
     assert result.X.shape == (n, n)

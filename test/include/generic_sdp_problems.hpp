@@ -311,7 +311,13 @@ inline std::vector<SDPTestProblem> make_exported_sdp_test_problems() {
   std::vector<SDPTestProblem> out;
   out.reserve(kProblemNames.size());
   for (const char* name : kProblemNames) {
-    out.push_back(load_problem_from_file(name));
+    // Avoid problems 2, 4 and 7 which are known to have linearly dependent
+    // constraints.
+    if (name != std::string("test_prob_4") &&
+        name != std::string("test_prob_2") && 
+        name != std::string("test_prob_7") ) {
+      out.push_back(load_problem_from_file(name));
+    }
   }
   return out;
 }

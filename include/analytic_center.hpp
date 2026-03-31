@@ -49,7 +49,9 @@ struct AnalyticCenterParams {
   bool adaptive_perturb = true;
   // final delta for centering (should be small to get close to boundary, but
   // not too small to cause numerical issues)
-  double delta_min = 1e-9;
+  double delta_min = 1e-7;
+  // initial perturbation value for centering/certification
+  double delta_init = 1e-5;
   // Max step size for increasing perturbation. If the step size is above this
   // threshold, then we consider that the step size is too large and we increase
   // the perturbation parameter to encourage more central steps.
@@ -70,8 +72,8 @@ struct AnalyticCenterParams {
   int lin_solve_max_iter = 200;
   // tolerance for iterative linear solvers (CG and MFCG)
   double lin_solve_tol = 1e-4;
-  // preconditioner perturbation for iterative solver
-  double lin_solve_precond_perturb = 1e-4;
+  // Low rank preconditioner parameters
+  LowRankPrecondParams lrp_params = LowRankPrecondParams();
 
   // Line search
   // ----------------
@@ -114,7 +116,7 @@ struct AnalyticCenterParams {
   bool early_stop_angle = false;
   // Maximum allowable angle between the current solution and the candidate
   // solution for early stopping (in radians).
-  double max_angle = 5e-4;
+  double max_angle = 1e-2;
   // use the centrality metric from He et al. 1997
   bool use_cert_centrality_metric = false;
   // centrality metric tolerance
@@ -153,15 +155,14 @@ class AnalyticCenter {
   // Returns the final result, including the centered primal solution, the
   // certificate matrix, the optimal multipliers, and the certificate
   // information (minimum eigenvalue and complementarity).
-  AnalyticCenterResult certify(const Matrix& Y_0, double delta_init) const;
+  AnalyticCenterResult certify(const Matrix& Y_0) const;
 
   // Centering method to compute the analytic center of the current
   // feasible region starting from X_0.
-  // Delta represents a perturbation parameter to ensure we stay in the interior
-  // of the PSD cone even when the solution is low rank. If delta is zero then
-  // no perturbation is applied.
-  std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0,
-                                                double delta_init) const;
+  // The initial perturbation is taken from params_.delta_init. Delta is used
+  // to ensure we stay in the interior of the PSD cone even when the solution
+  // is low rank. If delta is zero then no perturbation is applied.
+  std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0) const;
 
   // Build the optimality certificate for the problem using the optimal
   // multipliers
@@ -196,7 +197,7 @@ class AnalyticCenter {
 
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
-  std::pair<Vector, Vector> get_multipliers(const Matrix& Z, const Matrix& L, const Matrix& Y_0,
+  std::pair<Vector, Vector> get_multipliers(const Matrix& Z, const Matrix& Y_0,
                                             double delta) const;
 
   // Intermediate representation of the analytic center linear system
@@ -205,32 +206,32 @@ class AnalyticCenter {
     Matrix B;          // LHS matrix (m x m)
     Vector d;          // RHS vector (m)
     Vector violation;  // constraint violation (m)
-    Matrix LAL;  // each col is vec(L^T * A_i * L) (L is the cholesky factor of
-                 // the primal solution)
     SpMatrix A_bar;
     std::vector<double> A_trace;  // diagonal traces of A_i
+    std::vector<Matrix>
+        AX;  // A_i * X for each constraint (for efficient matrix-free ops)
     std::unique_ptr<MultiplierLinSys>
         B_mf;  // Matrix-free operator for B (if using matrix-free solver)
     const Matrix&
         X_;  // current primal solution (for building matrix-free operator)
+    double scale_;  // scaling factor for linear system (for rescaling)
 
     LinSysData(const Matrix& X, int dim, int m)
         : B(Matrix(m, m)),
           d(Vector(m)),
           violation(Vector(m)),
-          LAL(Matrix(dim * dim, m)),
           A_bar(SpMatrix(dim * dim, m)),
           A_trace(std::vector<double>(m)),
+          AX(std::vector<Matrix>(m)),
           B_mf(nullptr),
           X_(X) {}
   };
 
   // Constructs the linear system (H, d, violation) for the analytic center step
-  LinSysData build_ac_system(const Matrix& Z, const Matrix& L,
-                             double delta) const;
+  LinSysData build_ac_system(const Matrix& X, double delta) const;
 
   // Solves the linear system H * multipliers = d using the configured solver
-  Vector solve_ac_system(const LinSysData& system,  const Matrix& Y_0) const;
+  Vector solve_ac_system(const LinSysData& system, const Matrix& Y_0) const;
 
   double get_analytic_center_objective(const Matrix& X, double delta) const {
     auto I = Matrix::Identity(X.rows(), X.cols());

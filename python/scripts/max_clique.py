@@ -134,13 +134,11 @@ class MaxCliqueProblem:
         else:
             self.params = AnalyticCenterParams()
             self.params.verbose = True
-            self.params.check_cert= True
-            self.params.delta_min = 1e-9
-            self.params.delta_dec = 0.6
-            self.params.max_iter = 50
-            self.params.lin_solver = LinearSolverType.MFCG
+            self.params.lin_solver = LinearSolverType.MFCG_LRP
             self.params.lin_solve_max_iter = 200
             self.params.lin_solve_tol = 1e-4
+            self.params.lrp_params.tau = 1e-4
+            self.params.delta_init = 1e-5
         
 
     def get_constraints(self):
@@ -199,7 +197,8 @@ class MaxCliqueProblem:
         ac = AnalyticCenter(C=-self.M, rho=cost, A=self.As, b=self.bs, params=self.params)
         print("Running analytic center certifier...")
         t1 = time.time()
-        result = ac.certify(x_cand, delta)
+        self.params.delta_init = delta
+        result = ac.certify(x_cand)
         time_ac = (time.time() - t1)
         print(f"------- time for AC: {time_ac*1e3:.0f} ms")
         print(f"AC Result: certified={result.certified}  min_eig={result.min_eig:.6e}  complementarity={result.complementarity:.6e}")
@@ -288,8 +287,8 @@ class MaxCliqueProblem:
 if __name__ == "__main__":
     np.random.seed(0)
     # Build a bunny dataset
-    m = 300      # total number of associations in problem
-    n1 = 300     # number of points used on model (i.e., seen in view 1)
+    m = 100      # total number of associations in problem
+    n1 = 100     # number of points used on model (i.e., seen in view 1)
     n2o = 10     # number of outliers in data (i.e., seen in view 2)
     outrat = 0.1 # outlier ratio of initial association set
     sigma = 0.01  # uniform noise [m] range

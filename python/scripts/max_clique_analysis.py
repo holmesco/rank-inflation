@@ -35,9 +35,9 @@ OUTRAT_MAX = 0.98
 N_FULL_MAT = 0
 
 # Dataset parameters (mirroring max_clique.py __main__)
-M_ASSOC = 100       # total number of associations
-N1 = 100            # model points in view 1
-N2O = 10            # outlier points in view 2
+M_ASSOC = 120       # total number of associations
+N1 = 120            # model points in view 1
+N2O = 12            # outlier points in view 2
 SIGMA = 0.01        # uniform noise [m]
 PCFILE = "/workspace/python/examples/bun10k.ply"
 
@@ -48,12 +48,13 @@ SEED = 0
 # Solver bookkeeping
 # ---------------------------------------------------------------------------
 
-# All solver types to benchmark.  MFCG is always run; CG and LDLT are
-# restricted to the first N_FULL_MAT outlier-ratio trials.
+# All solver types to benchmark.  MFCG variants are always run; CG and LDLT
+# are restricted to the first N_FULL_MAT outlier-ratio trials.
 ALL_SOLVERS = {
-    "MFCG": LinearSolverType.MFCG,
-    "CG":   LinearSolverType.CG,
-    "LDLT": LinearSolverType.LDLT,
+    "MFCG_LRP": LinearSolverType.MFCG_LRP,
+    "MFCG_DP":  LinearSolverType.MFCG_DP,
+    "CG":       LinearSolverType.CG,
+    "LDLT":     LinearSolverType.LDLT,
 }
 
 FULL_MAT_SOLVERS = {"CG", "LDLT"}
@@ -63,13 +64,11 @@ def make_ac_params(solver_type: LinearSolverType) -> AnalyticCenterParams:
     """Return a default AnalyticCenterParams with the given linear solver."""
     params = AnalyticCenterParams()
     params.verbose = True
-    params.check_cert = True
-    params.delta_min = 1e-9
-    params.delta_dec = 0.6
-    params.max_iter = 50
     params.lin_solver = solver_type
     params.lin_solve_max_iter = 200
     params.lin_solve_tol = 1e-4
+    params.lrp_params.tau = 1e-4
+    params.delta_init = 1e-5
     return params
 
 
@@ -125,7 +124,7 @@ def run_analysis(
 
         # ---- Solve the SDP relaxation (once per outrat) ----------------------
         # Use MFCG params for the problem setup (solver only matters for AC)
-        prob = MaxCliqueProblem(clipper, params=make_ac_params(LinearSolverType.MFCG))
+        prob = MaxCliqueProblem(clipper, params=make_ac_params(LinearSolverType.MFCG_DP))
 
         t_sdp_start = time.time()
         X_sdp, u_sdp, sdp_rank = prob.solve_sdp()
@@ -170,11 +169,12 @@ DEFAULT_CSV = "/workspace/python/results/max_clique_analysis.csv"
 def plot_runtime_vs_constraints(csv_path: str = DEFAULT_CSV) -> None:
     """Load results CSV and plot runtime vs number of constraints.
 
-    Four series are shown:
+        Five series are shown:
       - Interior Point  (SDP solve time, one per outrat)
       - LDLT            (analytic-center time)
       - CG              (analytic-center time)
-      - MFCG            (analytic-center time)
+            - MFCG_LRP        (analytic-center time)
+            - MFCG_DP         (analytic-center time)
 
     Parameters
     ----------
@@ -198,9 +198,10 @@ def plot_runtime_vs_constraints(csv_path: str = DEFAULT_CSV) -> None:
 
     # --- AC solvers ---
     solver_styles = {
-        "LDLT": {"marker": "^"},
-        "CG":   {"marker": "o"},
-        "MFCG": {"marker": "D"},
+        "LDLT":     {"marker": "^"},
+        "CG":       {"marker": "o"},
+        "MFCG_LRP": {"marker": "D"},
+        "MFCG_DP":  {"marker": "v"},
     }
     for solver_name, style in solver_styles.items():
         sub = df[df["solver"] == solver_name].sort_values("n_constraints")
@@ -237,7 +238,7 @@ if __name__ == "__main__":
     print(df.to_string(index=False))
 
     # Persist to CSV for later inspection
-    out_path = "/workspace/python/results/max_clique_analysis.csv"
+    out_path = "/workspace/python/results/max_clique_analysis_lrp.csv"
     df.to_csv(out_path, index=False)
     print(f"\nResults saved to {out_path}")
 
