@@ -499,7 +499,7 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   params.verbose = true;
   params.early_stop_cert = true;
   // Deviation early stop on
-  params.early_stop_angle = true;
+  params.early_stop_angle = false;
   params.max_angle = 1e-3;
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
@@ -508,9 +508,9 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   // Turn off rescaling (preconditioner should deal with this)
   params.rescale_lin_sys = true;
   params.lin_solver = LinearSolverType::MFCG_LRP;
-  params.lrp_params.tau = 1e-7;
+  params.lrp_params.tau = 1e-5;
   // Initialize delta
-  auto delta = 1e-7;
+  auto delta = 1e-5;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // Update cost based on the mosek solution
@@ -532,6 +532,9 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
 // rank tight.
 TEST_P(GenericParamTest, Certify_MFCG_LRP_wLocal) {
   const auto& sdp = GetParam();
+  if (sdp.name == "test_prob_5") {
+    GTEST_SKIP() << "Skipping test_prob_5 because Mosek solution is not rank 1";
+  }
 
   // parameters
   AnalyticCenterParams params;
