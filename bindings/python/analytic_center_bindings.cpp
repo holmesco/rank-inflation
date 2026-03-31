@@ -90,6 +90,19 @@ PYBIND11_MODULE(ranktools, m) {
           "Matrix-free conjugate gradient solver with low-rank preconditioner")
       .export_values();
 
+    // ---- LowRankPrecondParams ----
+    py::class_<LowRankPrecondParams>(m, "LowRankPrecondParams")
+            .def(py::init<>())
+            .def_readwrite("tau", &LowRankPrecondParams::tau)
+            .def_readwrite("use_sparse_factor", &LowRankPrecondParams::use_sparse_factor)
+            .def_readwrite("use_approx", &LowRankPrecondParams::use_approx)
+            .def_readwrite("ldlt_zero_thresh", &LowRankPrecondParams::ldlt_zero_thresh)
+            .def("__repr__", [](const LowRankPrecondParams& p) {
+                return "<LowRankPrecondParams tau=" + std::to_string(p.tau) +
+                             " use_sparse_factor=" +
+                             (p.use_sparse_factor ? "True" : "False") + ">";
+            });
+
   // ---- AnalyticCenterParams ----
   py::class_<AnalyticCenterParams>(m, "AnalyticCenterParams")
       .def(py::init<>())
@@ -106,7 +119,18 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("lin_solve_max_iter",
                      &AnalyticCenterParams::lin_solve_max_iter)
       .def_readwrite("lin_solve_tol", &AnalyticCenterParams::lin_solve_tol)
-      .def_readwrite("tau_lrp", &AnalyticCenterParams::tau_lrp)
+      .def_readwrite("lrp_params", &AnalyticCenterParams::lrp_params)
+      // Backward-compatible alias for older scripts.
+      .def_property(
+          "tau_lrp",
+          [](const AnalyticCenterParams& p) { return p.lrp_params.tau; },
+          [](AnalyticCenterParams& p, double tau) { p.lrp_params.tau = tau; })
+      // Low rank approximation
+      .def_readwrite("low_rank_approx", &AnalyticCenterParams::low_rank_approx)
+      .def_readwrite("low_rank_approx_rank",
+                     &AnalyticCenterParams::low_rank_approx_rank)
+      .def_readwrite("low_rank_approx_tol",
+                     &AnalyticCenterParams::low_rank_approx_tol)
       // Adaptive perturbation
       .def_readwrite("adaptive_perturb",
                      &AnalyticCenterParams::adaptive_perturb)

@@ -49,7 +49,7 @@ struct AnalyticCenterParams {
   bool adaptive_perturb = true;
   // final delta for centering (should be small to get close to boundary, but
   // not too small to cause numerical issues)
-  double delta_min = 1e-9;
+  double delta_min = 1e-7;
   // initial perturbation value for centering/certification
   double delta_init = 1e-5;
   // Max step size for increasing perturbation. If the step size is above this
@@ -116,7 +116,7 @@ struct AnalyticCenterParams {
   bool early_stop_angle = false;
   // Maximum allowable angle between the current solution and the candidate
   // solution for early stopping (in radians).
-  double max_angle = 5e-4;
+  double max_angle = 1e-2;
   // use the centrality metric from He et al. 1997
   bool use_cert_centrality_metric = false;
   // centrality metric tolerance
