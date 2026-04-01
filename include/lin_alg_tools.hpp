@@ -368,28 +368,51 @@ class LowRankPrecond {
 
   // Build the top right matrix = A_bar^T(U otimes Z)
   Matrix build_top_right(const Matrix& U, const Matrix& W0, double tau) const {
-    // Build the Z matrix s.t. Z Z^T = (2W0 + U U^T) = X + W0
-    Matrix Z;
-    if (!params_.use_approx) {
-      Eigen::LLT<Matrix> llt(U * U.transpose() + 2 * W0);
-      Z = llt.matrixL();
-    } else {
-      // if approximation set then ZZ^T = 2tau I
-      // Note: we rely on eigen to optimize this below.
-      Z = Matrix::Identity(dim, dim) * std::sqrt(2 * tau);
+    // Init Matrix
+    Matrix top_right(ncons, rank_ * dim);
+    // define convenience variables
+    const bool approx = params_.use_approx;
+    const double s = std::sqrt(2.0 * tau);
+    // if not approximating, store transpose of Z for computations
+    // if approximating with Z Z^T = 2tau I, then we can skip building Z and
+    // just use s = sqrt(2tau) as a scaling factor
+    Matrix Zt;
+    if (!approx) {
+      Eigen::LLT<Matrix> llt(U * U.transpose() + 2.0 * W0);
+      Zt = llt.matrixL().transpose();
     }
 
-    // Build the top right block of the augmented system matrix
-    auto top_right = Matrix(ncons, rank_ * dim);
-    for (int i = 0; i < ncons; i++) {
-      Matrix mat;
-      if (i < ncons - 1) {
-        mat = Z.transpose() * (*As_)[i].selfadjointView<Eigen::Upper>() * U;
+#ifdef RANKTOOLS_PARALLEL
+#pragma omp parallel for schedule(dynamic)
+#endif
+    // compute products, vectorize and store in top right block.
+    for (int i = 0; i < ncons - 1; ++i) {
+      Matrix AiU =
+          (*As_)[i].selfadjointView<Eigen::Upper>() * U;  // dim x rank_
+      if (approx) {
+        // Zt = I*s
+        top_right.row(i) =
+            Eigen::Map<const Eigen::RowVectorXd>(AiU.data(), AiU.size()) * s;
       } else {
-        mat = Z.transpose() * (*C_).selfadjointView<Eigen::Upper>() * U;
+        Matrix mat = Zt * AiU;  // dim x rank_
+        top_right.row(i) =
+            Eigen::Map<const Eigen::RowVectorXd>(mat.data(), mat.size());
       }
-      top_right.row(i) = Eigen::Map<Vector>(mat.data(), mat.size());
     }
+
+    // Last row uses C 
+    {
+      Matrix CU = (*C_).selfadjointView<Eigen::Upper>() * U;
+      if (approx) {
+        top_right.row(ncons - 1) =
+            Eigen::Map<const Eigen::RowVectorXd>(CU.data(), CU.size()) * s;
+      } else {
+        Matrix mat = Zt * CU;
+        top_right.row(ncons - 1) =
+            Eigen::Map<const Eigen::RowVectorXd>(mat.data(), mat.size());
+      }
+    }
+
     return top_right;
   }
 
