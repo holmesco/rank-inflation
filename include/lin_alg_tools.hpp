@@ -102,6 +102,9 @@ struct generic_product_impl<MultiplierLinSys, Rhs, SparseShape, DenseShape,
                             const Rhs& rhs, const Scalar& alpha) {
     // Construct product S = sum_i A_i * y_i
     Eigen::MatrixXd S = rhs(rhs.size() - 1) * lhs.C_;
+#ifdef RANKTOOLS_PARALLEL
+#pragma omp parallel for schedule(dynamic)
+#endif
     for (int i = 0; i < rhs.size() - 1; i++) {
       S += rhs(i) * lhs.As_[i];
     }
@@ -109,6 +112,9 @@ struct generic_product_impl<MultiplierLinSys, Rhs, SparseShape, DenseShape,
     Eigen::MatrixXd XS = lhs.X_ * S.selfadjointView<Eigen::Upper>();
     // Compute trace(Ai X S X) = trace((X*S)^T A_i X) = vec(X*S)^T vec(A_i X) =
     // vec(X*S)^T AX_[i]
+#ifdef RANKTOOLS_PARALLEL
+#pragma omp parallel for schedule(dynamic)
+#endif
     for (int i = 0; i < lhs.ncons; i++) {
       Eigen::Map<const Eigen::VectorXd> sxt(XS.data(), XS.size());
       Eigen::Map<const Eigen::VectorXd> ax(lhs.AX_[i].data(),
@@ -259,7 +265,7 @@ class LowRankPrecond {
         build_top_right(*U_, W0, params_.tau) * params_.tau;
     Sys.block(ncons, ncons, rank_ * dim, rank_ * dim) =
         -Matrix::Identity(rank_ * dim, rank_ * dim) * std::pow(params_.tau, 2);
-  
+
     // Prefactorize (LDLT)
     Factor.compute(Sys.selfadjointView<Eigen::Upper>());
     // Flag that we have initialized to eigen
