@@ -114,6 +114,7 @@ PYBIND11_MODULE(ranktools, m) {
                      &AnalyticCenterParams::reduce_violation)
       .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
       .def_readwrite("rescale_lin_sys", &AnalyticCenterParams::rescale_lin_sys)
+      .def_readwrite("perturb_constraints", &AnalyticCenterParams::perturb_constraints)
       .def_readwrite("lin_solver", &AnalyticCenterParams::lin_solver)
       // Iterative linear solve
       .def_readwrite("lin_solve_max_iter",
@@ -177,6 +178,7 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readonly("certified", &AnalyticCenterResult::certified)
       .def_readonly("min_eig", &AnalyticCenterResult::min_eig)
       .def_readonly("complementarity", &AnalyticCenterResult::complementarity)
+      .def_readonly("solver_time", &AnalyticCenterResult::solver_time)
       .def("__repr__", [](const AnalyticCenterResult& r) {
         return "<AnalyticCenterResult certified=" +
                std::string(r.certified ? "True" : "False") +

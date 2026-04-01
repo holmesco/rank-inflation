@@ -22,6 +22,8 @@ struct AnalyticCenterResult {
   double min_eig;
   // Complementarity condition (first order condition)
   double complementarity;
+  // Solver time
+  double solver_time;
 };
 
 struct AnalyticCenterParams {
@@ -40,6 +42,8 @@ struct AnalyticCenterParams {
   // Rescaling is akin to scaling the log det objective by delta and improves
   // conditioning.
   bool rescale_lin_sys = true;
+  // Flag to turn on perturbation of the constraints by delta
+  bool perturb_constraints = true;
   // Select linear solver for centering step
   LinearSolverType lin_solver = LinearSolverType::LDLT;
 
