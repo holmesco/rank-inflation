@@ -31,6 +31,23 @@ inline std::string print_solver(LinearSolverType solver) {
 class MultiplierLinSys;
 using Eigen::SparseMatrix;
 
+inline double sparse_upper_dot_dense(const SparseMatrix<double>& A_upper,
+                                     const Eigen::MatrixXd& M) {
+  double sum = 0.0;
+  for (int k = 0; k < A_upper.outerSize(); ++k) {
+    for (SparseMatrix<double>::InnerIterator it(A_upper, k); it; ++it) {
+      const int r = it.row();
+      const int c = it.col();
+      if (r == c) {
+        sum += it.value() * M(r, c);
+      } else if (c > r) {
+        sum += it.value() * (M(r, c) + M(c, r)); 
+      }
+    }
+  }
+  return sum;
+}
+
 namespace Eigen {
 namespace internal {
 // MultiplierLinSys looks-like a dense matrix, so we inheret its traits:
@@ -66,8 +83,6 @@ class MultiplierLinSys : public Eigen::EigenBase<MultiplierLinSys> {
   const Eigen::MatrixXd& X_;
   const std::vector<Eigen::SparseMatrix<double>>& As_;
   const Eigen::MatrixXd& C_;
-  const std::vector<Eigen::MatrixXd>&
-      AX_;  // precomputed A_i * X and C * X products
   const int ncons;
   // perturbation parameter
   double scale_;
@@ -76,9 +91,8 @@ class MultiplierLinSys : public Eigen::EigenBase<MultiplierLinSys> {
   // constraint matrices)
   MultiplierLinSys(const Eigen::MatrixXd& X,
                    const std::vector<Eigen::SparseMatrix<double>>& As,
-                   const Eigen::MatrixXd& C,
-                   const std::vector<Eigen::MatrixXd>& AX, double scale)
-      : X_(X), As_(As), C_(C), AX_(AX), ncons(As.size() + 1), scale_(scale) {}
+                   const Eigen::MatrixXd& C, double scale)
+      : X_(X), As_(As), C_(C), ncons(As.size() + 1), scale_(scale) {}
 };
 
 // Implementation of MultiplierLinSys * Eigen::DenseVector though a
@@ -101,27 +115,20 @@ struct generic_product_impl<MultiplierLinSys, Rhs, SparseShape, DenseShape,
   static void scaleAndAddTo(Dest& dst, const MultiplierLinSys& lhs,
                             const Rhs& rhs, const Scalar& alpha) {
     // Construct product S = sum_i A_i * y_i
+    // NOTE: Cannot parallelize this loop because of common S
     Eigen::MatrixXd S = rhs(rhs.size() - 1) * lhs.C_;
-#ifdef RANKTOOLS_PARALLEL
-#pragma omp parallel for schedule(dynamic)
-#endif
     for (int i = 0; i < rhs.size() - 1; i++) {
       S += rhs(i) * lhs.As_[i];
     }
-    // Compute (S*X)^T = X*S
-    Eigen::MatrixXd XS = lhs.X_ * S.selfadjointView<Eigen::Upper>();
-    // Compute trace(Ai X S X) = trace((X*S)^T A_i X) = vec(X*S)^T vec(A_i X) =
-    // vec(X*S)^T AX_[i]
+    // Compute X*S*X once, then each output coordinate is a sparse-dense dot.
+    Eigen::MatrixXd XSX = lhs.X_ * S.selfadjointView<Eigen::Upper>() * lhs.X_;
 #ifdef RANKTOOLS_PARALLEL
 #pragma omp parallel for schedule(dynamic)
 #endif
-    for (int i = 0; i < lhs.ncons; i++) {
-      Eigen::Map<const Eigen::VectorXd> sxt(XS.data(), XS.size());
-      Eigen::Map<const Eigen::VectorXd> ax(lhs.AX_[i].data(),
-                                           lhs.AX_[i].size());
-      dst(i) += sxt.dot(ax) * alpha * lhs.scale_;
-      ;
+    for (int i = 0; i < lhs.ncons - 1; i++) {
+      dst(i) += sparse_upper_dot_dense(lhs.As_[i], XSX) * alpha * lhs.scale_;
     }
+    dst(lhs.ncons - 1) += lhs.C_.cwiseProduct(XSX).sum() * alpha * lhs.scale_;
   }
 };
 
@@ -142,10 +149,15 @@ class MultiplierDiagPreconditioner {
   // Eigen's CG calls compute(mat) with the matrix-free operator
   MultiplierDiagPreconditioner& compute(const MultiplierLinSys& op) {
     inv_diag_.resize(op.ncons);
-    for (int i = 0; i < op.ncons; ++i) {
-      double diag_val = (op.AX_[i] * op.AX_[i]).trace() * op.scale_;
+    for (int i = 0; i < op.ncons - 1; ++i) {
+      const Eigen::MatrixXd AX =
+          op.As_[i].selfadjointView<Eigen::Upper>() * op.X_;
+      const double diag_val = (AX * AX).trace() * op.scale_;
       inv_diag_(i) = (diag_val != Scalar(0)) ? 1.0 / diag_val : 1.0;
     }
+    const Eigen::MatrixXd CX = op.C_.selfadjointView<Eigen::Upper>() * op.X_;
+    const double diag_cost = (CX * CX).trace() * op.scale_;
+    inv_diag_(op.ncons - 1) = (diag_cost != Scalar(0)) ? 1.0 / diag_cost : 1.0;
     is_initialized_ = true;
     return *this;
   }

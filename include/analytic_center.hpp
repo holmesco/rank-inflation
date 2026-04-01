@@ -211,9 +211,6 @@ class AnalyticCenter {
     Vector d;          // RHS vector (m)
     Vector violation;  // constraint violation (m)
     SpMatrix A_bar;
-    std::vector<double> A_trace;  // diagonal traces of A_i
-    std::vector<Matrix>
-        AX;  // A_i * X for each constraint (for efficient matrix-free ops)
     std::unique_ptr<MultiplierLinSys>
         B_mf;  // Matrix-free operator for B (if using matrix-free solver)
     const Matrix&
@@ -225,8 +222,6 @@ class AnalyticCenter {
           d(Vector(m)),
           violation(Vector(m)),
           A_bar(SpMatrix(dim * dim, m)),
-          A_trace(std::vector<double>(m)),
-          AX(std::vector<Matrix>(m)),
           B_mf(nullptr),
           X_(X) {}
   };

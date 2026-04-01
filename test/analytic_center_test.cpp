@@ -143,8 +143,7 @@ TEST_P(LovazsParamTest, CertEarlyStopping) {
   // get current solution
   Matrix Y_0 = sdp.make_solution(1);
   // Run rank inflation, without inflation (target rank is 1)
-    auto [X, multipliers] =
-      problem.get_analytic_center(Y_0 * Y_0.transpose());
+  auto [X, multipliers] = problem.get_analytic_center(Y_0 * Y_0.transpose());
   std::cout
       << "Eigenvalues of Center: " << std::endl
       << Eigen::SelfAdjointEigenSolver<Matrix>(X).eigenvalues().transpose()
@@ -277,8 +276,7 @@ TEST(MatrixFree, Product) {
   // Build the explicit system to get the true diagonal of B
   auto system = problem.build_ac_system(X, delta);
   // Build the matrix-free operator
-  auto lin_op =
-      MultiplierLinSys(X, problem.A_, problem.C_, system.AX, 1 / delta);
+  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, 1 / delta);
   // Test on columns of identity
   auto Id = Matrix::Identity(sdp.dim, sdp.dim);
   for (int i = 0; i < sdp.dim; i++) {
@@ -317,8 +315,7 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   // Build the explicit system to get the true diagonal of B
   auto system = problem.build_ac_system(X, delta);
   // Build the matrix-free operator and preconditioner
-  auto lin_op =
-      MultiplierLinSys(X, problem.A_, problem.C_, system.AX, 1 / delta);
+  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, 1 / delta);
   MultiplierDiagPreconditioner precond;
   precond.compute(lin_op);
   // Check that the preconditioner computed successfully
@@ -364,8 +361,10 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
   AnalyticCenterParams params;
   params.verbose = true;
   params.rescale_lin_sys = false;
+  params.lrp_params.use_sparse_factor = true;  // Use dense factorization for testing purposes
+  // Match delta and tau to get exact preconditioner for this case
   auto delta = 1e-6;
-  params.lrp_params.tau = 1e-4;
+  params.lrp_params.tau = 1e-6;
 
   // get problem
   auto problem = sdp.make_testable(params);
@@ -406,7 +405,7 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
   for (int i = 0; i < problem.m; ++i) {
     PB.col(i) = precond.solve(B.col(i));
   }
-  std::cout << PB << std::endl;
+  // std::cout << PB << std::endl;
   // Inspect spectrum of PB.
   Eigen::EigenSolver<Matrix> es(PB);
   ASSERT_EQ(es.info(), Eigen::Success);
@@ -505,9 +504,6 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   AnalyticCenterParams params;
   params.verbose = true;
   params.early_stop_cert = true;
-  // Deviation early stop on
-  params.early_stop_angle = false;
-  params.max_angle = 1e-3;
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-7;

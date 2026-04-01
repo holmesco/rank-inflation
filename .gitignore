@@ -13,3 +13,4 @@ python/examples/
 *.csv
 *.so
 *.pyi
+callgrind*
