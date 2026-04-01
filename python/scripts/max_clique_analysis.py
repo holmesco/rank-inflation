@@ -27,17 +27,17 @@ N_OUTRAT = 10
 
 # Range of outlier ratios (log-spaced between these bounds)
 OUTRAT_MIN = 0.1
-OUTRAT_MAX = 0.98
+OUTRAT_MAX = 0.90
 
-# Number of trials (from the low-outrat end) for which the expensive
-# full-matrix solvers (CG, LDLT) are also run.  Set to N_OUTRAT to
-# run them for every trial.
+# Number of trials (from the low-outrat end) for 
+# which slow solver is also run.  Set to N_OUTRAT 
+# to run them for every trial.
 N_FULL_MAT = 0
 
 # Dataset parameters (mirroring max_clique.py __main__)
-M_ASSOC = 120       # total number of associations
-N1 = 120            # model points in view 1
-N2O = 12            # outlier points in view 2
+M_ASSOC = 130       # total number of associations
+N1 = 130            # model points in view 1
+N2O = 13            # outlier points in view 2
 SIGMA = 0.01        # uniform noise [m]
 PCFILE = "/workspace/python/examples/bun10k.ply"
 
@@ -53,11 +53,11 @@ SEED = 0
 ALL_SOLVERS = {
     "MFCG_LRP": LinearSolverType.MFCG_LRP,
     "MFCG_DP":  LinearSolverType.MFCG_DP,
-    "CG":       LinearSolverType.CG,
-    "LDLT":     LinearSolverType.LDLT,
+    # "CG":       LinearSolverType.CG,
+    # "LDLT":     LinearSolverType.LDLT,
 }
 
-FULL_MAT_SOLVERS = {"CG", "LDLT"}
+SLOW_SOLVERS = {"MFCG_DP"}
 
 
 def make_ac_params(solver_type: LinearSolverType) -> AnalyticCenterParams:
@@ -67,8 +67,12 @@ def make_ac_params(solver_type: LinearSolverType) -> AnalyticCenterParams:
     params.lin_solver = solver_type
     params.lin_solve_max_iter = 200
     params.lin_solve_tol = 1e-4
-    params.lrp_params.tau = 1e-4
-    params.delta_init = 1e-5
+    params.lrp_params.tau = 1e-5
+    params.delta_init = 1e-7
+    params.delta_min = 1e-8
+    # Turn off perturbations:
+    params.perturb_constraints = False
+    params.adaptive_perturb = False
     return params
 
 
@@ -126,9 +130,7 @@ def run_analysis(
         # Use MFCG params for the problem setup (solver only matters for AC)
         prob = MaxCliqueProblem(clipper, params=make_ac_params(LinearSolverType.MFCG_DP))
 
-        t_sdp_start = time.time()
-        X_sdp, u_sdp, sdp_rank = prob.solve_sdp()
-        sdp_time = time.time() - t_sdp_start
+        X_sdp, u_sdp, sdp_rank, sdp_time, eig_ratio = prob.solve_sdp()
 
         n_constraints = len(prob.As)
         sdp_cost = -(u_sdp.T @ prob.M @ u_sdp).item()
@@ -136,14 +138,14 @@ def run_analysis(
         # ---- Certify with each requested solver ------------------------------
         for solver_name, solver_enum in ALL_SOLVERS.items():
             # Skip expensive full-matrix solvers beyond the first n_full_mat
-            if solver_name in FULL_MAT_SOLVERS and i_trial >= n_full_mat:
+            if solver_name in SLOW_SOLVERS and i_trial >= n_full_mat:
                 continue
 
             print(f"\n--- Solver: {solver_name} ---")
             params = make_ac_params(solver_enum)
             prob_solver = MaxCliqueProblem(clipper, params=params)
 
-            result, ac_time = prob_solver.certify_candidate(u_sdp, cost=sdp_cost, delta=1e-5)
+            result = prob_solver.certify_candidate(u_sdp, cost=sdp_cost)
 
             records.append(
                 {
@@ -152,10 +154,11 @@ def run_analysis(
                     "n_constraints": n_constraints,
                     "sdp_time_s": sdp_time,
                     "sdp_rank": sdp_rank,
-                    "ac_time_s": ac_time,
+                    "ac_time_s": result.solver_time,
                     "certified": result.certified,
                     "min_eig": result.min_eig,
                     "complementarity": result.complementarity,
+                    "eig_ratio": eig_ratio
                 }
             )
 
@@ -226,6 +229,43 @@ def plot_runtime_vs_constraints(csv_path: str = DEFAULT_CSV) -> None:
     plt.show()
 
 
+def plot_eig_ratio_vs_constraints(csv_path: str = DEFAULT_CSV) -> None:
+    """Load results CSV and plot eigenvalue ratio vs number of constraints.
+
+    One series is shown:
+      - Eigenvalue Ratio (SDP eig_ratio, one per outrat)
+
+    Parameters
+    ----------
+    csv_path : str
+        Path to the CSV produced by ``run_analysis``.
+    """
+    df = pd.read_csv(csv_path)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+
+    eig = df.drop_duplicates(subset="n_constraints")[["n_constraints", "eig_ratio"]]
+    eig = eig.sort_values("n_constraints")
+
+    ax.plot(
+        eig["n_constraints"],
+        eig["eig_ratio"],
+        marker="o",
+        label="Eigenvalue Ratio",
+    )
+
+    ax.set_xlabel("Number of constraints")
+    ax.set_ylabel("Eigenvalue ratio")
+    ax.set_title("Eigenvalue Ratio vs. Number of Constraints")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    fig.tight_layout()
+    plt.savefig(csv_path.replace(".csv", "_eig_ratio.png"), dpi=150)
+    plt.show()
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -244,3 +284,6 @@ if __name__ == "__main__":
 
     # Generate the runtime plot
     plot_runtime_vs_constraints(out_path)
+
+    # Generate eigenvalue ratio plot
+    plot_eig_ratio_vs_constraints(out_path)

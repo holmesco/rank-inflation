@@ -1,5 +1,7 @@
 #include "analytic_center.hpp"
 
+#include <valgrind/callgrind.h>
+
 namespace RankTools {
 
 AnalyticCenter::AnalyticCenter(
@@ -86,7 +88,13 @@ std::pair<double, double> AnalyticCenter::check_certificate(
 
 AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0) const {
   // Run analtyic center solve
+  CALLGRIND_START_INSTRUMENTATION;
+  auto start = std::chrono::high_resolution_clock::now();
   auto [X, mult_scaled] = get_analytic_center(Y_0);
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> elapsed = end - start;
+  CALLGRIND_STOP_INSTRUMENTATION;
+  CALLGRIND_DUMP_STATS;
   auto H = build_certificate_from_dual(mult_scaled);
   // Check certificate at the final solution
   auto [min_eig, complementarity] = eval_certificate(H, Y_0);
@@ -100,6 +108,24 @@ AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0) const {
                      (complementarity <= params_.tol_cert_complementarity);
   result.min_eig = min_eig;
   result.complementarity = complementarity;
+  result.solver_time = elapsed.count();
+  if (params_.verbose) {
+    std::cout << "Analytic Center took " << result.solver_time << " seconds."
+              << std::endl;
+    std::cout << "Certificate Evaluation at Solution: " << std::endl;
+    std::cout << "Minimum Eigenvalue of Certificate Matrix: " << min_eig
+              << std::endl;
+    std::cout << "Complementarity (Stationarity Condition): " << complementarity
+              << std::endl;
+    if (result.certified) {
+      std::cout << "The solution is certified as a global minimum."
+                << std::endl;
+    } else {
+      std::cout << "The solution is NOT certified as a global minimum."
+                << std::endl;
+    }
+  }
+
   return result;
 }
 
@@ -268,11 +294,19 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
     if (i < a_size) {
       sys.AX[i] = A_[i].selfadjointView<Eigen::Upper>() * X;
       sys.A_trace[i] = A_[i].diagonal().sum();
-      val = b_[i];// + delta * sys.A_trace[i];
+      if (params_.perturb_constraints) {
+        val = b_[i] + delta * sys.A_trace[i];
+      } else {
+        val = b_[i];
+      }
     } else {
       sys.AX[i] = C_.selfadjointView<Eigen::Upper>() * X;
       sys.A_trace[i] = C_.diagonal().sum();
-      val = rho_;// + delta * sys.A_trace[i];
+      if (params_.perturb_constraints) {
+        val = rho_ + delta * sys.A_trace[i];
+      } else {
+        val = rho_;
+      }
     }
     // Set RHS of the system
     sys.d(i) = sys.AX[i].trace();
