@@ -25,5 +25,6 @@ wheel.install-dir = "."
 # Usage examples:
 #   pip install .                                       # Release, no debug
 #   pip install . -C cmake.define.DEBUG_FLAG=ON         # Release + debug prints
+#   pip install . -C cmake.define.ENABLE_PARALLEL=ON    # turn on parallel loops
 #   pip install . -C cmake.define.CMAKE_BUILD_TYPE=Debug                     # Debug build
 #   pip install . -C cmake.define.CMAKE_BUILD_TYPE=Debug -C cmake.define.DEBUG_FLAG=ON  # both

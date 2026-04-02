@@ -31,6 +31,23 @@ inline std::string print_solver(LinearSolverType solver) {
 class MultiplierLinSys;
 using Eigen::SparseMatrix;
 
+inline double sparse_upper_dot_dense(const SparseMatrix<double>& A_upper,
+                                     const Eigen::MatrixXd& M) {
+  double sum = 0.0;
+  for (int k = 0; k < A_upper.outerSize(); ++k) {
+    for (SparseMatrix<double>::InnerIterator it(A_upper, k); it; ++it) {
+      const int r = it.row();
+      const int c = it.col();
+      if (r == c) {
+        sum += it.value() * M(r, c);
+      } else if (c > r) {
+        sum += it.value() * (M(r, c) + M(c, r)); 
+      }
+    }
+  }
+  return sum;
+}
+
 namespace Eigen {
 namespace internal {
 // MultiplierLinSys looks-like a dense matrix, so we inheret its traits:
@@ -66,8 +83,6 @@ class MultiplierLinSys : public Eigen::EigenBase<MultiplierLinSys> {
   const Eigen::MatrixXd& X_;
   const std::vector<Eigen::SparseMatrix<double>>& As_;
   const Eigen::MatrixXd& C_;
-  const std::vector<Eigen::MatrixXd>&
-      AX_;  // precomputed A_i * X and C * X products
   const int ncons;
   // perturbation parameter
   double scale_;
@@ -76,9 +91,8 @@ class MultiplierLinSys : public Eigen::EigenBase<MultiplierLinSys> {
   // constraint matrices)
   MultiplierLinSys(const Eigen::MatrixXd& X,
                    const std::vector<Eigen::SparseMatrix<double>>& As,
-                   const Eigen::MatrixXd& C,
-                   const std::vector<Eigen::MatrixXd>& AX, double scale)
-      : X_(X), As_(As), C_(C), AX_(AX), ncons(As.size() + 1), scale_(scale) {}
+                   const Eigen::MatrixXd& C, double scale)
+      : X_(X), As_(As), C_(C), ncons(As.size() + 1), scale_(scale) {}
 };
 
 // Implementation of MultiplierLinSys * Eigen::DenseVector though a
@@ -101,21 +115,20 @@ struct generic_product_impl<MultiplierLinSys, Rhs, SparseShape, DenseShape,
   static void scaleAndAddTo(Dest& dst, const MultiplierLinSys& lhs,
                             const Rhs& rhs, const Scalar& alpha) {
     // Construct product S = sum_i A_i * y_i
+    // NOTE: Cannot parallelize this loop because of common S
     Eigen::MatrixXd S = rhs(rhs.size() - 1) * lhs.C_;
     for (int i = 0; i < rhs.size() - 1; i++) {
       S += rhs(i) * lhs.As_[i];
     }
-    // Compute (S*X)^T = X*S
-    Eigen::MatrixXd XS = lhs.X_ * S.selfadjointView<Eigen::Upper>();
-    // Compute trace(Ai X S X) = trace((X*S)^T A_i X) = vec(X*S)^T vec(A_i X) =
-    // vec(X*S)^T AX_[i]
-    for (int i = 0; i < lhs.ncons; i++) {
-      Eigen::Map<const Eigen::VectorXd> sxt(XS.data(), XS.size());
-      Eigen::Map<const Eigen::VectorXd> ax(lhs.AX_[i].data(),
-                                           lhs.AX_[i].size());
-      dst(i) += sxt.dot(ax) * alpha * lhs.scale_;
-      ;
+    // Compute X*S*X once, then each output coordinate is a sparse-dense dot.
+    Eigen::MatrixXd XSX = lhs.X_ * S.selfadjointView<Eigen::Upper>() * lhs.X_;
+#ifdef RANKTOOLS_PARALLEL
+#pragma omp parallel for schedule(dynamic)
+#endif
+    for (int i = 0; i < lhs.ncons - 1; i++) {
+      dst(i) += sparse_upper_dot_dense(lhs.As_[i], XSX) * alpha * lhs.scale_;
     }
+    dst(lhs.ncons - 1) += lhs.C_.cwiseProduct(XSX).sum() * alpha * lhs.scale_;
   }
 };
 
@@ -136,10 +149,15 @@ class MultiplierDiagPreconditioner {
   // Eigen's CG calls compute(mat) with the matrix-free operator
   MultiplierDiagPreconditioner& compute(const MultiplierLinSys& op) {
     inv_diag_.resize(op.ncons);
-    for (int i = 0; i < op.ncons; ++i) {
-      double diag_val = (op.AX_[i] * op.AX_[i]).trace() * op.scale_;
+    for (int i = 0; i < op.ncons - 1; ++i) {
+      const Eigen::MatrixXd AX =
+          op.As_[i].selfadjointView<Eigen::Upper>() * op.X_;
+      const double diag_val = (AX * AX).trace() * op.scale_;
       inv_diag_(i) = (diag_val != Scalar(0)) ? 1.0 / diag_val : 1.0;
     }
+    const Eigen::MatrixXd CX = op.C_.selfadjointView<Eigen::Upper>() * op.X_;
+    const double diag_cost = (CX * CX).trace() * op.scale_;
+    inv_diag_(op.ncons - 1) = (diag_cost != Scalar(0)) ? 1.0 / diag_cost : 1.0;
     is_initialized_ = true;
     return *this;
   }
@@ -259,7 +277,7 @@ class LowRankPrecond {
         build_top_right(*U_, W0, params_.tau) * params_.tau;
     Sys.block(ncons, ncons, rank_ * dim, rank_ * dim) =
         -Matrix::Identity(rank_ * dim, rank_ * dim) * std::pow(params_.tau, 2);
-  
+
     // Prefactorize (LDLT)
     Factor.compute(Sys.selfadjointView<Eigen::Upper>());
     // Flag that we have initialized to eigen
@@ -350,28 +368,51 @@ class LowRankPrecond {
 
   // Build the top right matrix = A_bar^T(U otimes Z)
   Matrix build_top_right(const Matrix& U, const Matrix& W0, double tau) const {
-    // Build the Z matrix s.t. Z Z^T = (2W0 + U U^T) = X + W0
-    Matrix Z;
-    if (!params_.use_approx) {
-      Eigen::LLT<Matrix> llt(U * U.transpose() + 2 * W0);
-      Z = llt.matrixL();
-    } else {
-      // if approximation set then ZZ^T = 2tau I
-      // Note: we rely on eigen to optimize this below.
-      Z = Matrix::Identity(dim, dim) * std::sqrt(2 * tau);
+    // Init Matrix
+    Matrix top_right(ncons, rank_ * dim);
+    // define convenience variables
+    const bool approx = params_.use_approx;
+    const double s = std::sqrt(2.0 * tau);
+    // if not approximating, store transpose of Z for computations
+    // if approximating with Z Z^T = 2tau I, then we can skip building Z and
+    // just use s = sqrt(2tau) as a scaling factor
+    Matrix Zt;
+    if (!approx) {
+      Eigen::LLT<Matrix> llt(U * U.transpose() + 2.0 * W0);
+      Zt = llt.matrixL().transpose();
     }
 
-    // Build the top right block of the augmented system matrix
-    auto top_right = Matrix(ncons, rank_ * dim);
-    for (int i = 0; i < ncons; i++) {
-      Matrix mat;
-      if (i < ncons - 1) {
-        mat = Z.transpose() * (*As_)[i].selfadjointView<Eigen::Upper>() * U;
+#ifdef RANKTOOLS_PARALLEL
+#pragma omp parallel for schedule(dynamic)
+#endif
+    // compute products, vectorize and store in top right block.
+    for (int i = 0; i < ncons - 1; ++i) {
+      Matrix AiU =
+          (*As_)[i].selfadjointView<Eigen::Upper>() * U;  // dim x rank_
+      if (approx) {
+        // Zt = I*s
+        top_right.row(i) =
+            Eigen::Map<const Eigen::RowVectorXd>(AiU.data(), AiU.size()) * s;
       } else {
-        mat = Z.transpose() * (*C_).selfadjointView<Eigen::Upper>() * U;
+        Matrix mat = Zt * AiU;  // dim x rank_
+        top_right.row(i) =
+            Eigen::Map<const Eigen::RowVectorXd>(mat.data(), mat.size());
       }
-      top_right.row(i) = Eigen::Map<Vector>(mat.data(), mat.size());
     }
+
+    // Last row uses C 
+    {
+      Matrix CU = (*C_).selfadjointView<Eigen::Upper>() * U;
+      if (approx) {
+        top_right.row(ncons - 1) =
+            Eigen::Map<const Eigen::RowVectorXd>(CU.data(), CU.size()) * s;
+      } else {
+        Matrix mat = Zt * CU;
+        top_right.row(ncons - 1) =
+            Eigen::Map<const Eigen::RowVectorXd>(mat.data(), mat.size());
+      }
+    }
+
     return top_right;
   }
 

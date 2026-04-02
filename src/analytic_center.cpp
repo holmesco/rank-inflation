@@ -1,5 +1,7 @@
 #include "analytic_center.hpp"
 
+#include <valgrind/callgrind.h>
+
 namespace RankTools {
 
 AnalyticCenter::AnalyticCenter(
@@ -86,7 +88,13 @@ std::pair<double, double> AnalyticCenter::check_certificate(
 
 AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0) const {
   // Run analtyic center solve
+  CALLGRIND_START_INSTRUMENTATION;
+  auto start = std::chrono::high_resolution_clock::now();
   auto [X, mult_scaled] = get_analytic_center(Y_0);
+  auto end = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> elapsed = end - start;
+  CALLGRIND_STOP_INSTRUMENTATION;
+  CALLGRIND_DUMP_STATS;
   auto H = build_certificate_from_dual(mult_scaled);
   // Check certificate at the final solution
   auto [min_eig, complementarity] = eval_certificate(H, Y_0);
@@ -100,6 +108,24 @@ AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0) const {
                      (complementarity <= params_.tol_cert_complementarity);
   result.min_eig = min_eig;
   result.complementarity = complementarity;
+  result.solver_time = elapsed.count();
+  if (params_.verbose) {
+    std::cout << "Analytic Center took " << result.solver_time << " seconds."
+              << std::endl;
+    std::cout << "Certificate Evaluation at Solution: " << std::endl;
+    std::cout << "Minimum Eigenvalue of Certificate Matrix: " << min_eig
+              << std::endl;
+    std::cout << "Complementarity (Stationarity Condition): " << complementarity
+              << std::endl;
+    if (result.certified) {
+      std::cout << "The solution is certified as a global minimum."
+                << std::endl;
+    } else {
+      std::cout << "The solution is NOT certified as a global minimum."
+                << std::endl;
+    }
+  }
+
   return result;
 }
 
@@ -260,22 +286,29 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
   // Initialize system data
   LinSysData sys(X, dim, m);
   const int a_size = static_cast<int>(A_.size());
+  
 #ifdef RANKTOOLS_PARALLEL
 #pragma omp parallel for schedule(dynamic)
 #endif
   for (int i = 0; i < m; i++) {
     double val;
     if (i < a_size) {
-      sys.AX[i] = A_[i].selfadjointView<Eigen::Upper>() * X;
-      sys.A_trace[i] = A_[i].diagonal().sum();
-      val = b_[i];// + delta * sys.A_trace[i];
+      const double trace_Ai = A_[i].diagonal().sum();
+      if (params_.perturb_constraints) {
+        val = b_[i] + delta * trace_Ai;
+      } else {
+        val = b_[i];
+      }
+      sys.d(i) = sparse_upper_dot_dense(A_[i], X);
     } else {
-      sys.AX[i] = C_.selfadjointView<Eigen::Upper>() * X;
-      sys.A_trace[i] = C_.diagonal().sum();
-      val = rho_;// + delta * sys.A_trace[i];
+      const double trace_C = C_.diagonal().sum();
+      if (params_.perturb_constraints) {
+        val = rho_ + delta * trace_C;
+      } else {
+        val = rho_;
+      }
+      sys.d(i) = C_.cwiseProduct(X).sum();
     }
-    // Set RHS of the system
-    sys.d(i) = sys.AX[i].trace();
     // compute violation
     sys.violation(i) = sys.d(i) - val;
     // adjusted rhs to include violation if enabled
@@ -289,13 +322,21 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
   if (params_.lin_solver == LinearSolverType::MFCG_DP ||
       params_.lin_solver == LinearSolverType::MFCG_LRP) {
     // If using matrix-free solver, build the matrix-free operator for the LHS
-    sys.B_mf =
-        std::make_unique<MultiplierLinSys>(X, A_, C_, sys.AX, sys.scale_);
+    sys.B_mf = std::make_unique<MultiplierLinSys>(X, A_, C_, sys.scale_);
   } else {
+    std::vector<Matrix> AX_local(m);
+#ifdef RANKTOOLS_PARALLEL
+#pragma omp parallel for schedule(dynamic)
+#endif
+    for (int i = 0; i < a_size; ++i) {
+      AX_local[i] = A_[i].selfadjointView<Eigen::Upper>() * X;
+    }
+    AX_local[m - 1] = C_.selfadjointView<Eigen::Upper>() * X;
+
     sys.B.setZero();
     for (int i = 0; i < m; i++) {
       for (int j = i; j < m; j++) {
-        sys.B(i, j) = sys.scale_ * (sys.AX[i] * sys.AX[j]).trace();
+        sys.B(i, j) = sys.scale_ * (AX_local[i] * AX_local[j]).trace();
       }
     }
   }

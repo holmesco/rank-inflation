@@ -8,6 +8,7 @@ from scipy.sparse import csc_array
 import clipperpy
 from cert_tools.sdp_solvers import solve_sdp_fusion, adjust_Q
 from ranktools import AnalyticCenter, AnalyticCenterParams, LinearSolverType
+import pickle
 
 
 def randsphere(m,n,r):
@@ -134,11 +135,16 @@ class MaxCliqueProblem:
         else:
             self.params = AnalyticCenterParams()
             self.params.verbose = True
+            self.params.verbose = True
             self.params.lin_solver = LinearSolverType.MFCG_LRP
             self.params.lin_solve_max_iter = 200
             self.params.lin_solve_tol = 1e-4
-            self.params.lrp_params.tau = 1e-4
+            self.params.lrp_params.tau = 1e-5
             self.params.delta_init = 1e-5
+            self.params.delta_min = 1e-8
+            # Turn off perturbations:
+            self.params.perturb_constraints = False
+            self.params.adaptive_perturb = False
         
 
     def get_constraints(self):
@@ -170,7 +176,7 @@ class MaxCliqueProblem:
         
         return constraints, values
     
-    def certify_candidate(self, x_cand, cost=None,delta=1e-5):
+    def certify_candidate(self, x_cand, cost=None):
         """Certify the optimality of a candidate solution to the maximum clique problem.
         
         Parameters
@@ -185,8 +191,6 @@ class MaxCliqueProblem:
         result : AnalyticCenterResult
             Result of the certification process, including whether the solution is certified, 
             minimum eigenvalue of the dual variable, and complementarity measure.
-        time_ac : float
-            Time taken for the analytic center certification process.
         """
         # Get cost of candidate solution
         if cost is None:
@@ -196,11 +200,8 @@ class MaxCliqueProblem:
         # Run certifier
         ac = AnalyticCenter(C=-self.M, rho=cost, A=self.As, b=self.bs, params=self.params)
         print("Running analytic center certifier...")
-        t1 = time.time()
-        self.params.delta_init = delta
         result = ac.certify(x_cand)
-        time_ac = (time.time() - t1)
-        print(f"------- time for AC: {time_ac*1e3:.0f} ms")
+        print(f"------- time for AC: {result.solver_time*1e3:.0f} ms")
         print(f"AC Result: certified={result.certified}  min_eig={result.min_eig:.6e}  complementarity={result.complementarity:.6e}")
         
         # DEBUG
@@ -209,7 +210,7 @@ class MaxCliqueProblem:
         print(f"Complementarity of candidate solution: {x_cand.T @ result.H @ x_cand}")
         print(f"Cost of inflated solution: {np.trace(-self.M @ result.X)}, Actual cost: {cost}")
         
-        return result, time_ac
+        return result
     
     def solve_clipper(self):
         """Solve the maximum clique problem using Clipper and certify the solution."""
@@ -256,14 +257,13 @@ class MaxCliqueProblem:
             constraints.append((A_i, b_i))
 
         # Solve SDP: min <Q, X> s.t. <A_i, X> = b_i, X >= 0
-        t1 = time.time()
         X_sol, info = solve_sdp_fusion(
             Q=Q,
             Constraints=constraints,
             adjust=False,
             verbose=True,
         )
-        time_sdp = time.time() - t1
+        time_sdp = info["time"]
         print(f"SDP solve time: {time_sdp*1e3:.0f} ms")
 
         # # Extract rank-1 solution via eigendecomposition
@@ -278,19 +278,23 @@ class MaxCliqueProblem:
         print(f"Cost of leading eigenvector solution: {cost_u}")
         rank = np.sum(eigvals > 1e-6*eigvals[-1])
         print(f"Rank of SDP solution (tol=1e-6): {rank}")
-
-        return X_sol, u, rank
+        eig_ratio = eigvals[-1]/eigvals[-2]
+        
+        return X_sol, u, rank, time_sdp, eig_ratio
         
         
 
     
 if __name__ == "__main__":
+    load_soln = True
+    output_path = "/workspace/python/scripts/u_solution.pkl"
+    
     np.random.seed(0)
     # Build a bunny dataset
-    m = 100      # total number of associations in problem
-    n1 = 100     # number of points used on model (i.e., seen in view 1)
-    n2o = 10     # number of outliers in data (i.e., seen in view 2)
-    outrat = 0.1 # outlier ratio of initial association set
+    m = 200      # total number of associations in problem
+    n1 = 200     # number of points used on model (i.e., seen in view 1)
+    n2o = 20     # number of outliers in data (i.e., seen in view 2)
+    outrat = 0.01 # outlier ratio of initial association set
     sigma = 0.01  # uniform noise [m] range
     pcfile = '/workspace/python/examples/bun10k.ply'  # Object file
     # Random pose transormation
@@ -301,5 +305,16 @@ if __name__ == "__main__":
     clipper, Agt = generate_dataset(pcfile, m, n1, n2o, outrat, sigma, T_21)
     
     prob = MaxCliqueProblem(clipper)
-    X, u, rank = prob.solve_sdp()
-    result, time_ac = prob.certify_candidate(u)
+    
+    if not load_soln:
+        X, u, rank,_,_ = prob.solve_sdp()
+        with open(output_path, "wb") as f:
+            pickle.dump(u, f)
+        print(f"Saved solution u to {output_path}")
+    else:
+        with open(output_path, "rb") as f:
+            u = pickle.load(f)
+        print(f"Loaded solution u from {output_path}")
+    
+    # run Certifier
+    result = prob.certify_candidate(u)
