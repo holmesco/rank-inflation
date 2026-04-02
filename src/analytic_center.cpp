@@ -119,11 +119,11 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   // Initialize
   int n_iter = 0;
   double delta = params_.delta_init;
-  Matrix Z = Y_0 * Y_0.transpose();
+  Matrix X = Y_0 * Y_0.transpose();
   // store rank of candidate solution
   rank_init = Y_0.cols();
   auto [alpha, L] = line_search_factorization(
-      Z, Matrix::Identity(dim, dim) * delta);  // Initial line search to ensure
+      X, Matrix::Identity(dim, dim) * delta);  // Initial line search to ensure
                                                // PSDness of the starting point
   // Optimality certificate
   Matrix H;
@@ -137,7 +137,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   while (n_iter < params_.max_iter) {
     // Get system of equations
     Vector violation(m);
-    std::tie(multipliers, violation) = get_multipliers(Z, Y_0, delta);
+    std::tie(multipliers, violation) = get_multipliers(X, Y_0, delta);
 
     // get the barrier parameter value
     barrier_param = 1 / multipliers(m - 1);
@@ -147,20 +147,20 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       S = S / delta;
     }
     // Get Newton step direction towards analytic center
-    auto deltaZ = Z - Z * S * Z;
+    auto deltaX = X - X * S * X;
     // Line search to find step that ensures PSDness of the solution
     // NOTE: Could replace with exact line search based on determinant increase,
     // but this backtracking
     alpha = 1.0;
-    std::tie(alpha, L) = line_search_factorization(Z, deltaZ);
+    std::tie(alpha, L) = line_search_factorization(X, deltaX);
     // Compute centrality metric from He et al. 1997
     // When this is below 1, the dual matrix is guaranteed to be PSD, so this
     // can be used as an early stopping condition for the centering iterations.
     cent_metric = (L.transpose() * S * L - Matrix::Identity(dim, dim)).norm();
     // Compute the angle between the current solution and the initial solution
     // as a measure of deviation from the initial solution for early stopping.
-    double cos_angle = (Y_0.transpose() * Z * Y_0).trace() /
-                       (Y_0.transpose() * Y_0).norm() / Z.norm();
+    double cos_angle = (Y_0.transpose() * X * Y_0).trace() /
+                       (Y_0.transpose() * Y_0).norm() / X.norm();
     angle = std::acos(cos_angle);
     // Print update
     n_iter++;
@@ -177,7 +177,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       }
       std::printf(
           "%6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e\n",
-          n_iter, violation.norm(), deltaZ.norm(), complementarity,
+          n_iter, violation.norm(), deltaX.norm(), complementarity,
           barrier_param, alpha, delta, cent_metric, angle);
     }
 
@@ -239,7 +239,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     }
 
     // Check final stopping condition
-    if (deltaZ.norm() < params_.tol_step_norm)
+    if (deltaX.norm() < params_.tol_step_norm)
       if (params_.adaptive_perturb) {
         if (delta <= params_.delta_min) {
           if (params_.verbose) {
@@ -259,7 +259,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   }
   // Return the final solution and multipliers for certificate checking
   Vector mult_scaled = multipliers / multipliers(m - 1);
-  return {Z, mult_scaled};
+  return {X, mult_scaled};
 }
 
 AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
@@ -445,9 +445,9 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
   }
 #ifdef DEBUG
   // print information about the linear system
-  Eigen::SelfAdjointEigenSolver<Matrix> es_Z_dbg(
+  Eigen::SelfAdjointEigenSolver<Matrix> es_X_dbg(
       sys.B.selfadjointView<Eigen::Upper>());
-  double min_eig_B = es_Z_dbg.eigenvalues().minCoeff();
+  double min_eig_B = es_X_dbg.eigenvalues().minCoeff();
   std::cout << "Minimum eigenvalue of B: " << min_eig_B << std::endl;
   // print residual of the linear system solution
   Vector residual = sys.B.selfadjointView<Eigen::Upper>() * multipliers - sys.d;
@@ -458,7 +458,7 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
   return multipliers;
 }
 
-std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
+std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& X,
                                                           const Matrix& Y_0,
                                                           double delta) const {
   // Build the system of equations for the current solution
@@ -466,7 +466,7 @@ std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
   // start a timer for building the system
   auto start = std::chrono::high_resolution_clock::now();
 #endif
-  auto sys = build_ac_system(Z, delta);
+  auto sys = build_ac_system(X, delta);
 
 #ifdef TIMING
   auto end = std::chrono::high_resolution_clock::now();
@@ -484,25 +484,25 @@ std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& Z,
             << " seconds" << std::endl;
 #endif
 #ifdef DEBUG
-  // print information about Z
-  Eigen::SelfAdjointEigenSolver<Matrix> es_Z(Z);
-  double min_eig_Z = es_Z.eigenvalues().minCoeff();
-  std::cout << "Minimum eigenvalue of Z: " << min_eig_Z << std::endl;
+  // print information about X
+  Eigen::SelfAdjointEigenSolver<Matrix> es_X(X);
+  double min_eig_X = es_X.eigenvalues().minCoeff();
+  std::cout << "Minimum eigenvalue of X: " << min_eig_X << std::endl;
 #endif
 
   return {multipliers, sys.violation};
 }
 
 std::pair<double, Matrix> AnalyticCenter::line_search_factorization(
-    Matrix& Z, const Matrix& dZ) const {
+    Matrix& X, const Matrix& dX) const {
   //  Initial step size
   double alpha = params_.alpha_init;
   // Backtracking parameters
   const double beta =
       params_.ln_search_red_factor;  // step size reduction factor
   // Backtracking loop
-  Matrix Z_new = Z + alpha * dZ;
-  Eigen::LDLT<Eigen::MatrixXd> solver(Z_new);
+  Matrix X_new = X + alpha * dX;
+  Eigen::LDLT<Eigen::MatrixXd> solver(X_new);
   while (!solver.isPositive()) {
     if (solver.info() == Eigen::NumericalIssue) {
       std::cout << "LINESEARCH: The matrix is has severe numerical issues."
@@ -515,12 +515,12 @@ std::pair<double, Matrix> AnalyticCenter::line_search_factorization(
       alpha = params_.alpha_min;
       break;  // Stop if step size is too small
     }
-    Z_new = Z + alpha * dZ;
-    solver.compute(Z_new);
+    X_new = X + alpha * dX;
+    solver.compute(X_new);
   }
-  // update Z with the new value that ensures PSDness
-  Z = Z_new;
-  // Return the Cholesky factorization of the new Z for use in the next
+  // update X with the new value that ensures PSDness
+  X = X_new;
+  // Return the Cholesky factorization of the new X for use in the next
   // iteration's linear system
   Eigen::MatrixXd L_chol = solver.matrixL();
   L_chol.noalias() = L_chol * solver.vectorD().cwiseSqrt().asDiagonal();
