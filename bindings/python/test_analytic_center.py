@@ -95,7 +95,7 @@ def test_build_and_check_certificate():
     Y0 = np.eye(n) / np.sqrt(n)
     X, mult = ac.get_analytic_center(Y0)
 
-    H = ac.build_certificate_from_dual(mult)
+    H = ac.build_adjoint(mult)
     assert H.shape == (n, n)
 
     min_eig, first_order = ac.check_certificate(H, Y0)

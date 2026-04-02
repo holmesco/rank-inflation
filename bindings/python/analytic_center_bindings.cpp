@@ -49,8 +49,12 @@ class PyAnalyticCenter {
     return ac_.get_analytic_center(Y_0);
   }
 
+  Matrix build_adjoint(const Vector& coeffs) const {
+    return ac_.build_adjoint(coeffs);
+  }
+
   Matrix build_certificate_from_dual(const Vector& multipliers) const {
-    return ac_.build_certificate_from_dual(multipliers);
+    return build_adjoint(multipliers);
   }
 
   std::pair<double, double> eval_certificate(const Matrix& H,
@@ -90,18 +94,20 @@ PYBIND11_MODULE(ranktools, m) {
           "Matrix-free conjugate gradient solver with low-rank preconditioner")
       .export_values();
 
-    // ---- LowRankPrecondParams ----
-    py::class_<LowRankPrecondParams>(m, "LowRankPrecondParams")
-            .def(py::init<>())
-            .def_readwrite("tau", &LowRankPrecondParams::tau)
-            .def_readwrite("use_sparse_factor", &LowRankPrecondParams::use_sparse_factor)
-            .def_readwrite("use_approx", &LowRankPrecondParams::use_approx)
-            .def_readwrite("ldlt_zero_thresh", &LowRankPrecondParams::ldlt_zero_thresh)
-            .def("__repr__", [](const LowRankPrecondParams& p) {
-                return "<LowRankPrecondParams tau=" + std::to_string(p.tau) +
-                             " use_sparse_factor=" +
-                             (p.use_sparse_factor ? "True" : "False") + ">";
-            });
+  // ---- LowRankPrecondParams ----
+  py::class_<LowRankPrecondParams>(m, "LowRankPrecondParams")
+      .def(py::init<>())
+      .def_readwrite("tau", &LowRankPrecondParams::tau)
+      .def_readwrite("use_sparse_factor",
+                     &LowRankPrecondParams::use_sparse_factor)
+      .def_readwrite("use_approx", &LowRankPrecondParams::use_approx)
+      .def_readwrite("ldlt_zero_thresh",
+                     &LowRankPrecondParams::ldlt_zero_thresh)
+      .def("__repr__", [](const LowRankPrecondParams& p) {
+        return "<LowRankPrecondParams tau=" + std::to_string(p.tau) +
+               " use_sparse_factor=" +
+               (p.use_sparse_factor ? "True" : "False") + ">";
+      });
 
   // ---- AnalyticCenterParams ----
   py::class_<AnalyticCenterParams>(m, "AnalyticCenterParams")
@@ -114,7 +120,8 @@ PYBIND11_MODULE(ranktools, m) {
                      &AnalyticCenterParams::reduce_violation)
       .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
       .def_readwrite("rescale_lin_sys", &AnalyticCenterParams::rescale_lin_sys)
-      .def_readwrite("perturb_constraints", &AnalyticCenterParams::perturb_constraints)
+      .def_readwrite("perturb_constraints",
+                     &AnalyticCenterParams::perturb_constraints)
       .def_readwrite("lin_solver", &AnalyticCenterParams::lin_solver)
       // Iterative linear solve
       .def_readwrite("lin_solve_max_iter",
@@ -246,10 +253,12 @@ tuple(X, multipliers)
     X : numpy.ndarray (n, n)  — centered primal solution.
     multipliers : numpy.ndarray (m,) — optimal dual multipliers.
 )pbdoc")
+      .def("build_adjoint", &PyAnalyticCenter::build_adjoint, py::arg("coeffs"),
+           "Build the adjoint matrix sum_i coeffs[i] * A_i + coeffs[-1] * C.")
       .def("build_certificate_from_dual",
            &PyAnalyticCenter::build_certificate_from_dual,
            py::arg("multipliers"),
-           "Build the certificate matrix H from dual multipliers.")
+           "Backward-compatible alias for build_adjoint(multipliers).")
       .def("eval_certificate", &PyAnalyticCenter::eval_certificate,
            py::arg("H"), py::arg("Y"),
            R"pbdoc(

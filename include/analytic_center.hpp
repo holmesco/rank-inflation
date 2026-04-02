@@ -166,11 +166,13 @@ class AnalyticCenter {
   // The initial perturbation is taken from params_.delta_init. Delta is used
   // to ensure we stay in the interior of the PSD cone even when the solution
   // is low rank. If delta is zero then no perturbation is applied.
+  // Returns the centered solution and the scaled multipliers for certificate checking.
   std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0) const;
 
-  // Build the optimality certificate for the problem using the optimal
-  // multipliers
-  Matrix build_certificate_from_dual(const Vector& multipliers) const;
+  // Build weighted sum of constraint matrices: sum_i A_i * lambda_i
+  // Note: to build certificate for SDP, the multipliers should be rescaled by
+  // the last multiplier (corresponding to the cost constraint)
+  Matrix build_adjoint(const Vector& coeffs) const;
 
   // Check global optimality of a solution
   // Returns the minimum eigenvalue of the certificate matrix and the evaluation
@@ -193,11 +195,6 @@ class AnalyticCenter {
       lr_solver;
   // Expected rank of the initial solution
   mutable int rank_init;
-
-  // Build weighted sum of constraint matrices: sum_i A_i * lambda_i
-  // If the coefficient falls below `tol` then the corresponding constraint is
-  // not added to the sum
-  SpMatrix build_adjoint(const Vector& coeffs, double tol = 0.0) const;
 
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints

@@ -155,7 +155,7 @@ TEST_P(LovazsParamTest, CertEarlyStopping) {
   std::cout << "Violation at Analytic Center: " << violation.norm()
             << std::endl;
   // Build the certificate matrix
-  auto H = problem.build_certificate_from_dual(multipliers);
+  auto H = problem.build_adjoint(multipliers);
   // check certificate on high rank solution
   auto [min_eig_hr, first_ord_cond_hr] = problem.eval_certificate(H, Y);
   std::cout << "Cost at High Rank Solution: " << (sdp.C * X).trace()

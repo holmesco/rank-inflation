@@ -33,33 +33,18 @@ Vector AnalyticCenter::eval_constraints(const Matrix& X) const {
   return result;
 }
 
-SpMatrix AnalyticCenter::build_adjoint(const Vector& coeffs, double tol) const {
+Matrix AnalyticCenter::build_adjoint(const Vector& coeffs) const {
   // 1. Calculate the weighted sum of the upper-triangular parts
-  SpMatrix upperSum = coeffs[0] * A_[0];
-  for (size_t i = 1; i < A_.size(); ++i) {
-    if (std::abs(coeffs(i)) > tol) {
-      upperSum += coeffs[i] * A_[i];
-    }
+  // Construct product S = sum_i A_i * y_i
+  // NOTE: Cannot parallelize this loop because of common S
+  Eigen::MatrixXd S = coeffs(m - 1) * C_;
+  for (int i = 0; i < m - 1; i++) {
+    S += coeffs(i) * A_[i];
   }
-
-  // 2. Reflect the upper triangle into the lower triangle to get the full
-  // matrix .selfadjointView<Eigen::Upper>() treats the matrix as symmetric and
-  // the assignment to a SparseMatrix fills in the missing entries.
-  SpMatrix fullMatrix = upperSum.selfadjointView<Eigen::Upper>();
-
-  fullMatrix.makeCompressed();
-  return fullMatrix;
-}
-
-Matrix AnalyticCenter::build_certificate_from_dual(
-    const Vector& multipliers) const {
-  // build weighted sum of constraint matrices with multiplier values
-  auto f_A = build_adjoint(multipliers, 0.0);
-  // add cost term if required
-  Matrix H;
-  H = C_ + f_A;
-
-  return H;
+  // 2. Symmetrize S to get the full matrix (since A_i are symmetric)
+  S.triangularView<Eigen::Lower>() =
+      S.triangularView<Eigen::Upper>().transpose();
+  return S;
 }
 
 std::pair<double, double> AnalyticCenter::eval_certificate(
@@ -95,7 +80,7 @@ AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0) const {
   std::chrono::duration<double> elapsed = end - start;
   CALLGRIND_STOP_INSTRUMENTATION;
   CALLGRIND_DUMP_STATS;
-  auto H = build_certificate_from_dual(mult_scaled);
+  auto H = build_adjoint(mult_scaled);
   // Check certificate at the final solution
   auto [min_eig, complementarity] = eval_certificate(H, Y_0);
   // Return the final solution, multipliers and certificate information
@@ -140,7 +125,6 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   auto [alpha, L] = line_search_factorization(
       Z, Matrix::Identity(dim, dim) * delta);  // Initial line search to ensure
                                                // PSDness of the starting point
-  Vector mult_scaled(m - 1);
   // Optimality certificate
   Matrix H;
   double complementarity = std::nan("");
@@ -148,26 +132,22 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   double barrier_param = std::nan("");
   double cent_metric = std::nan("");
   double angle = std::nan("");
+  Vector multipliers(m);
   // Main loop
   while (n_iter < params_.max_iter) {
     // Get system of equations
-    auto [multipliers, violation] = get_multipliers(Z, Y_0, delta);
+    Vector violation(m);
+    std::tie(multipliers, violation) = get_multipliers(Z, Y_0, delta);
 
     // get the barrier parameter value
     barrier_param = 1 / multipliers(m - 1);
-    // compute scaled multipliers for certificate checking
-    mult_scaled = multipliers.segment(0, m - 1) * barrier_param;
-
     // Dual matrix (adjoint of constraints with multipliers + cost term )
-    // TODO: This is not the most efficient way to implement this, should start
-    // with dense and add sparse to it.
-    auto adjoint_sp = build_adjoint(multipliers);
-    Matrix adjoint = C_ * multipliers(m - 1) + adjoint_sp;
+    Matrix S = build_adjoint(multipliers);
     if (params_.rescale_lin_sys) {
-      adjoint = adjoint / delta;
+      S = S / delta;
     }
     // Get Newton step direction towards analytic center
-    auto deltaZ = Z - Z * adjoint * Z;
+    auto deltaZ = Z - Z * S * Z;
     // Line search to find step that ensures PSDness of the solution
     // NOTE: Could replace with exact line search based on determinant increase,
     // but this backtracking
@@ -176,8 +156,7 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     // Compute centrality metric from He et al. 1997
     // When this is below 1, the dual matrix is guaranteed to be PSD, so this
     // can be used as an early stopping condition for the centering iterations.
-    cent_metric =
-        (L.transpose() * adjoint * L - Matrix::Identity(dim, dim)).norm();
+    cent_metric = (L.transpose() * S * L - Matrix::Identity(dim, dim)).norm();
     // Compute the angle between the current solution and the initial solution
     // as a measure of deviation from the initial solution for early stopping.
     double cos_angle = (Y_0.transpose() * Z * Y_0).trace() /
@@ -214,8 +193,9 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
           break;
         }
       } else {
-        // Build certificate matrix
-        H = build_certificate_from_dual(mult_scaled);
+        // Build certificate matrix (rescaled adjoint)
+        double scale = params_.rescale_lin_sys ? delta : 1.0;
+        H = S * scale / multipliers(m - 1);
         // Check complementarity condition for first order optimality
         complementarity = (Y_0.transpose() * H * Y_0).norm();
         if (complementarity <= params_.tol_cert_complementarity) {
@@ -277,7 +257,8 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
         break;
       }
   }
-
+  // Return the final solution and multipliers for certificate checking
+  Vector mult_scaled = multipliers / multipliers(m - 1);
   return {Z, mult_scaled};
 }
 
@@ -286,7 +267,7 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
   // Initialize system data
   LinSysData sys(X, dim, m);
   const int a_size = static_cast<int>(A_.size());
-  
+
 #ifdef RANKTOOLS_PARALLEL
 #pragma omp parallel for schedule(dynamic)
 #endif
