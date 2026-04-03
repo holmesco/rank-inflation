@@ -355,13 +355,13 @@ TEST(MatrixFree, DiagonalPreconditioner) {
 
 // Test the low-rank preconditioner and verify that it improves conditioning of
 // the system.
-TEST_P(LovazsParamTest, LowRankPrecond) {
+TEST_P(LovazsParamTest, LowRankPrecondLDLT) {
   const auto& sdp = GetParam();
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
   params.rescale_lin_sys = false;
-  params.lrp_params.use_sparse_factor = true;  // Use dense factorization for testing purposes
+  params.lrp_params.method = LowRankPrecondMethod::DenseLDLT;
   // Match delta and tau to get exact preconditioner for this case
   auto delta = 1e-6;
   params.lrp_params.tau = 1e-6;
@@ -428,6 +428,74 @@ TEST_P(LovazsParamTest, LowRankPrecond) {
   EXPECT_LT(cond_est, 1.1)
       << "Preconditioned operator PB is poorly conditioned.";
 }
+
+// Test the low-rank preconditioner and verify that it improves conditioning of
+// the system.
+TEST_P(LovazsParamTest, LowRankPrecondQR) {
+  const auto& sdp = GetParam();
+  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.rescale_lin_sys = false;
+  params.lrp_params.method = LowRankPrecondMethod::DenseQR;
+  // Match delta and tau to get exact preconditioner for this case
+  auto delta = 1e-6;
+  params.lrp_params.tau = 1e-6;
+
+  // get problem
+  auto problem = sdp.make_testable(params);
+  // Solve using Mosek to get analytic center solution
+  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b);
+  auto Y_mosek = get_positive_eigspace(mosek_soln.X, 1e-3);
+  Matrix X = Y_mosek * Y_mosek.transpose();
+  auto [alpha, L] = problem.line_search_factorization(
+      X, Matrix::Identity(problem.dim, problem.dim) * delta);
+  EXPECT_NEAR((X - Y_mosek * Y_mosek.transpose() -
+               Matrix::Identity(problem.dim, problem.dim) * delta)
+                  .norm(),
+              0.0, 1e-10);
+
+  // Explicit system matrix B
+  auto system = problem.build_ac_system(X, delta);
+  Matrix B = system.B.selfadjointView<Eigen::Upper>();
+
+  // Build low-rank preconditioner with rank = 1 at the perturbed solution
+  auto precond = LowRankPrecond(params.lrp_params);
+  precond.initialize(Y_mosek, sdp.A, sdp.C);
+  precond.set_scale(system.scale_);
+  // check success
+  EXPECT_EQ(precond.info(), Eigen::Success);
+
+  // Build explicit preconditioned operator PB by applying P to each column of
+  // B. For a good preconditioner, PB should be well-conditioned.
+  Matrix PB(problem.m, problem.m);
+  for (int i = 0; i < problem.m; ++i) {
+    PB.col(i) = precond.solve(B.col(i));
+  }
+  // std::cout << PB << std::endl;
+  // Inspect spectrum of PB.
+  Eigen::EigenSolver<Matrix> es(PB);
+  ASSERT_EQ(es.info(), Eigen::Success);
+  auto eigvals = es.eigenvalues();
+
+  double min_abs_eig = std::numeric_limits<double>::infinity();
+  double max_abs_eig = 0.0;
+  for (int i = 0; i < eigvals.size(); ++i) {
+    const double abs_eig = std::abs(eigvals(i));
+    min_abs_eig = std::min(min_abs_eig, abs_eig);
+    max_abs_eig = std::max(max_abs_eig, abs_eig);
+  }
+
+  // Condition number estimate from eigenvalue magnitudes.
+  const double cond_est = max_abs_eig / min_abs_eig;
+  std::cout << "cond(PB): " << cond_est << std::endl;
+
+  // Well-preconditioned systems should have condition number close to 1.
+  // Note conditioning should actually be exactly 1 for this case.
+  EXPECT_LT(cond_est, 1.1)
+      << "Preconditioned operator PB is poorly conditioned.";
+}
+
 
 TEST_P(GenericParamTest, LinDependentConstraints) {
   const auto& sdp = GetParam();

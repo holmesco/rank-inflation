@@ -193,6 +193,7 @@ class AnalyticCenter {
   // Previous multipliers for iterative linear system solvers
   mutable Vector prev_multipliers_;
   // Matrix Free, Low Rank Preconditioned Conjugate Gradient solver
+  // We store this so that we can reuse the preconditioner.
   mutable std::unique_ptr<Eigen::ConjugateGradient<
       MultiplierLinSys, Eigen::Upper | Eigen::Lower, LowRankPrecond>>
       lr_solver;

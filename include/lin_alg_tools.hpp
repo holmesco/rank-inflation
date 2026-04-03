@@ -41,7 +41,7 @@ inline double sparse_upper_dot_dense(const SparseMatrix<double>& A_upper,
       if (r == c) {
         sum += it.value() * M(r, c);
       } else if (c > r) {
-        sum += it.value() * (M(r, c) + M(c, r)); 
+        sum += it.value() * (M(r, c) + M(c, r));
       }
     }
   }
@@ -177,13 +177,15 @@ class MultiplierDiagPreconditioner {
   bool is_initialized_;
 };
 
+enum class LowRankPrecondMethod { DenseLDLT, SparseLDLT, DenseQR, SparseQR };
+
 struct LowRankPrecondParams {
   // Diagonal perturbation parameter.
   double tau = 1e-5;
   // Flag for using the sparse factorization approach (true) vs the dense
   // approach (false) to building the preconditioner. The sparse approach is
   // cheaper to build, but may be less effective at improving conditioning.
-  bool use_sparse_factor = true;
+  LowRankPrecondMethod method = LowRankPrecondMethod::SparseLDLT;
   // Flag for using the approximation ZZ^T = 2tau I instead of Z Z^T = X + W0,
   // which is cheaper to compute, but in our case may be less effective at
   // improving conditioning.
@@ -230,10 +232,12 @@ class LowRankPrecond {
     dim = C.cols();
     ncons = As.size() + 1;
     // Call function to build the preconditioner
-    if (params_.use_sparse_factor) {
-      build_preconditioner_sparse();
+    if (params_.method == LowRankPrecondMethod::SparseLDLT) {
+      build_ldlt_sparse();
+    } else if (params_.method == LowRankPrecondMethod::DenseQR) {
+      build_qr_dense();
     } else {
-      build_preconditioner_dense();
+      build_ldlt_dense();
     }
   }
 
@@ -248,17 +252,20 @@ class LowRankPrecond {
       return *this;
     }
     // Call the internal build function that does the actual work
-    if (params_.use_sparse_factor) {
-      return build_preconditioner_sparse();
+    if (params_.method == LowRankPrecondMethod::SparseLDLT) {
+      build_ldlt_sparse();
+    } else if (params_.method == LowRankPrecondMethod::SparseQR) {
+      build_ldlt_dense();
     } else {
-      return build_preconditioner_dense();
+      build_ldlt_dense();
     }
+    return *this;
   }
 
   // Internal compute function that does the actual work of building the
   // preconditioner. This version builds the dense augmented system and
   // factorizes it with LDLT. We could
-  LowRankPrecond& build_preconditioner_dense() {
+  LowRankPrecond& build_ldlt_dense() {
     if (!U_ || !C_ || !As_) {
       throw std::runtime_error(
           "LowRankPrecond: Problem data not set. Call init() before "
@@ -274,16 +281,16 @@ class LowRankPrecond {
         (A_bar_.transpose() * A_bar_).template triangularView<Eigen::Upper>() *
         std::pow(params_.tau, 2.0);
     Sys.block(0, ncons, ncons, rank_ * dim) =
-        build_top_right(*U_, W0, params_.tau) * params_.tau;
+        build_top_right(*U_, params_.tau) * params_.tau;
     Sys.block(ncons, ncons, rank_ * dim, rank_ * dim) =
         -Matrix::Identity(rank_ * dim, rank_ * dim) * std::pow(params_.tau, 2);
 
     // Prefactorize (LDLT)
-    Factor.compute(Sys.selfadjointView<Eigen::Upper>());
+    LDLTDenseFactor.compute(Sys.selfadjointView<Eigen::Upper>());
     // Flag that we have initialized to eigen
-    is_initialized_ = (Factor.info() == Eigen::Success);
+    is_initialized_ = (LDLTDenseFactor.info() == Eigen::Success);
     if (!is_initialized_) {
-      std::cerr << "LDLT factorization failed. Info: " << Factor.info()
+      std::cerr << "LDLT factorization failed. Info: " << LDLTDenseFactor.info()
                 << std::endl;
     }
 
@@ -293,7 +300,7 @@ class LowRankPrecond {
   // Internal compute function that does the actual work of building the
   // preconditioner. This version builds the augmented system sparsely and
   // factorizes it with SimplicialLDLT. We could
-  LowRankPrecond& build_preconditioner_sparse() {
+  LowRankPrecond& build_ldlt_sparse() {
     if (!U_ || !C_ || !As_) {
       throw std::runtime_error(
           "LowRankPrecond: Problem data not set. Call init() before "
@@ -304,7 +311,7 @@ class LowRankPrecond {
 
     const Matrix W0 = Matrix::Identity(dim, dim) * params_.tau;
     const Matrix top_right_dense =
-        build_top_right(*U_, W0, params_.tau) * params_.tau;
+        build_top_right(*U_, params_.tau) * params_.tau;
 
     const int rdim = rank_ * dim;
     const int nsys = ncons + rdim;
@@ -343,8 +350,32 @@ class LowRankPrecond {
     Sys.setFromTriplets(trips.begin(), trips.end());
     Sys.makeCompressed();
 
-    SparseFactor.compute(Sys);
-    is_initialized_ = (SparseFactor.info() == Eigen::Success);
+    LDLTSparseFactor.compute(Sys);
+    is_initialized_ = (LDLTSparseFactor.info() == Eigen::Success);
+
+    return *this;
+  }
+
+  // Internal compute function that does the actual work of building the
+  // preconditioner. This version builds the dense qr factorization
+  LowRankPrecond& build_qr_dense() {
+    if (!U_ || !C_ || !As_) {
+      throw std::runtime_error(
+          "LowRankPrecond: Problem data not set. Call init() before "
+          "compute().");
+    }
+    // compute constraint matrix
+    build_constraint_mat();
+    Matrix A_bar_dense = A_bar_;
+    // build the V = A_bar^T(U otimes Z) matrix
+    auto V_dense = build_top_right(*U_, params_.tau);
+    // build least squares factored matrix
+    auto Sys = Eigen::MatrixXd(A_bar_dense.rows() + V_dense.cols(),
+                               A_bar_dense.cols());
+    Sys << A_bar_dense, V_dense.transpose();
+    // Factorize with dense QR
+    QRDenseFactor.compute(Sys);
+    is_initialized_ = (QRDenseFactor.info() == Eigen::Success);
 
     return *this;
   }
@@ -353,32 +384,39 @@ class LowRankPrecond {
   // that is, invert the preconditioner matrix and apply it to the input vector
   template <typename Rhs>
   Eigen::VectorXd solve(const Eigen::MatrixBase<Rhs>& b) const {
-    auto rhs = Vector(ncons + rank_ * dim);
-    rhs << b / scale_, Vector::Zero(rank_ * dim);
-
+    
     Vector result;
-    if (params_.use_sparse_factor) {
-      result = SparseFactor.solve(rhs);
+    if (params_.method == LowRankPrecondMethod::SparseLDLT) {
+      auto rhs = Vector(ncons + rank_ * dim);
+      rhs << b / scale_, Vector::Zero(rank_ * dim);
+      result = LDLTSparseFactor.solve(rhs);
+      result = result.segment(0, ncons);
+    } else if (params_.method == LowRankPrecondMethod::DenseQR) {
+      // Solve Sys^T Sys x = b via R^T R x = b, where Sys = [A; V] = Q R is the dense QR factorization of the augmented system matrix
+      result = QRDenseFactor.solve(QRDenseFactor.adjoint().solve(b / scale_));
     } else {
-      // result = Factor.solve(rhs);
-      result = ldlt_pseudo_solve(rhs);
+      auto rhs = Vector(ncons + rank_ * dim);
+      rhs << b / scale_, Vector::Zero(rank_ * dim);
+      result = LDLTDenseFactor.solve(rhs);
+      result = result.segment(0, ncons);
     }
-    return result.segment(0, ncons);
+    return result;
   }
 
   // Build the top right matrix = A_bar^T(U otimes Z)
-  Matrix build_top_right(const Matrix& U, const Matrix& W0, double tau) const {
+  Matrix build_top_right(const Matrix& U, double tau) const {
     // Init Matrix
     Matrix top_right(ncons, rank_ * dim);
     // define convenience variables
     const bool approx = params_.use_approx;
     const double s = std::sqrt(2.0 * tau);
+    auto W0 = Matrix::Identity(dim, dim) * 2.0 * tau;
     // if not approximating, store transpose of Z for computations
     // if approximating with Z Z^T = 2tau I, then we can skip building Z and
     // just use s = sqrt(2tau) as a scaling factor
     Matrix Zt;
     if (!approx) {
-      Eigen::LLT<Matrix> llt(U * U.transpose() + 2.0 * W0);
+      Eigen::LLT<Matrix> llt(U * U.transpose() + W0);
       Zt = llt.matrixL().transpose();
     }
 
@@ -400,7 +438,7 @@ class LowRankPrecond {
       }
     }
 
-    // Last row uses C 
+    // Last row uses C
     {
       Matrix CU = (*C_).selfadjointView<Eigen::Upper>() * U;
       if (approx) {
@@ -476,10 +514,13 @@ class LowRankPrecond {
   int ncons;
   double scale_;
 
-  // built matrices
+  // built constraint matrix A_bar = [vec(A1) ... vec(Am) vec(C)]
   Eigen::SparseMatrix<double> A_bar_;
-  Eigen::LDLT<Matrix> Factor;
-  Eigen::SimplicialLDLT<SpMatrix> SparseFactor;
+  // Factorizations
+  Eigen::LDLT<Matrix> LDLTDenseFactor;
+  Eigen::SimplicialLDLT<SpMatrix> LDLTSparseFactor;
+  Eigen::SparseQR<SpMatrix, Eigen::COLAMDOrdering<int>> QRSparseFactor;
+  Eigen::ColPivHouseholderQR<Eigen::MatrixXd> QRDenseFactor;
 
   /// @brief Solve the system using the LDLT factorization, treating small
   /// eigenvalues as zero to handle potential singularity. This effectively
@@ -488,9 +529,9 @@ class LowRankPrecond {
   /// @return solution vector after applying the pseudo-inverse of the LDLT
   /// factorization
   Eigen::VectorXd ldlt_pseudo_solve(const Eigen::VectorXd& b) const {
-    const auto& L = Factor.matrixL();
-    const auto& P = Factor.transpositionsP();
-    const auto& D = Factor.vectorD();  // diagonal of D
+    const auto& L = LDLTDenseFactor.matrixL();
+    const auto& P = LDLTDenseFactor.transpositionsP();
+    const auto& D = LDLTDenseFactor.vectorD();  // diagonal of D
 
     // Step 1: apply permutation
     Vector rhs = P.transpose() * b;
@@ -514,14 +555,3 @@ class LowRankPrecond {
     return P * y;
   }
 };
-
-// Add preconditioner types to RankTools namespace for use in analytic center
-// and other algorithms
-namespace RankTools {
-// Preconditioner types
-enum class PreconditionerType {
-  Diagonal,
-  LowRank,
-  FixedLowRank,
-};
-}  // namespace RankTools
