@@ -19,15 +19,15 @@ AnalyticCenter::AnalyticCenter(
 
 Vector AnalyticCenter::eval_constraints(const Matrix& X) const {
   // Loop through constraints, evaluating gradient and constraint value
+  const int a_size = static_cast<int>(A_.size());
   Vector result(m);
   for (int i = 0; i < m; i++) {
-    if (i < A_.size()) {
-      // Constraints
-      // NOTE: Converting to DENSE here. Optimize this later
-      result(i) = (A_[i].selfadjointView<Eigen::Upper>() * X).trace() - b_[i];
+    if (i < a_size) {
+      // Sparse constraints (upper-triangular sparse storage)
+      result(i) = sparse_upper_dot_dense(A_[i], X) - b_[i];
     } else {
       // Cost "constraint"
-      result(i) = (C_ * X).trace() - rho_;
+      result(i) = C_.cwiseProduct(X).sum() - rho_;
     }
   }
   return result;
@@ -286,7 +286,7 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
       if (params_.perturb_constraints) {
         val = rho_ + delta * trace_C;
       } else {
-        val = rho_;
+        val = rho_ + params_.cost_perturb;
       }
       sys.d(i) = C_.cwiseProduct(X).sum();
     }

@@ -122,6 +122,7 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("rescale_lin_sys", &AnalyticCenterParams::rescale_lin_sys)
       .def_readwrite("perturb_constraints",
                      &AnalyticCenterParams::perturb_constraints)
+      .def_readwrite("cost_perturb", &AnalyticCenterParams::cost_perturb)
       .def_readwrite("lin_solver", &AnalyticCenterParams::lin_solver)
       // Iterative linear solve
       .def_readwrite("lin_solve_max_iter",

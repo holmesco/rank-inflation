@@ -42,13 +42,15 @@ struct AnalyticCenterParams {
   // Rescaling is akin to scaling the log det objective by delta and improves
   // conditioning.
   bool rescale_lin_sys = true;
-  // Flag to turn on perturbation of the constraints by delta
-  bool perturb_constraints = true;
   // Select linear solver for centering step
   LinearSolverType lin_solver = LinearSolverType::LDLT;
-
+  
   // Adaptive Perturbation Parameters
   // -------------------------
+  // Flag to turn on perturbation of the constraints by delta
+  bool perturb_constraints = true;
+  // perturbation of cost that is active when perturb_constraints is false
+  double cost_perturb = 1e-6;
   // enable adaptive perturbation for centering
   bool adaptive_perturb = true;
   // final delta for centering (should be small to get close to boundary, but
@@ -69,6 +71,7 @@ struct AnalyticCenterParams {
   double delta_dec_step_min = 0.9;
   // update factor for adjusting delta in adaptive centering
   double delta_dec = 0.6;
+  
 
   // Iterative Linear Solve Parameters
   // -----------------
