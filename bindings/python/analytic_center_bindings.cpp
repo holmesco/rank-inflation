@@ -94,19 +94,31 @@ PYBIND11_MODULE(ranktools, m) {
           "Matrix-free conjugate gradient solver with low-rank preconditioner")
       .export_values();
 
+  // ---- LowRankPrecondMethod ----
+  py::enum_<LowRankPrecondMethod>(
+      m, "LowRankPrecondMethod",
+      "Method for building the low-rank preconditioner.")
+      .value("DenseLDLT", LowRankPrecondMethod::DenseLDLT,
+             "Dense LDLT factorization approach")
+      .value("SparseLDLT", LowRankPrecondMethod::SparseLDLT,
+             "Sparse LDLT factorization approach")
+      .value("DenseQR", LowRankPrecondMethod::DenseQR,
+             "Dense QR factorization approach")
+      .value("SparseQR", LowRankPrecondMethod::SparseQR,
+             "Sparse QR factorization approach")
+      .export_values();
+
   // ---- LowRankPrecondParams ----
   py::class_<LowRankPrecondParams>(m, "LowRankPrecondParams")
       .def(py::init<>())
       .def_readwrite("tau", &LowRankPrecondParams::tau)
-      .def_readwrite("use_sparse_factor",
-                     &LowRankPrecondParams::use_sparse_factor)
+      .def_readwrite("method", &LowRankPrecondParams::method)
       .def_readwrite("use_approx", &LowRankPrecondParams::use_approx)
       .def_readwrite("ldlt_zero_thresh",
                      &LowRankPrecondParams::ldlt_zero_thresh)
       .def("__repr__", [](const LowRankPrecondParams& p) {
         return "<LowRankPrecondParams tau=" + std::to_string(p.tau) +
-               " use_sparse_factor=" +
-               (p.use_sparse_factor ? "True" : "False") + ">";
+               " method=" + std::to_string(static_cast<int>(p.method)) + ">";
       });
 
   // ---- AnalyticCenterParams ----

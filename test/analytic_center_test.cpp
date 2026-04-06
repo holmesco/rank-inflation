@@ -361,15 +361,15 @@ TEST_P(LovazsParamTest, LowRankPrecondLDLT) {
   AnalyticCenterParams params;
   params.verbose = true;
   params.rescale_lin_sys = false;
-  params.lrp_params.method = LowRankPrecondMethod::DenseLDLT;
+  params.lrp_params.method = LowRankPrecondMethod::SparseLDLT;
   // Match delta and tau to get exact preconditioner for this case
-  auto delta = 1.0;
+  auto delta = 1e-8;
   params.lrp_params.tau = delta;
 
   // get problem
   auto problem = sdp.make_testable(params);
   // Solve using Mosek to get analytic center solution
-  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b);
+  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b, false);
   auto Y_mosek = get_positive_eigspace(mosek_soln.X, 1e-3);
   Matrix X = Y_mosek * Y_mosek.transpose();
   auto [alpha, L] = problem.line_search_factorization(
@@ -437,15 +437,15 @@ TEST_P(LovazsParamTest, LowRankPrecondQR) {
   AnalyticCenterParams params;
   params.verbose = true;
   params.rescale_lin_sys = false;
-  params.lrp_params.method = LowRankPrecondMethod::DenseQR;
+  params.lrp_params.method = LowRankPrecondMethod::SparseQR;
   // Match delta and tau to get exact preconditioner for this case
-  auto delta = 1e-8;
+  auto delta = 1e-7;
   params.lrp_params.tau = delta;
 
   // get problem
   auto problem = sdp.make_testable(params);
   // Solve using Mosek to get analytic center solution
-  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b);
+  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b, false);
   auto Y_mosek = get_positive_eigspace(mosek_soln.X, 1e-3);
   Matrix X = Y_mosek * Y_mosek.transpose();
   auto [alpha, L] = problem.line_search_factorization(

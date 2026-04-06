@@ -238,8 +238,11 @@ class LowRankPrecond {
       build_ldlt_dense();
     } else if (params_.method == LowRankPrecondMethod::DenseQR) {
       build_qr_dense();
+    } else if (params_.method == LowRankPrecondMethod::SparseQR) {
+      build_qr_sparse();
     } else {
-      throw std::runtime_error("LowRankPrecond: Unknown preconditioning method.");
+      throw std::runtime_error(
+          "LowRankPrecond: Unknown preconditioning method.");
     }
   }
 
@@ -260,8 +263,11 @@ class LowRankPrecond {
       build_ldlt_dense();
     } else if (params_.method == LowRankPrecondMethod::DenseQR) {
       build_qr_dense();
+    } else if (params_.method == LowRankPrecondMethod::SparseQR) {
+      build_qr_sparse();
     } else {
-      throw std::runtime_error("LowRankPrecond: Unknown preconditioning method.");
+      throw std::runtime_error(
+          "LowRankPrecond: Unknown preconditioning method.");
     }
     return *this;
   }
@@ -382,6 +388,69 @@ class LowRankPrecond {
     return *this;
   }
 
+  // Internal compute function that does the actual work of building the
+  // preconditioner. This version builds the sparse qr factorization
+  LowRankPrecond& build_qr_sparse() {
+    if (!U_ || !C_ || !As_) {
+      throw std::runtime_error(
+          "LowRankPrecond: Problem data not set. Call init() before "
+          "compute().");
+    }
+    // compute constraint matrix
+    build_constraint_mat();
+
+    // build the V = A_bar^T(U otimes Z) matrix as dense
+    auto V_dense = build_top_right(*U_, params_.tau);
+
+    // Sparsify V_dense by collecting non-zero entries
+    std::vector<Eigen::Triplet<double>> V_trips;
+    V_trips.reserve(static_cast<size_t>(V_dense.rows() * V_dense.cols() *
+                                        0.1));  // estimate 10% density
+    for (int i = 0; i < V_dense.rows(); ++i) {
+      for (int j = 0; j < V_dense.cols(); ++j) {
+        if (V_dense(i, j) != 0.0) {
+          V_trips.emplace_back(i, j, V_dense(i, j));
+        }
+      }
+    }
+    SpMatrix V_sparse(V_dense.rows(), V_dense.cols());
+    V_sparse.setFromTriplets(V_trips.begin(), V_trips.end());
+    V_sparse.makeCompressed();
+
+    // Build sparse augmented system: [tau * A_bar; V_sparse^T]
+    const int nrows_total = A_bar_.rows() + V_sparse.cols();
+    const int ncols = A_bar_.cols();
+    const double tau = params_.tau;
+
+    std::vector<Eigen::Triplet<double>> sys_trips;
+    sys_trips.reserve(
+        static_cast<size_t>(A_bar_.nonZeros() + V_sparse.nonZeros()));
+
+    // Top block: tau * A_bar_
+    for (int k = 0; k < A_bar_.outerSize(); ++k) {
+      for (SpMatrix::InnerIterator it(A_bar_, k); it; ++it) {
+        sys_trips.emplace_back(it.row(), it.col(), tau * it.value());
+      }
+    }
+
+    // Bottom block: V_sparse^T (transpose is handled by swapping indices)
+    for (int k = 0; k < V_sparse.outerSize(); ++k) {
+      for (SpMatrix::InnerIterator it(V_sparse, k); it; ++it) {
+        sys_trips.emplace_back(A_bar_.rows() + it.col(), it.row(), it.value());
+      }
+    }
+
+    SpMatrix Sys(nrows_total, ncols);
+    Sys.setFromTriplets(sys_trips.begin(), sys_trips.end());
+    Sys.makeCompressed();
+
+    // Factorize with sparse QR
+    QRSparseFactor.compute(Sys);
+    is_initialized_ = (QRSparseFactor.info() == Eigen::Success);
+
+    return *this;
+  }
+
   // Apply the preconditioner by solving the augmented system
   // that is, invert the preconditioner matrix and apply it to the input vector
   template <typename Rhs>
@@ -405,7 +474,8 @@ class LowRankPrecond {
              "preconditioner.");
       auto c = QRDenseFactor.colsPermutation().inverse() * b / scale_;
       // Make a mutable copy of R to enable solve operations
-      Eigen::MatrixXd R_copy = QRDenseFactor.matrixR().topLeftCorner(rank,rank);
+      Eigen::MatrixXd R_copy =
+          QRDenseFactor.matrixR().topLeftCorner(rank, rank);
       auto R = R_copy.template triangularView<Eigen::Upper>();
       // Solve R^T y = c
       Eigen::VectorXd y = R.transpose().solve(c);
@@ -413,8 +483,28 @@ class LowRankPrecond {
       Eigen::VectorXd z = R.solve(y);
       // Unpermute the result
       result = QRDenseFactor.colsPermutation() * z;
+    } else if (params_.method == LowRankPrecondMethod::SparseQR) {
+      // Solve Sys^T Sys x = b via R^T R x = b, where Sys = [A; V] = Q R is the
+      // dense QR factorization of the augmented system matrix
+      // Check Rank
+      int rank = QRSparseFactor.rank();
+      assert(rank == ncons &&
+             "Column rank deficiency detected in QR factorization of low rank "
+             "preconditioner.");
+      auto c = QRSparseFactor.colsPermutation().inverse() * b / scale_;
+      // Make a mutable copy of R to enable solve operations
+      Eigen::MatrixXd R_copy =
+          QRSparseFactor.matrixR().topLeftCorner(rank, rank);
+      auto R = R_copy.template triangularView<Eigen::Upper>();
+      // Solve R^T y = c
+      Eigen::VectorXd y = R.transpose().solve(c);
+      // Solve R z = y
+      Eigen::VectorXd z = R.solve(y);
+      // Unpermute the result
+      result = QRSparseFactor.colsPermutation() * z;
     } else {
-      throw std::runtime_error("LowRankPrecond: Unknown preconditioning method.");
+      throw std::runtime_error(
+          "LowRankPrecond: Unknown preconditioning method.");
     }
     return result;
   }
@@ -431,9 +521,12 @@ class LowRankPrecond {
     // just use s = sqrt(2tau) as a scaling factor
     Matrix Zt;
     if (!approx) {
-      Eigen::LLT<Matrix> llt(U * U.transpose() + 2*Matrix::Identity(dim, dim) * tau);
+      Eigen::LLT<Matrix> llt(U * U.transpose() +
+                             2 * Matrix::Identity(dim, dim) * tau);
       if (llt.info() != Eigen::Success) {
-        throw std::runtime_error("LowRankPrecond: Cholesky factorization failed when building Z matrix for top right block of preconditioner.");
+        throw std::runtime_error(
+            "LowRankPrecond: Cholesky factorization failed when building Z "
+            "matrix for top right block of preconditioner.");
       }
       Zt = llt.matrixL().transpose();
     }
