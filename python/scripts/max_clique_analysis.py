@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
 
 from max_clique import generate_dataset, MaxCliqueProblem
-from ranktools import AnalyticCenterParams, LinearSolverType
+from ranktools import AnalyticCenterParams, LinearSolverType, LowRankPrecondMethod
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -28,7 +28,7 @@ from ranktools import AnalyticCenterParams, LinearSolverType
 N_OUTRAT = 10
 
 # Number of randomized trials to run per outlier ratio
-N_TRIALS_PER_OUTRAT = 1
+N_TRIALS_PER_OUTRAT = 10
 
 # Range of outlier ratios (log-spaced between these bounds)
 OUTRAT_MIN = 0.1
@@ -57,7 +57,7 @@ SEED = 0
 # are restricted to the first N_FULL_MAT outlier-ratio trials.
 ALL_SOLVERS = {
     "MFCG_LRP": LinearSolverType.MFCG_LRP,
-    "MFCG_DP":  LinearSolverType.MFCG_DP,
+    # "MFCG_DP":  LinearSolverType.MFCG_DP,
     # "CG":       LinearSolverType.CG,
     # "LDLT":     LinearSolverType.LDLT,
 }
@@ -80,6 +80,8 @@ def make_ac_params(solver_type: LinearSolverType) -> AnalyticCenterParams:
     # Turn off perturbations:
     params.perturb_constraints = False
     params.adaptive_perturb = False
+    # Set preconditioner
+    params.lrp_params.method = LowRankPrecondMethod.SparseLDLT
     return params
 
 

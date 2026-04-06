@@ -142,9 +142,10 @@ class MaxCliqueProblem:
             self.params.lrp_params.tau = 1e-5
             self.params.delta_init = 1e-5
             self.params.delta_min = 1e-8
+            self.params.rescale_lin_sys = False
             # Turn off perturbations:
-            self.params.perturb_constraints = False
-            self.params.adaptive_perturb = False
+            self.params.perturb_constraints = True
+            self.params.adaptive_perturb = True
         
 
     def get_constraints(self):
@@ -238,7 +239,7 @@ class MaxCliqueProblem:
         soln = self.solve_clipper()
         u = soln.u / np.linalg.norm(soln.u)
         # Certify solution
-        result, time_ac = self.certify_candidate(u)
+        result = self.certify_candidate(u)
         
         return u
         
@@ -291,10 +292,10 @@ if __name__ == "__main__":
     
     np.random.seed(0)
     # Build a bunny dataset
-    m = 200      # total number of associations in problem
-    n1 = 200     # number of points used on model (i.e., seen in view 1)
-    n2o = 20     # number of outliers in data (i.e., seen in view 2)
-    outrat = 0.01 # outlier ratio of initial association set
+    m = 500      # total number of associations in problem
+    n1 = 500     # number of points used on model (i.e., seen in view 1)
+    n2o = 50     # number of outliers in data (i.e., seen in view 2)
+    outrat = 0.9 # outlier ratio of initial association set
     sigma = 0.01  # uniform noise [m] range
     pcfile = '/workspace/python/examples/bun10k.ply'  # Object file
     # Random pose transormation
@@ -306,15 +307,17 @@ if __name__ == "__main__":
     
     prob = MaxCliqueProblem(clipper)
     
-    if not load_soln:
-        X, u, rank,_,_ = prob.solve_sdp()
-        with open(output_path, "wb") as f:
-            pickle.dump(u, f)
-        print(f"Saved solution u to {output_path}")
-    else:
-        with open(output_path, "rb") as f:
-            u = pickle.load(f)
-        print(f"Loaded solution u from {output_path}")
+    # if not load_soln:
+    #     X, u, rank,_,_ = prob.solve_sdp()
+    #     with open(output_path, "wb") as f:
+    #         pickle.dump(u, f)
+    #     print(f"Saved solution u to {output_path}")
+    # else:
+    #     with open(output_path, "rb") as f:
+    #         u = pickle.load(f)
+    #     print(f"Loaded solution u from {output_path}")
     
-    # run Certifier
-    result = prob.certify_candidate(u)
+    # # run Certifier
+    # result = prob.certify_candidate(u)
+    
+    prob.solve_and_certify()
