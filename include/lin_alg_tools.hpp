@@ -2,6 +2,7 @@
 #include <Eigen/Core>
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
+#include <algorithm>
 #include <iostream>
 
 // -------------- SOLVER ENUM TYPES ---------------
@@ -384,6 +385,15 @@ class LowRankPrecond {
     // Factorize with dense QR
     QRDenseFactor.compute(Sys);
     is_initialized_ = (QRDenseFactor.info() == Eigen::Success);
+    if (is_initialized_) {
+      const int rank = QRDenseFactor.rank();
+      if (rank != ncons) {
+        throw std::runtime_error(
+            "LowRankPrecond: Column rank deficiency detected in dense QR "
+            "factorization.");
+      }
+      QRDenseR_ = QRDenseFactor.matrixR().topLeftCorner(rank, rank);
+    }
 
     return *this;
   }
@@ -402,29 +412,23 @@ class LowRankPrecond {
     // build the V = A_bar^T(U otimes Z) matrix as dense
     auto V_dense = build_top_right(*U_, params_.tau);
 
-    // Sparsify V_dense by collecting non-zero entries
-    std::vector<Eigen::Triplet<double>> V_trips;
-    V_trips.reserve(static_cast<size_t>(V_dense.rows() * V_dense.cols() *
-                                        0.1));  // estimate 10% density
-    for (int i = 0; i < V_dense.rows(); ++i) {
-      for (int j = 0; j < V_dense.cols(); ++j) {
-        if (V_dense(i, j) != 0.0) {
-          V_trips.emplace_back(i, j, V_dense(i, j));
-        }
-      }
-    }
-    SpMatrix V_sparse(V_dense.rows(), V_dense.cols());
-    V_sparse.setFromTriplets(V_trips.begin(), V_trips.end());
+    // Sparsify V with a numeric tolerance. Using an exact zero test on
+    // floating-point values keeps almost every entry and causes unnecessary
+    // memory traffic / factorization cost.
+    const double vmax = V_dense.cwiseAbs().maxCoeff();
+    const double drop_tol = std::max(1e-14, 1e-12 * vmax);
+    SpMatrix V_sparse = V_dense.sparseView(drop_tol, 1.0);
     V_sparse.makeCompressed();
 
     // Build sparse augmented system: [tau * A_bar; V_sparse^T]
-    const int nrows_total = A_bar_.rows() + V_sparse.cols();
+    const int a_rows = A_bar_.rows();
+    const int nrows_total = a_rows + V_sparse.cols();
     const int ncols = A_bar_.cols();
     const double tau = params_.tau;
 
     std::vector<Eigen::Triplet<double>> sys_trips;
-    sys_trips.reserve(
-        static_cast<size_t>(A_bar_.nonZeros() + V_sparse.nonZeros()));
+    sys_trips.reserve(static_cast<size_t>(A_bar_.nonZeros()) +
+                      static_cast<size_t>(V_sparse.nonZeros()));
 
     // Top block: tau * A_bar_
     for (int k = 0; k < A_bar_.outerSize(); ++k) {
@@ -436,7 +440,7 @@ class LowRankPrecond {
     // Bottom block: V_sparse^T (transpose is handled by swapping indices)
     for (int k = 0; k < V_sparse.outerSize(); ++k) {
       for (SpMatrix::InnerIterator it(V_sparse, k); it; ++it) {
-        sys_trips.emplace_back(A_bar_.rows() + it.col(), it.row(), it.value());
+        sys_trips.emplace_back(a_rows + it.col(), it.row(), it.value());
       }
     }
 
@@ -447,6 +451,17 @@ class LowRankPrecond {
     // Factorize with sparse QR
     QRSparseFactor.compute(Sys);
     is_initialized_ = (QRSparseFactor.info() == Eigen::Success);
+    if (is_initialized_) {
+      const int rank = QRSparseFactor.rank();
+      if (rank != ncons) {
+        throw std::runtime_error(
+            "LowRankPrecond: Column rank deficiency detected in sparse QR "
+            "factorization.");
+      }
+      // Cache a dense copy of the leading R block once. Reusing this avoids
+      // repeated sparse->dense materialization in each solve() call.
+      QRSparseR_ = QRSparseFactor.matrixR().topLeftCorner(rank, rank);
+    }
 
     return *this;
   }
@@ -467,39 +482,32 @@ class LowRankPrecond {
     } else if (params_.method == LowRankPrecondMethod::DenseQR) {
       // Solve Sys^T Sys x = b via R^T R x = b, where Sys = [A; V] = Q R is the
       // dense QR factorization of the augmented system matrix
-      // Check Rank
-      int rank = QRDenseFactor.rank();
-      assert(rank == ncons &&
-             "Column rank deficiency detected in QR factorization of low rank "
-             "preconditioner.");
+      assert(QRDenseR_.rows() == ncons && QRDenseR_.cols() == ncons &&
+             "Dense QR preconditioner cache has invalid dimensions.");
       auto c = QRDenseFactor.colsPermutation().inverse() * b / scale_;
-      // Make a mutable copy of R to enable solve operations
-      Eigen::MatrixXd R_copy =
-          QRDenseFactor.matrixR().topLeftCorner(rank, rank);
-      auto R = R_copy.template triangularView<Eigen::Upper>();
       // Solve R^T y = c
-      Eigen::VectorXd y = R.transpose().solve(c);
+      Eigen::VectorXd y =
+          QRDenseR_.transpose().template triangularView<Eigen::Lower>().solve(
+              c);
       // Solve R z = y
-      Eigen::VectorXd z = R.solve(y);
+      Eigen::VectorXd z =
+          QRDenseR_.template triangularView<Eigen::Upper>().solve(y);
       // Unpermute the result
       result = QRDenseFactor.colsPermutation() * z;
     } else if (params_.method == LowRankPrecondMethod::SparseQR) {
       // Solve Sys^T Sys x = b via R^T R x = b, where Sys = [A; V] = Q R is the
-      // dense QR factorization of the augmented system matrix
-      // Check Rank
-      int rank = QRSparseFactor.rank();
-      assert(rank == ncons &&
-             "Column rank deficiency detected in QR factorization of low rank "
-             "preconditioner.");
+      // sparse QR factorization of the augmented system matrix
+      // Sparse version
+      assert(QRSparseR_.rows() == ncons && QRSparseR_.cols() == ncons &&
+             "Sparse QR preconditioner cache has invalid dimensions.");
       auto c = QRSparseFactor.colsPermutation().inverse() * b / scale_;
-      // Make a mutable copy of R to enable solve operations
-      Eigen::MatrixXd R_copy =
-          QRSparseFactor.matrixR().topLeftCorner(rank, rank);
-      auto R = R_copy.template triangularView<Eigen::Upper>();
       // Solve R^T y = c
-      Eigen::VectorXd y = R.transpose().solve(c);
+      Eigen::VectorXd y =
+          QRSparseR_.transpose().template triangularView<Eigen::Lower>().solve(
+              c);
       // Solve R z = y
-      Eigen::VectorXd z = R.solve(y);
+      Eigen::VectorXd z =
+          QRSparseR_.template triangularView<Eigen::Upper>().solve(y);
       // Unpermute the result
       result = QRSparseFactor.colsPermutation() * z;
     } else {
@@ -632,37 +640,6 @@ class LowRankPrecond {
   Eigen::SimplicialLDLT<SpMatrix> LDLTSparseFactor;
   Eigen::SparseQR<SpMatrix, Eigen::COLAMDOrdering<int>> QRSparseFactor;
   Eigen::ColPivHouseholderQR<Eigen::MatrixXd> QRDenseFactor;
-
-  /// @brief Solve the system using the LDLT factorization, treating small
-  /// eigenvalues as zero to handle potential singularity. This effectively
-  /// applies a pseudo-inverse of the factorized matrix.
-  /// @param b right-hand side vector to solve for
-  /// @return solution vector after applying the pseudo-inverse of the LDLT
-  /// factorization
-  Eigen::VectorXd ldlt_pseudo_solve(const Eigen::VectorXd& b) const {
-    const auto& L = LDLTDenseFactor.matrixL();
-    const auto& P = LDLTDenseFactor.transpositionsP();
-    const auto& D = LDLTDenseFactor.vectorD();  // diagonal of D
-
-    // Step 1: apply permutation
-    Vector rhs = P.transpose() * b;
-
-    // Step 2: forward solve L z = rhs
-    Vector z = L.solve(rhs);
-
-    // Step 3: apply pseudo-inverse of D
-    for (int i = 0; i < D.size(); ++i) {
-      if (std::abs(D[i]) > params_.ldlt_zero_thresh) {
-        z[i] /= D[i];
-      } else {
-        z[i] = 0.0;  // project out nullspace
-      }
-    }
-
-    // Step 4: backward solve L^T y = z
-    Eigen::VectorXd y = L.transpose().solve(z);
-
-    // Step 5: undo permutation
-    return P * y;
-  }
+  Matrix QRDenseR_;
+  Matrix QRSparseR_;
 };

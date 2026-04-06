@@ -19,7 +19,7 @@ option(BUILD_TESTS "Build testsuite" ON)
 option(BUILD_PYTHON_BINDINGS "Build pybind11 Python bindings" OFF)
 option(ENABLE_DEBUG "Print additional debugging information" OFF)
 option(ENABLE_TIMING "Print out timing data" OFF)
-option(ENABLE_PARALLEL "Enable OpenMP parallelization of hot loops" OFF)
+option(ENABLE_PARALLEL "Enable OpenMP parallelization of hot loops" ON)
 
 ###############################################################################
 # Dependencies
@@ -75,7 +75,9 @@ target_link_libraries(rank_tools PRIVATE
     Boost::filesystem 
     Boost::system)
 target_link_libraries(rank_tools PUBLIC Eigen3::Eigen)
-target_link_libraries(rank_tools PUBLIC OpenMP::OpenMP_CXX)
+if(ENABLE_PARALLEL)
+  target_link_libraries(rank_tools PUBLIC OpenMP::OpenMP_CXX)
+endif()
 target_link_libraries(rank_tools PUBLIC ${FUSION_LIB} ${MOSEK_LIB})
 
 # debug flag  
