@@ -234,10 +234,12 @@ class LowRankPrecond {
     // Call function to build the preconditioner
     if (params_.method == LowRankPrecondMethod::SparseLDLT) {
       build_ldlt_sparse();
+    } else if (params_.method == LowRankPrecondMethod::DenseLDLT) {
+      build_ldlt_dense();
     } else if (params_.method == LowRankPrecondMethod::DenseQR) {
       build_qr_dense();
     } else {
-      build_ldlt_dense();
+      throw std::runtime_error("LowRankPrecond: Unknown preconditioning method.");
     }
   }
 
@@ -254,10 +256,12 @@ class LowRankPrecond {
     // Call the internal build function that does the actual work
     if (params_.method == LowRankPrecondMethod::SparseLDLT) {
       build_ldlt_sparse();
-    } else if (params_.method == LowRankPrecondMethod::SparseQR) {
+    } else if (params_.method == LowRankPrecondMethod::DenseLDLT) {
       build_ldlt_dense();
+    } else if (params_.method == LowRankPrecondMethod::DenseQR) {
+      build_qr_dense();
     } else {
-      build_ldlt_dense();
+      throw std::runtime_error("LowRankPrecond: Unknown preconditioning method.");
     }
     return *this;
   }
@@ -273,8 +277,6 @@ class LowRankPrecond {
     }
     // compute constraint matrix
     build_constraint_mat();
-    // Set W0 residual
-    auto W0 = Matrix::Identity(dim, dim) * params_.tau;
     // Build sparse augmented system - Eqn 23 in Zhang and Lavaei 2017
     auto Sys = Matrix(ncons + rank_ * dim, ncons + rank_ * dim);
     Sys.block(0, 0, ncons, ncons) =
@@ -284,7 +286,6 @@ class LowRankPrecond {
         build_top_right(*U_, params_.tau) * params_.tau;
     Sys.block(ncons, ncons, rank_ * dim, rank_ * dim) =
         -Matrix::Identity(rank_ * dim, rank_ * dim) * std::pow(params_.tau, 2);
-
     // Prefactorize (LDLT)
     LDLTDenseFactor.compute(Sys.selfadjointView<Eigen::Upper>());
     // Flag that we have initialized to eigen
@@ -385,12 +386,15 @@ class LowRankPrecond {
   // that is, invert the preconditioner matrix and apply it to the input vector
   template <typename Rhs>
   Eigen::VectorXd solve(const Eigen::MatrixBase<Rhs>& b) const {
-    Vector result;
+    Vector result(ncons);
     if (params_.method == LowRankPrecondMethod::SparseLDLT) {
       auto rhs = Vector(ncons + rank_ * dim);
       rhs << b / scale_, Vector::Zero(rank_ * dim);
-      result = LDLTSparseFactor.solve(rhs);
-      result = result.segment(0, ncons);
+      result = LDLTSparseFactor.solve(rhs).head(ncons).eval();
+    } else if (params_.method == LowRankPrecondMethod::DenseLDLT) {
+      auto rhs = Vector(ncons + rank_ * dim);
+      rhs << b / scale_, Vector::Zero(rank_ * dim);
+      result = LDLTDenseFactor.solve(rhs).head(ncons).eval();
     } else if (params_.method == LowRankPrecondMethod::DenseQR) {
       // Solve Sys^T Sys x = b via R^T R x = b, where Sys = [A; V] = Q R is the
       // dense QR factorization of the augmented system matrix
@@ -410,28 +414,27 @@ class LowRankPrecond {
       // Unpermute the result
       result = QRDenseFactor.colsPermutation() * z;
     } else {
-      auto rhs = Vector(ncons + rank_ * dim);
-      rhs << b / scale_, Vector::Zero(rank_ * dim);
-      result = LDLTDenseFactor.solve(rhs);
-      result = result.segment(0, ncons);
+      throw std::runtime_error("LowRankPrecond: Unknown preconditioning method.");
     }
     return result;
   }
 
-  // Build the top right matrix = A_bar^T(U otimes Z)
+  // Build the top right matrix, V = A_bar^T(U otimes Z)
   Matrix build_top_right(const Matrix& U, double tau) const {
     // Init Matrix
     Matrix top_right(ncons, rank_ * dim);
     // define convenience variables
     const bool approx = params_.use_approx;
     const double s = std::sqrt(2.0 * tau);
-    auto W0 = Matrix::Identity(dim, dim) * 2.0 * tau;
     // if not approximating, store transpose of Z for computations
     // if approximating with Z Z^T = 2tau I, then we can skip building Z and
     // just use s = sqrt(2tau) as a scaling factor
     Matrix Zt;
     if (!approx) {
-      Eigen::LLT<Matrix> llt(U * U.transpose() + W0);
+      Eigen::LLT<Matrix> llt(U * U.transpose() + 2*Matrix::Identity(dim, dim) * tau);
+      if (llt.info() != Eigen::Success) {
+        throw std::runtime_error("LowRankPrecond: Cholesky factorization failed when building Z matrix for top right block of preconditioner.");
+      }
       Zt = llt.matrixL().transpose();
     }
 

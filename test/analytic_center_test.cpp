@@ -361,9 +361,9 @@ TEST_P(LovazsParamTest, LowRankPrecondLDLT) {
   AnalyticCenterParams params;
   params.verbose = true;
   params.rescale_lin_sys = false;
-  params.lrp_params.method = LowRankPrecondMethod::SparseLDLT;
+  params.lrp_params.method = LowRankPrecondMethod::DenseLDLT;
   // Match delta and tau to get exact preconditioner for this case
-  auto delta = 1e-6;
+  auto delta = 1.0;
   params.lrp_params.tau = delta;
 
   // get problem
@@ -405,7 +405,7 @@ TEST_P(LovazsParamTest, LowRankPrecondLDLT) {
   for (int i = 0; i < problem.m; ++i) {
     PB.col(i) = precond.solve(B.col(i));
   }
-  // std::cout << PB << std::endl;
+
   // Inspect spectrum of PB.
   Eigen::EigenSolver<Matrix> es(PB);
   ASSERT_EQ(es.info(), Eigen::Success);
