@@ -361,10 +361,10 @@ TEST_P(LovazsParamTest, LowRankPrecondLDLT) {
   AnalyticCenterParams params;
   params.verbose = true;
   params.rescale_lin_sys = false;
-  params.lrp_params.method = LowRankPrecondMethod::DenseLDLT;
+  params.lrp_params.method = LowRankPrecondMethod::SparseLDLT;
   // Match delta and tau to get exact preconditioner for this case
   auto delta = 1e-6;
-  params.lrp_params.tau = 1e-6;
+  params.lrp_params.tau = delta;
 
   // get problem
   auto problem = sdp.make_testable(params);
@@ -439,8 +439,8 @@ TEST_P(LovazsParamTest, LowRankPrecondQR) {
   params.rescale_lin_sys = false;
   params.lrp_params.method = LowRankPrecondMethod::DenseQR;
   // Match delta and tau to get exact preconditioner for this case
-  auto delta = 1e-6;
-  params.lrp_params.tau = 1e-6;
+  auto delta = 1e-8;
+  params.lrp_params.tau = delta;
 
   // get problem
   auto problem = sdp.make_testable(params);

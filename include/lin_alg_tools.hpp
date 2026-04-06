@@ -372,7 +372,8 @@ class LowRankPrecond {
     // build least squares factored matrix
     auto Sys = Eigen::MatrixXd(A_bar_dense.rows() + V_dense.cols(),
                                A_bar_dense.cols());
-    Sys << A_bar_dense, V_dense.transpose();
+    Sys.topRows(A_bar_dense.rows()) = A_bar_dense * params_.tau;
+    Sys.bottomRows(V_dense.cols()) = V_dense.transpose();
     // Factorize with dense QR
     QRDenseFactor.compute(Sys);
     is_initialized_ = (QRDenseFactor.info() == Eigen::Success);
@@ -384,7 +385,6 @@ class LowRankPrecond {
   // that is, invert the preconditioner matrix and apply it to the input vector
   template <typename Rhs>
   Eigen::VectorXd solve(const Eigen::MatrixBase<Rhs>& b) const {
-    
     Vector result;
     if (params_.method == LowRankPrecondMethod::SparseLDLT) {
       auto rhs = Vector(ncons + rank_ * dim);
@@ -392,8 +392,23 @@ class LowRankPrecond {
       result = LDLTSparseFactor.solve(rhs);
       result = result.segment(0, ncons);
     } else if (params_.method == LowRankPrecondMethod::DenseQR) {
-      // Solve Sys^T Sys x = b via R^T R x = b, where Sys = [A; V] = Q R is the dense QR factorization of the augmented system matrix
-      result = QRDenseFactor.solve(QRDenseFactor.adjoint().solve(b / scale_));
+      // Solve Sys^T Sys x = b via R^T R x = b, where Sys = [A; V] = Q R is the
+      // dense QR factorization of the augmented system matrix
+      // Check Rank
+      int rank = QRDenseFactor.rank();
+      assert(rank == ncons &&
+             "Column rank deficiency detected in QR factorization of low rank "
+             "preconditioner.");
+      auto c = QRDenseFactor.colsPermutation().inverse() * b / scale_;
+      // Make a mutable copy of R to enable solve operations
+      Eigen::MatrixXd R_copy = QRDenseFactor.matrixR().topLeftCorner(rank,rank);
+      auto R = R_copy.template triangularView<Eigen::Upper>();
+      // Solve R^T y = c
+      Eigen::VectorXd y = R.transpose().solve(c);
+      // Solve R z = y
+      Eigen::VectorXd z = R.solve(y);
+      // Unpermute the result
+      result = QRDenseFactor.colsPermutation() * z;
     } else {
       auto rhs = Vector(ncons + rank_ * dim);
       rhs << b / scale_, Vector::Zero(rank_ * dim);
