@@ -363,7 +363,7 @@ TEST_P(LovazsParamTest, LowRankPrecondLDLT) {
   params.rescale_lin_sys = false;
   params.lrp_params.method = LowRankPrecondMethod::SparseLDLT;
   // Match delta and tau to get exact preconditioner for this case
-  auto delta = 1e-8;
+  auto delta = 1e-7;
   params.lrp_params.tau = delta;
 
   // get problem
@@ -580,6 +580,7 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   params.rescale_lin_sys = true;
   params.lin_solver = LinearSolverType::MFCG_LRP;
   params.lrp_params.tau = 1e-5;
+  params.lrp_params.method = LowRankPrecondMethod::SparseLDLT;
   // Initialize delta
   auto delta = 1e-5;
   params.delta_init = delta;

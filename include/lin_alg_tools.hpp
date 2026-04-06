@@ -317,9 +317,9 @@ class LowRankPrecond {
     // compute constraint matrix
     build_constraint_mat();
 
-    const Matrix W0 = Matrix::Identity(dim, dim) * params_.tau;
-    const Matrix top_right_dense =
-        build_top_right(*U_, params_.tau) * params_.tau;
+    SpMatrix top_right_sparse = build_top_right_sparse(*U_, params_.tau);
+    top_right_sparse *= params_.tau;
+    top_right_sparse.makeCompressed();
 
     const int rdim = rank_ * dim;
     const int nsys = ncons + rdim;
@@ -330,7 +330,7 @@ class LowRankPrecond {
 
     std::vector<Eigen::Triplet<double>> trips;
     trips.reserve(static_cast<size_t>(AtA.nonZeros()) +
-                  static_cast<size_t>(2 * ncons * rdim + rdim));
+                  static_cast<size_t>(2 * top_right_sparse.nonZeros() + rdim));
 
     for (int k = 0; k < AtA.outerSize(); ++k) {
       for (SpMatrix::InnerIterator it(AtA, k); it; ++it) {
@@ -339,13 +339,10 @@ class LowRankPrecond {
     }
 
     // Top-right and symmetric bottom-left blocks
-    for (int i = 0; i < ncons; ++i) {
-      for (int j = 0; j < rdim; ++j) {
-        const double v = top_right_dense(i, j);
-        if (v != 0.0) {
-          trips.emplace_back(i, ncons + j, v);
-          trips.emplace_back(ncons + j, i, v);
-        }
+    for (int k = 0; k < top_right_sparse.outerSize(); ++k) {
+      for (SpMatrix::InnerIterator it(top_right_sparse, k); it; ++it) {
+        trips.emplace_back(it.row(), ncons + it.col(), it.value());
+        trips.emplace_back(ncons + it.col(), it.row(), it.value());
       }
     }
 
@@ -409,15 +406,7 @@ class LowRankPrecond {
     // compute constraint matrix
     build_constraint_mat();
 
-    // build the V = A_bar^T(U otimes Z) matrix as dense
-    auto V_dense = build_top_right(*U_, params_.tau);
-
-    // Sparsify V with a numeric tolerance. Using an exact zero test on
-    // floating-point values keeps almost every entry and causes unnecessary
-    // memory traffic / factorization cost.
-    const double vmax = V_dense.cwiseAbs().maxCoeff();
-    const double drop_tol = std::max(1e-14, 1e-12 * vmax);
-    SpMatrix V_sparse = V_dense.sparseView(drop_tol, 1.0);
+    SpMatrix V_sparse = build_top_right_sparse(*U_, params_.tau);
     V_sparse.makeCompressed();
 
     // Build sparse augmented system: [tau * A_bar; V_sparse^T]
@@ -571,6 +560,17 @@ class LowRankPrecond {
     }
 
     return top_right;
+  }
+
+  // Build sparse V = A_bar^T(U otimes Z) using tolerance-based sparsification
+  // to avoid near-zero floating-point noise filling the matrix.
+  SpMatrix build_top_right_sparse(const Matrix& U, double tau) const {
+    Matrix top_right_dense = build_top_right(U, tau);
+    const double vmax = top_right_dense.cwiseAbs().maxCoeff();
+    const double drop_tol = std::max(1e-14, 1e-12 * vmax);
+    SpMatrix top_right_sparse = top_right_dense.sparseView(drop_tol, 1.0);
+    top_right_sparse.makeCompressed();
+    return top_right_sparse;
   }
 
   // Construct the vectorized constraint matrix
