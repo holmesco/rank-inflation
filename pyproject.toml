@@ -19,7 +19,7 @@ dependencies = [
 	"pybind11",
 	"pybind11-stubgen",
 	"scikit-build-core",
-    "theseus-ai",
+	"theseus-ai",
 	"cmake",
 	"ninja",
 	"pytest",
@@ -27,6 +27,8 @@ dependencies = [
 	"torchaudio==2.2.1",
 	"torchvision==0.17.1",
 	"torchelastic==0.2.2",
+	"poly-matrix",
+	"open3d>=0.19.0",
 ]
 
 [project.optional-dependencies]
@@ -41,6 +43,12 @@ explicit = true
 torch = { index = "pytorch-cu121" }
 torchaudio = { index = "pytorch-cu121" }
 torchvision = { index = "pytorch-cu121" }
+poly-matrix = { workspace = true }
+
+[tool.uv.workspace]
+members = [
+    "extern/poly_matrix",
+]
 
 [tool.scikit-build]
 # Tell scikit-build-core to pass the flag that enables the pybind11 target

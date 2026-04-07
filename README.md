@@ -33,6 +33,14 @@ Activate the environment:
 source .venv/bin/activate
 ```
 
+Add specific modules
+```bash
+uv pip install extern/certifiable-tools
+uv pip install extern/clipper/build/bindings/python
+```
+
+Hereafter, if syncing with uv use the flag `--inexact` to avoid removing the manually added modules.
+
 Run tests:
 
 ```bash
