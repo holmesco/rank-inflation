@@ -6,9 +6,8 @@ from scipy.special import gammainc
 from scipy.sparse import csc_array
 
 import clipperpy
-from cert_tools.sdp_solvers import solve_sdp_fusion, adjust_Q
+from cert_tools.sdp_solvers import solve_sdp_fusion
 from ranktools import AnalyticCenter, AnalyticCenterParams, LinearSolverType
-import pickle
 
 
 def randsphere(m,n,r):
