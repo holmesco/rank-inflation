@@ -6,11 +6,41 @@ build-backend = "scikit_build_core.build"
 name = "ranktools"
 version = "0.0.1"
 description = "Python bindings for RankTools AnalyticCenter solver"
-requires-python = ">=3.8"
-dependencies = ["numpy", "scipy"]
+requires-python = ">=3.10"
+dependencies = [
+	"numpy",
+	"scipy",
+	"scikit-sparse==0.4.16",
+	"casadi",
+	"cvxpy",
+	"mosek",
+	"matplotlib",
+	"pandas",
+	"pybind11",
+	"pybind11-stubgen",
+	"scikit-build-core",
+    "theseus-ai",
+	"cmake",
+	"ninja",
+	"pytest",
+	"torch==2.2.1",
+	"torchaudio==2.2.1",
+	"torchvision==0.17.1",
+	"torchelastic==0.2.2",
+]
 
 [project.optional-dependencies]
 test = ["pytest"]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchaudio = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
 
 [tool.scikit-build]
 # Tell scikit-build-core to pass the flag that enables the pybind11 target
