@@ -1,5 +1,7 @@
 import torch
 import numpy as np
+import pandas as pd
+import time
 
 from examples.utils.stereo_camera_model import StereoCameraModel
 from examples.utils.stereo_utils import get_gt_setup
@@ -14,7 +16,7 @@ def set_seed(x):
     np.random.seed(x)
     torch.manual_seed(x)
 
-class StereoLocalization:
+class StereoLocalizationProblem:
     def __init__(self, batch_size=1, N_map=50, device="cuda:0"):
         # Default dtype
         torch.set_default_dtype(torch.float64)
@@ -88,7 +90,7 @@ class StereoLocalization:
                                              self.inv_cov_weights)
         
         
-    def run_estimator(self, T_init):
+    def run_estimator(self, T_init, verbose=True):
         # Run estimator
         T_trg_src = self.estimator(
             self.keypoints_3D_src,
@@ -96,9 +98,65 @@ class StereoLocalization:
             self.weights,
             T_init,
             self.inv_cov_weights,
-            verbose=True,
+            verbose=verbose,
         )
         return T_trg_src
+
+    def run_initializations_and_certify(self, N_init=10, init_perturb=0.5, seed=0):
+        """Generate N random initializations, run the estimator, certify each solution, and print a DataFrame.
+
+        Args:
+            N_init (int): Number of random initializations.
+            init_perturb (float): Std-dev of random se(3) perturbation used to initialize each run.
+            seed (int): Random seed for reproducibility.
+
+        Returns:
+            pd.DataFrame: Per-run results including cost, certification status, and certifier metrics.
+        """
+        if self.batch_size != 1:
+            raise ValueError("run_initializations_and_certify currently supports batch_size=1.")
+
+        set_seed(seed)
+        t_sdp_start = time.perf_counter()
+        _, info_sdp, _ = self.certifier.solve_sdp(verbose=False)
+        t_sdp_end = time.perf_counter()
+        sdp_wall_time_s = t_sdp_end - t_sdp_start
+        sdp_solver_time_s = info_sdp[0].get("time", np.nan) if len(info_sdp) > 0 else np.nan
+        print(f"SDP solve wall time: {sdp_wall_time_s:.6f} s")
+        print(f"SDP reported solver time: {sdp_solver_time_s:.6f} s")
+
+        C = self.certifier.Cs[0].detach().cpu().numpy()
+        results = []
+
+        for i in range(N_init):
+            xi_pert = init_perturb * torch.randn(1, 6, dtype=self.T_trg_src.dtype)
+            T_pert = se3_exp(xi_pert)
+            T_init = T_pert.bmm(self.T_trg_src)
+
+            T_est = self.run_estimator(T_init.to(self.device), verbose=False)
+            x_cand = self.certifier.transform_to_x(T_est)[0].detach().cpu().numpy()
+
+            optimal_cost = float((x_cand.T @ C @ x_cand).item())
+            cert_result = self.certifier.certify_solution(
+                x_cand,
+                verbose=False,
+                cost=optimal_cost,
+            )
+
+            results.append(
+                {
+                    "init": i,
+                    "optimal_cost": optimal_cost,
+                    "certified": bool(cert_result.certified),
+                    "min_eig": float(cert_result.min_eig),
+                    "complementarity": float(cert_result.complementarity),
+                    "certifier_time_s": float(cert_result.solver_time),
+                }
+            )
+
+        df = pd.DataFrame(results)
+        print(df)
+        return df
     
     def test_estimator_ground_truth(self):
         # Test with ground truth initialization
@@ -125,7 +183,13 @@ class StereoLocalization:
         x_cand = self.certifier.transform_to_x(T_trg_src_sdp)
         result = self.certifier.certify_solution(x_cand[0])
         np.testing.assert_equal(result.certified, True)
+        # Test with output of solver
+        x_cand = self.certifier.transform_to_x(T_trg_src)
+        result = self.certifier.certify_solution(x_cand[0])
+        np.testing.assert_equal(result.certified, True)
         
 if __name__ == "__main__":
-    stereo_loc = StereoLocalization(batch_size=1, N_map=50)
-    stereo_loc.estimator_ground_truth_test()
+    stereo_loc = StereoLocalizationProblem(batch_size=1, N_map=50)
+    # stereo_loc.test_estimator_ground_truth()
+    df = stereo_loc.run_initializations_and_certify(N_init=10, init_perturb=0.5, seed=0)
+    

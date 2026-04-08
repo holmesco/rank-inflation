@@ -24,6 +24,7 @@ class StereoPoseCertifier():
         keypoints_3D_trg,
         weights,
         inv_cov_weights=None,
+        params: AnalyticCenterParams | None = None,
     ):
         """
         Initialize the PoseSDPBlock class.
@@ -72,20 +73,24 @@ class StereoPoseCertifier():
         }
         
         # Certifier Parameters
-        self.params = AnalyticCenterParams()
-        self.params.verbose = True
-        self.params.verbose = True
-        self.params.lin_solver = LinearSolverType.MFCG_LRP
-        self.params.lin_solve_max_iter = 200
-        self.params.lin_solve_tol = 1e-4
-        self.params.lrp_params.tau = 1e-4
-        self.params.delta_init = 1e-5
-        self.params.delta_min = 1e-8
-        self.params.rescale_lin_sys = False
-        self.params.max_iter = 20
-        # Turn off perturbations:
-        self.params.perturb_constraints = False
-        self.params.adaptive_perturb = False
+        if params is None:
+            self.params = AnalyticCenterParams()
+            self.params.verbose = True
+            self.params.verbose = True
+            self.params.lin_solver = LinearSolverType.MFCG_DP
+            self.params.lin_solve_max_iter = 1000
+            self.params.lin_solve_tol = 1e-4
+            self.params.lrp_params.tau = 1e-4
+            self.params.delta_init = 1e-6
+            self.params.delta_min = 1e-8
+            self.params.rescale_lin_sys = False
+            self.params.max_iter = 20
+            # Turn off perturbations:
+            self.params.perturb_constraints = False
+            self.params.adaptive_perturb = False
+            self.params.cost_perturb = 1e-4
+        else:
+            self.params = params
 
     def solve_sdp(
         self,
