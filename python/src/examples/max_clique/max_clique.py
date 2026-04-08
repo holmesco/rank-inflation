@@ -183,8 +183,6 @@ class MaxCliqueProblem:
         ----------
         x_cand : np.ndarray
             Candidate solution to certify.
-        delta : float
-            Tolerance for certification.
             
         Returns
         -------

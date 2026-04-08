@@ -1,22 +1,29 @@
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from poly_matrix import PolyMatrix
 from torch.profiler import record_function
+from scipy.sparse import csc_matrix
 
-from sdprlayers.layers.sdprlayer import SDPRLayerMosek
-from sdprlayers.utils.lie_algebra import se3_inv, se3_log
+from examples.utils.lie_algebra import se3_inv, se3_log
+from cert_tools.sdp_solvers import solve_sdp_fusion
+from ranktools import AnalyticCenter, AnalyticCenterParams, LinearSolverType
 
 
-class SDPPoseEstimator(nn.Module):
+
+
+class StereoPoseCertifier():
     """
     Compute the relative pose between the source and target frames using
     Semidefinite Programming Relaxation (SDPR)Layer.
     """
 
     def __init__(
-        self, T_s_v, use_dual=True, diff_qcqp=False, compute_multipliers=False
+        self, 
+        T_s_v, 
+        keypoints_3D_src,
+        keypoints_3D_trg,
+        weights,
+        inv_cov_weights=None,
     ):
         """
         Initialize the PoseSDPBlock class.
@@ -25,20 +32,37 @@ class SDPPoseEstimator(nn.Module):
             T_s_v (torch.tensor): 4x4 transformation matrix providing the transform from the vehicle frame to the
                                   sensor frame.
         """
-        super(SDPPoseEstimator, self).__init__()
+        self.device = keypoints_3D_src.device
+        self.batch_size, _, n_points = keypoints_3D_src.size()
+        self.dim = 13
+        self.T_s_v = T_s_v
 
-        # Generate constraints
-        constraints = (
+        # Construct objective function
+        with record_function("SDP: Build Cost Matrix"):
+            self.Cs, self.scales, self.offsets = self.get_obj_matrix_vec(
+                keypoints_3D_src, keypoints_3D_trg, weights, inv_cov_weights
+            )
+        # Generate constraint matrices
+        self.As = (
             self.gen_orthogonal_constraints()
             + self.gen_handedness_constraints()
             + self.gen_row_col_constraints()
         )
+        # generate homogenizing constraint
+        Ah = csc_matrix((self.dim, self.dim), dtype=float)
+        Ah[0, 0] = 1.0
+        self.As += [Ah]
+        # generate rhs of constraints
+        self.bs = np.zeros(len(self.As))
+        self.bs[-1] = 1.0
+        self.constraints = list(zip(self.As, self.bs))
+        
         # Redundant constraints
-        redun_list = list(range(6, len(constraints)))
+        self.redun_list = list(range(6, len(self.constraints)))
 
         # Mosek Parameters
         tol = 1e-12
-        mosek_params = {
+        self.mosek_params = {
             "MSK_IPAR_INTPNT_MAX_ITERATIONS": 1000,
             "MSK_DPAR_INTPNT_CO_TOL_PFEAS": tol,
             "MSK_DPAR_INTPNT_CO_TOL_REL_GAP": tol,
@@ -46,76 +70,134 @@ class SDPPoseEstimator(nn.Module):
             "MSK_DPAR_INTPNT_CO_TOL_INFEAS": tol,
             "MSK_DPAR_INTPNT_CO_TOL_DFEAS": tol,
         }
+        
+        # Certifier Parameters
+        self.params = AnalyticCenterParams()
+        self.params.verbose = True
+        self.params.verbose = True
+        self.params.lin_solver = LinearSolverType.MFCG_LRP
+        self.params.lin_solve_max_iter = 200
+        self.params.lin_solve_tol = 1e-4
+        self.params.lrp_params.tau = 1e-4
+        self.params.delta_init = 1e-5
+        self.params.delta_min = 1e-8
+        self.params.rescale_lin_sys = False
+        self.params.max_iter = 20
+        # Turn off perturbations:
+        self.params.perturb_constraints = False
+        self.params.adaptive_perturb = False
 
-        # Initialize SDPRLayer
-        self.sdprlayer = SDPRLayerMosek(
-            n_vars=13,
-            constraints=constraints,
-            diff_qcqp=diff_qcqp,
-            redun_list=redun_list,
-            compute_multipliers=compute_multipliers,
-            use_dual=use_dual,
-            mosek_params=mosek_params,
-        )
-
-        self.register_buffer("T_s_v", T_s_v)
-
-    def forward(
+    def solve_sdp(
         self,
-        keypoints_3D_src,
-        keypoints_3D_trg,
-        weights,
-        inv_cov_weights=None,
         verbose=False,
         mosek_params=None,
-        return_loss=False,
     ):
         """
-        Compute the pose, T_trg_src, from the source to the target frame.
-
-        Args:
-            keypoints_3D_src (torch,tensor, Bx4xN): 3D point coordinates of keypoints from source frame.
-            keypoints_3D_trg (torch,tensor, Bx4xN): 3D point coordinates of keypoints from target frame.
-            weights (torch.tensor, Bx1xN): weights in range (0, 1) associated with the matched source and target
-                                           points.
-            inv_cov_weights (torch.tensor, BxNx3x3): Inverse Covariance Matrices defined for each point.
-
+        Solve the SDP using MOSEK
+        
         Returns:
             T_trg_src (torch.tensor, Bx4x4): relative transform from the source to the target frame.
         """
-        device = keypoints_3D_src.device
-        batch_size, _, n_points = keypoints_3D_src.size()
-
-        # Construct objective function
-        with record_function("SDPR: Build Cost Matrix"):
-            Qs, scales, offsets = self.get_obj_matrix_vec(
-                keypoints_3D_src, keypoints_3D_trg, weights, inv_cov_weights
-            )
-
+        
+        # Convert to Sparse format
         # Run layer
-        with record_function("SDPR: Run Optimization"):
-            Xs, xs = self.sdprlayer(Qs, verbose=verbose, mosek_params=mosek_params)
+        X_batch = []
+        info_batch = []
+        with record_function("SDP: Run Optimization"):
+            for b in range(self.batch_size):
+                C = self.Cs[b].cpu().numpy()
+                X, info = solve_sdp_fusion(Q=C,
+                                           Constraints=self.constraints,
+                                           adjust=False,
+                                           verbose=verbose)
+                X_batch.append(torch.from_numpy(X))
+                info_batch.append(info)
 
-        # Extract solution
-        t_trg_src_intrg = xs[:, 10:]
-        R_trg_src = torch.reshape(xs[:, 1:10], (-1, 3, 3)).transpose(-1, -2)
+        X = torch.stack(X_batch, dim=0)
+        T_trg_src = self.solution_matrix_to_transform(X)
+        
+        return X, info_batch, T_trg_src
+
+    def x_to_transform(self, x):
+        """Convert batched pose vectors (Bx13x1) to batched transforms (Bx4x4)."""
+        B = x.shape[0]
+        device = x.device
+        dtype = x.dtype
+
+        # Extract rotation and translation in sensor frame coordinates.
+        t_trg_src_intrg = x[:, 10:, [0]]
+        R_trg_src = torch.reshape(x[:, 1:10, 0], (B, 3, 3)).transpose(-1, -2)
         t_src_trg_intrg = -t_trg_src_intrg
+
         # Create transformation matrix
-        zeros = torch.zeros(batch_size, 1, 3).type_as(keypoints_3D_src)  # Bx1x3
-        one = torch.ones(batch_size, 1, 1).type_as(keypoints_3D_src)  # Bx1x1
+        zeros = torch.zeros(B, 1, 3, device=device, dtype=dtype)  # Bx1x3
+        one = torch.ones(B, 1, 1, device=device, dtype=dtype)  # Bx1x1
         trans_cols = torch.cat([t_src_trg_intrg, one], dim=1)  # Bx4x1
         rot_cols = torch.cat([R_trg_src, zeros], dim=1)  # Bx4x3
         T_trg_src = torch.cat([rot_cols, trans_cols], dim=2)  # Bx4x4
 
         # Convert from sensor to vehicle frame
-        T_s_v = self.T_s_v.expand(batch_size, 4, 4).to(device)
+        T_s_v = self.T_s_v.expand(B, 4, 4).to(device=device, dtype=dtype)
         T_trg_src = se3_inv(T_s_v).bmm(T_trg_src).bmm(T_s_v)
+        return T_trg_src
 
-        if return_loss:
-            loss = torch.vmap(torch.trace)(Xs @ Qs) * scales + offsets
-            return T_trg_src, loss
-        else:
-            return T_trg_src
+    def transform_to_x(self, T_trg_src):
+        """Reverse of `x_to_transform`: convert batched transforms (Bx4x4) to pose vectors (Bx13x1)."""
+        B = T_trg_src.shape[0]
+        device = T_trg_src.device
+        dtype = T_trg_src.dtype
+
+        # Convert from vehicle to sensor frame
+        T_s_v = self.T_s_v.expand(B, 4, 4).to(device=device, dtype=dtype)
+        T_intrg = T_s_v.bmm(T_trg_src).bmm(se3_inv(T_s_v))
+
+        R_trg_src = T_intrg[:, :3, :3]
+        t_src_trg_intrg = T_intrg[:, :3, [3]]
+        t_trg_src_intrg = -t_src_trg_intrg
+
+        x = torch.zeros(B, self.dim, 1, device=device, dtype=dtype)
+        x[:, 0, 0] = 1.0
+        x[:, 1:10, 0] = R_trg_src.transpose(-1, -2).reshape(B, 9)
+        x[:, 10:, 0] = t_trg_src_intrg[:, :, 0]
+        return x
+
+    def solution_matrix_to_transform(self, X):
+        """Convert batched SDP solution matrices (Bx13x13) to batched transforms (Bx4x4)."""
+        x = X[:, :, [0]]
+        return self.x_to_transform(x)
+    
+    def certify_solution(self, x_cand, verbose=True, cost=None):
+        
+        """Certify the optimality of a candidate solution matrix weighted localization problem.
+        
+        Parameters
+        ----------
+        x_cand : np.ndarray
+            Candidate solution to certify.
+            
+        Returns
+        -------
+        result : AnalyticCenterResult
+            Result of the certification process, including whether the solution is certified, 
+            minimum eigenvalue of the dual variable, and complementarity measure.
+        """
+        # Get cost of candidate solution
+        C = self.Cs[0].cpu().numpy()
+        if cost is None:
+            cost = (x_cand.T @ C @ x_cand).item()
+        # Run certifier
+        ac = AnalyticCenter(C=C, rho=cost, A=self.As, b=self.bs, params=self.params)
+        if verbose:
+            print("Running analytic center certifier...")
+            print(f"target cost: {cost}")
+            print(f"Number of constraints: {len(self.As)}")
+        result = ac.certify(x_cand)
+        if verbose:
+            print(f"------- time for AC: {result.solver_time*1e3:.0f} ms")
+            print(f"AC Result: certified={result.certified}  min_eig={result.min_eig:.6e}  complementarity={result.complementarity:.6e}")
+        
+        return result
+    
 
     @staticmethod
     def get_obj_matrix_vec(

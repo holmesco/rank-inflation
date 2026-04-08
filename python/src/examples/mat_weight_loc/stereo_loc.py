@@ -7,6 +7,7 @@ from examples.utils.keypoint_tools import get_inv_cov_weights
 from examples.utils.lie_algebra import se3_exp, se3_inv, se3_log
 
 from examples.mat_weight_loc.lieopt_pose_est import LieOptPoseEstimator
+from examples.mat_weight_loc.stereo_cert import StereoPoseCertifier
 
 
 def set_seed(x):
@@ -27,7 +28,7 @@ class StereoLocalization:
         # Set up test problem
         
         r_v0s, C_v0s, r_ls = get_gt_setup(
-            N_map=50, N_batch=batch_size, traj_type="circle"
+            N_map=50, N_batch=batch_size, traj_type="circle", n_turns=0.25
         )
         r_v0s = torch.tensor(r_v0s)
         C_v0s = torch.tensor(C_v0s)
@@ -79,6 +80,13 @@ class StereoLocalization:
         self.inv_cov_weights, cov = get_inv_cov_weights(
             self.keypoints_3D_trg, valid, self.stereo_cam
         )
+        # Intialize certifier class
+        self.certifier = StereoPoseCertifier(self.T_s_v,
+                                             self.keypoints_3D_src,
+                                             self.keypoints_3D_trg,
+                                             self.weights,
+                                             self.inv_cov_weights)
+        
         
     def run_estimator(self, T_init):
         # Run estimator
@@ -92,12 +100,12 @@ class StereoLocalization:
         )
         return T_trg_src
     
-    def estimator_ground_truth_test(self):
+    def test_estimator_ground_truth(self):
         # Test with ground truth initialization
         T_trg_src = self.run_estimator(self.T_trg_src.cuda())
         # Check that the difference is small
         diff = se3_log(se3_inv(T_trg_src.cpu()).bmm(self.T_trg_src)).numpy()
-        np.testing.assert_allclose(diff, np.zeros((1, 6)), atol=1e-7)
+        np.testing.assert_allclose(diff, np.zeros((1, 6)), atol=1e-7)        
         # Define perturbation
         pert = 0.5
         xi_pert = torch.tensor([[pert, pert, pert, pert, pert, pert]])
@@ -108,6 +116,15 @@ class StereoLocalization:
         # Check that the difference is small
         diff = se3_log(se3_inv(T_trg_src.cpu()).bmm(self.T_trg_src)).numpy()
         np.testing.assert_allclose(diff, np.zeros((1, 6)), atol=1e-8)
+        # check that the certifier sdp solve gets the same solution
+        X, info, T_trg_src_sdp = self.certifier.solve_sdp(verbose=True)
+        # Check that the difference is small
+        diff = se3_log(se3_inv(T_trg_src_sdp.cpu()).bmm(self.T_trg_src)).numpy()
+        np.testing.assert_allclose(diff, np.zeros((1, 6)), atol=1e-6)
+        # Run Certifier on SDP output
+        x_cand = self.certifier.transform_to_x(T_trg_src_sdp)
+        result = self.certifier.certify_solution(x_cand[0])
+        np.testing.assert_equal(result.certified, True)
         
 if __name__ == "__main__":
     stereo_loc = StereoLocalization(batch_size=1, N_map=50)
