@@ -407,10 +407,10 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
     // Set a maximum number of iterations
     solver.setMaxIterations(params_.lin_solve_max_iter);
     solver.setTolerance(params_.lin_solve_tol);  // Set a convergence tolerance
-    // Call compute
+    // Call compute to initialize the preconditioner.
     solver.compute(lin_op);
     if (solver.info() != Eigen::Success) {
-      std::cout << "Solver Failed: " << solver.error() << std::endl;
+      std::cout << "Preconditioner Failed: " << solver.error() << std::endl;
     }
     // Use previous multipliers as initial guess if available to speed up
     // convergence
