@@ -6,7 +6,7 @@ from scipy.sparse import csc_matrix
 
 from examples.utils.lie_algebra import se3_inv, se3_log
 from cert_tools.sdp_solvers import solve_sdp_fusion
-from ranktools import AnalyticCenter, AnalyticCenterParams, LinearSolverType
+from ranktools import AnalyticCenter, AnalyticCenterParams, LinearSolverType, LowRankPrecondMethod
 
 
 
@@ -77,14 +77,16 @@ class StereoPoseCertifier():
             self.params = AnalyticCenterParams()
             self.params.verbose = True
             self.params.verbose = True
-            self.params.lin_solver = LinearSolverType.MFCG_DP
-            self.params.lin_solve_max_iter = 1000
+            self.params.lin_solver = LinearSolverType.MFCG_LRP
+            self.params.lin_solve_max_iter = 200
             self.params.lin_solve_tol = 1e-4
-            self.params.lrp_params.tau = 1e-4
             self.params.delta_init = 1e-6
             self.params.delta_min = 1e-8
             self.params.rescale_lin_sys = False
             self.params.max_iter = 20
+            # Preconditioner parameters
+            self.params.lrp_params.tau = 1e-7
+            self.params.lrp_params.method = LowRankPrecondMethod.DenseLDLT
             # Turn off perturbations:
             self.params.perturb_constraints = False
             self.params.adaptive_perturb = False

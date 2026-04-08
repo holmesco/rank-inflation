@@ -35,6 +35,7 @@ class PyAnalyticCenter {
 
   int dim() const { return ac_.dim; }
   int m() const { return ac_.m; }
+  AnalyticCenterParams& params() { return ac_.params_; }
   const AnalyticCenterParams& params() const { return ac_.params_; }
 
   Vector eval_constraints(const Matrix& X) const {
@@ -140,7 +141,15 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("lin_solve_max_iter",
                      &AnalyticCenterParams::lin_solve_max_iter)
       .def_readwrite("lin_solve_tol", &AnalyticCenterParams::lin_solve_tol)
-      .def_readwrite("lrp_params", &AnalyticCenterParams::lrp_params)
+      .def_property(
+          "lrp_params",
+          [](AnalyticCenterParams& p) -> LowRankPrecondParams& {
+            return p.lrp_params;
+          },
+          [](AnalyticCenterParams& p, const LowRankPrecondParams& lrp) {
+            p.lrp_params = lrp;
+          },
+          py::return_value_policy::reference_internal)
       // Backward-compatible alias for older scripts.
       .def_property(
           "tau_lrp",
@@ -230,7 +239,12 @@ params : AnalyticCenterParams, optional
 )pbdoc")
       .def_property_readonly("dim", &PyAnalyticCenter::dim)
       .def_property_readonly("m", &PyAnalyticCenter::m)
-      .def_property_readonly("params", &PyAnalyticCenter::params)
+      .def_property(
+          "params", py::overload_cast<>(&PyAnalyticCenter::params),
+          [](PyAnalyticCenter& self, const AnalyticCenterParams& p) {
+            self.params() = p;
+          },
+          py::return_value_policy::reference_internal)
       .def("eval_constraints", &PyAnalyticCenter::eval_constraints,
            py::arg("X"), "Evaluate constraint violations at X.")
       .def("certify", &PyAnalyticCenter::certify, py::arg("Y_0"),
