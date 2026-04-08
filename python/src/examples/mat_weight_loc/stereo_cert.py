@@ -3,6 +3,7 @@ import torch
 from poly_matrix import PolyMatrix
 from torch.profiler import record_function
 from scipy.sparse import csc_matrix
+from scipy.linalg import qr
 
 from examples.utils.lie_algebra import se3_inv, se3_log
 from cert_tools.sdp_solvers import solve_sdp_fusion
@@ -53,6 +54,9 @@ class StereoPoseCertifier():
         Ah = csc_matrix((self.dim, self.dim), dtype=float)
         Ah[0, 0] = 1.0
         self.As += [Ah]
+        # Remove set of linearly dependent constraints
+        dep_constraints = [22, 17, 20, 23, 18, 15, 21]
+        self.As = [A for i, A in enumerate(self.As) if i not in dep_constraints]
         # generate rhs of constraints
         self.bs = np.zeros(len(self.As))
         self.bs[-1] = 1.0
@@ -80,17 +84,20 @@ class StereoPoseCertifier():
             self.params.lin_solver = LinearSolverType.MFCG_LRP
             self.params.lin_solve_max_iter = 200
             self.params.lin_solve_tol = 1e-4
-            self.params.delta_init = 1e-6
-            self.params.delta_min = 1e-8
+            self.params.delta_init = 1e-5
             self.params.rescale_lin_sys = False
             self.params.max_iter = 20
+            # Early stopping local
+            self.params.early_stop_angle = True
+            self.params.max_angle = 1e-3
             # Preconditioner parameters
-            self.params.lrp_params.tau = 1e-7
-            self.params.lrp_params.method = LowRankPrecondMethod.DenseLDLT
+            self.params.lrp_params.tau = 1e-4
+            self.params.lrp_params.method = LowRankPrecondMethod.SparseLDLT
             # Turn off perturbations:
+            self.params.delta_min = 1e-8
             self.params.perturb_constraints = False
             self.params.adaptive_perturb = False
-            self.params.cost_perturb = 1e-4
+            self.params.cost_perturb = 1e-6
         else:
             self.params = params
 
@@ -203,6 +210,90 @@ class StereoPoseCertifier():
             print(f"------- time for AC: {result.solver_time*1e3:.0f} ms")
             print(f"AC Result: certified={result.certified}  min_eig={result.min_eig:.6e}  complementarity={result.complementarity:.6e}")
         
+        return result
+
+    def check_constraint_linear_independence(self, constraints=None, tol=None, verbose=True):
+        """Check linear independence of constraint matrices using RRQR.
+
+        This method vectorizes each constraint matrix ``A_i`` into ``vec(A_i)``,
+        stacks these vectors into a matrix
+
+            V = [vec(A_1), ..., vec(A_m)]^T  \in R^{m x n^2},
+
+        and computes a rank-revealing QR decomposition with column pivoting on
+        ``V^T`` to determine the rank and identify independent constraints.
+
+        Args:
+            constraints (list, optional): Constraint matrices to analyze.
+                If ``None``, uses ``self.As``.
+            tol (float, optional): Threshold on ``|diag(R)|`` for numerical rank.
+                If ``None``, uses a standard machine-precision-based threshold.
+            verbose (bool): Print a short summary.
+
+        Returns:
+            dict: A dictionary with fields:
+                - ``rank``: numerical rank of the constraint matrix
+                - ``num_constraints``: number of constraints analyzed
+                - ``num_entries``: vector length of each constraint
+                - ``is_linearly_independent``: whether all constraints are independent
+                - ``independent_indices``: pivot-selected independent constraint indices
+                - ``dependent_indices``: remaining dependent constraint indices
+                - ``pivot_order``: full RRQR pivot order
+                - ``diag_R``: diagonal of ``R`` from RRQR (absolute values indicate significance)
+                - ``tol``: tolerance used for rank decision
+                - ``vectorized_constraints``: stacked matrix of vectorized constraints
+        """
+        A_list = self.As if constraints is None else constraints
+        if len(A_list) == 0:
+            raise ValueError("No constraints provided.")
+
+        # Vectorize each constraint matrix and stack row-wise.
+        vecs = []
+        for A in A_list:
+            if hasattr(A, "toarray"):
+                A_dense = A.toarray()
+            else:
+                A_dense = np.asarray(A)
+            vecs.append(A_dense.reshape(-1))
+
+        V = np.stack(vecs, axis=0)  # (m, n^2)
+
+        # RRQR on V^T so pivoting acts on constraints (rows of V).
+        _, R, piv = qr(V.T, mode="economic", pivoting=True)
+        diag_R = np.abs(np.diag(R))
+
+        if tol is None:
+            if diag_R.size == 0:
+                tol = 0.0
+            else:
+                tol = np.finfo(V.dtype).eps * max(V.shape) * diag_R[0]
+
+        rank = int(np.sum(diag_R > tol))
+        independent_idx = piv[:rank].tolist()
+        dependent_idx = piv[rank:].tolist()
+
+        result = {
+            "rank": rank,
+            "num_constraints": V.shape[0],
+            "num_entries": V.shape[1],
+            "is_linearly_independent": rank == V.shape[0],
+            "independent_indices": independent_idx,
+            "dependent_indices": dependent_idx,
+            "pivot_order": piv.tolist(),
+            "diag_R": diag_R,
+            "tol": float(tol),
+            "vectorized_constraints": V,
+        }
+
+        if verbose:
+            print("Constraint linear-independence check (RRQR)")
+            print(f"  constraints: {result['num_constraints']}")
+            print(f"  vector length per constraint: {result['num_entries']}")
+            print(f"  rank: {result['rank']}")
+            print(f"  linearly independent: {result['is_linearly_independent']}")
+            if not result["is_linearly_independent"]:
+                print(f"  dependent constraint indices: {result['dependent_indices']}")
+
         return result
     
 

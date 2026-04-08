@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import pandas as pd
 import time
+import matplotlib.pyplot as plt
 
 from examples.utils.stereo_camera_model import StereoCameraModel
 from examples.utils.stereo_utils import get_gt_setup
@@ -102,13 +103,117 @@ class StereoLocalizationProblem:
         )
         return T_trg_src
 
-    def run_initializations_and_certify(self, N_init=10, init_perturb=0.5, seed=0):
+    def plot_targ_frames_3d(self, T_ests, is_global_min, axis_scale=0.2, title=None):
+        """Plot target frames in 3D from estimated transforms.
+
+        Args:
+            T_ests (torch.Tensor): Batched transforms of shape (N, 4, 4).
+            is_global_min (array-like): Boolean mask of shape (N,) where True indicates global minima.
+            axis_scale (float): Length of frame axes used in the visualization.
+            title (str | None): Optional figure title.
+        """
+        if T_ests.ndim != 3 or T_ests.shape[1:] != (4, 4):
+            raise ValueError("T_ests must have shape (N, 4, 4).")
+
+        is_global_min = np.asarray(is_global_min, dtype=bool)
+        if is_global_min.shape[0] != T_ests.shape[0]:
+            raise ValueError("is_global_min must have shape (N,) matching T_ests.")
+
+        T_ests_np = T_ests.detach().cpu().numpy()
+
+        fig = plt.figure(figsize=(9, 7))
+        ax = fig.add_subplot(111, projection="3d")
+
+        global_color = "tab:green"
+        local_color = "tab:red"
+
+        for i in range(T_ests_np.shape[0]):
+            T = T_ests_np[i]
+            R = T[:3, :3]
+            t = T[:3, 3]
+            color = global_color if is_global_min[i] else local_color
+
+            ax.scatter(t[0], t[1], t[2], c=color, s=40)
+
+            ex = R[:, 0] * axis_scale
+            ey = R[:, 1] * axis_scale
+            ez = R[:, 2] * axis_scale
+
+            ax.quiver(t[0], t[1], t[2], ex[0], ex[1], ex[2], color=color, linewidth=1.0)
+            ax.quiver(t[0], t[1], t[2], ey[0], ey[1], ey[2], color=color, linewidth=1.0, alpha=0.75)
+            ax.quiver(t[0], t[1], t[2], ez[0], ez[1], ez[2], color=color, linewidth=1.0, alpha=0.5)
+
+        # Plot source keypoints (3D map points)
+        if self.keypoints_3D_src.ndim == 3 and self.keypoints_3D_src.shape[1] >= 3:
+            keypoints_src = self.keypoints_3D_src[0, :3, :].detach().cpu().numpy().T
+            ax.scatter(
+                keypoints_src[:, 0],
+                keypoints_src[:, 1],
+                keypoints_src[:, 2],
+                c="tab:blue",
+                s=12,
+                alpha=0.6,
+                label="keypoints_3D_src",
+            )
+
+        if T_ests_np.shape[0] > 0:
+            xyz = T_ests_np[:, :3, 3]
+            mins = xyz.min(axis=0)
+            maxs = xyz.max(axis=0)
+            span = np.maximum(maxs - mins, 1e-6)
+            pad = 0.15 * span
+            ax.set_xlim(mins[0] - pad[0], maxs[0] + pad[0])
+            ax.set_ylim(mins[1] - pad[1], maxs[1] + pad[1])
+            ax.set_zlim(mins[2] - pad[2], maxs[2] + pad[2])
+
+        ax.set_xlabel("x")
+        ax.set_ylabel("y")
+        ax.set_zlabel("z")
+        ax.set_title(title if title is not None else "Estimated target frames")
+        ax.set_aspect("equal", adjustable="box")
+
+        ax.scatter([], [], [], c=global_color, s=40, label="global minimum")
+        ax.scatter([], [], [], c=local_color, s=40, label="local minimum")
+        ax.legend(loc="best")
+        plt.tight_layout()
+        plt.show()
+
+    def get_random_inits(self, radius, N_batch=10, seed=0):
+        """Generate random pose initializations similar to stereo_cal.get_random_inits."""
+        set_seed(seed)
+        r_v0s = []
+        C_v0s = []
+
+        for _ in range(N_batch):
+            # random locations on sphere
+            r_ = np.random.random((3, 1)) - 0.5
+            r = radius * r_ / np.linalg.norm(r_)
+            r_v0s += [r]
+
+            # random orientation pointing at origin
+            z = -r / np.linalg.norm(r)
+            y = np.random.randn(3, 1)
+            y = y - y.T @ z * z
+            y = y / np.linalg.norm(y)
+            x = np.cross(y[:, 0], z[:, 0])[:, None]
+            C_v0s += [np.hstack([x, y, z]).T]
+
+        r_v0s = np.stack(r_v0s)
+        C_v0s = np.stack(C_v0s)
+
+        return r_v0s, C_v0s
+
+    
+    
+    def run_initializations_and_certify(self, N_init=10, seed=0, plot_results=False, plot_axis_scale=0.2):
         """Generate N random initializations, run the estimator, certify each solution, and print a DataFrame.
 
         Args:
             N_init (int): Number of random initializations.
             init_perturb (float): Std-dev of random se(3) perturbation used to initialize each run.
             seed (int): Random seed for reproducibility.
+            plot_results (bool): If True, plot estimated target frames colored by local/global minima.
+            plot_axis_scale (float): Axis length for plotted frame triads.
 
         Returns:
             pd.DataFrame: Per-run results including cost, certification status, and certifier metrics.
@@ -116,24 +221,41 @@ class StereoLocalizationProblem:
         if self.batch_size != 1:
             raise ValueError("run_initializations_and_certify currently supports batch_size=1.")
 
-        set_seed(seed)
+        radius = torch.linalg.norm(self.T_trg_src[0, :3, 3]).item()
+        r_v0s_init, C_v0s_init = self.get_random_inits(
+            radius=radius,
+            N_batch=N_init,
+            seed=seed,
+        )
+        r_v0s_init = torch.tensor(
+            r_v0s_init, dtype=self.T_trg_src.dtype, device=self.T_trg_src.device
+        )
+        C_v0s_init = torch.tensor(
+            C_v0s_init, dtype=self.T_trg_src.dtype, device=self.T_trg_src.device
+        )
+
+        zeros = torch.zeros(N_init, 1, 3, dtype=self.T_trg_src.dtype, device=self.T_trg_src.device)
+        one = torch.ones(N_init, 1, 1, dtype=self.T_trg_src.dtype, device=self.T_trg_src.device)
+        r_0v_v = -C_v0s_init.bmm(r_v0s_init)
+        trans_cols = torch.cat([r_0v_v, one], dim=1)
+        rot_cols = torch.cat([C_v0s_init, zeros], dim=1)
+        T_inits = torch.cat([rot_cols, trans_cols], dim=2)
+
         t_sdp_start = time.perf_counter()
         _, info_sdp, _ = self.certifier.solve_sdp(verbose=False)
         t_sdp_end = time.perf_counter()
         sdp_wall_time_s = t_sdp_end - t_sdp_start
         sdp_solver_time_s = info_sdp[0].get("time", np.nan) if len(info_sdp) > 0 else np.nan
-        print(f"SDP solve wall time: {sdp_wall_time_s:.6f} s")
-        print(f"SDP reported solver time: {sdp_solver_time_s:.6f} s")
+        
 
         C = self.certifier.Cs[0].detach().cpu().numpy()
         results = []
+        T_est_list = []
 
         for i in range(N_init):
-            xi_pert = init_perturb * torch.randn(1, 6, dtype=self.T_trg_src.dtype)
-            T_pert = se3_exp(xi_pert)
-            T_init = T_pert.bmm(self.T_trg_src)
-
-            T_est = self.run_estimator(T_init.to(self.device), verbose=False)
+            T_init = T_inits[i : i + 1].to(self.device)
+            T_est = self.run_estimator(T_init, verbose=False)
+            T_est_list.append(T_est.detach())
             x_cand = self.certifier.transform_to_x(T_est)[0].detach().cpu().numpy()
 
             optimal_cost = float((x_cand.T @ C @ x_cand).item())
@@ -154,8 +276,22 @@ class StereoLocalizationProblem:
                 }
             )
 
+        T_ests = torch.cat(T_est_list, dim=0)
+
         df = pd.DataFrame(results)
         print(df)
+        print(f"SDP solve wall time: {sdp_wall_time_s:.6f} s")
+        print(f"SDP reported solver time: {sdp_solver_time_s:.6f} s")
+
+        if plot_results:
+            is_global_min = df["certified"].to_numpy(dtype=bool)
+            self.plot_targ_frames_3d(
+                T_ests,
+                is_global_min,
+                axis_scale=plot_axis_scale,
+                title="Estimated target frames (green=global, red=local)",
+            )
+
         return df
     
     def test_estimator_ground_truth(self):
@@ -190,6 +326,7 @@ class StereoLocalizationProblem:
         
 if __name__ == "__main__":
     stereo_loc = StereoLocalizationProblem(batch_size=1, N_map=50)
+    # stereo_loc.certifier.check_constraint_linear_independence()
     # stereo_loc.test_estimator_ground_truth()
-    df = stereo_loc.run_initializations_and_certify(N_init=10, init_perturb=0.5, seed=0)
+    df = stereo_loc.run_initializations_and_certify(N_init=20, plot_results=True, seed=0)
     
