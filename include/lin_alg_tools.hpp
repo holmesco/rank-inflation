@@ -298,7 +298,7 @@ class LowRankPrecond {
     // Flag that we have initialized to eigen
     is_initialized_ = (LDLTDenseFactor.info() == Eigen::Success);
     if (!is_initialized_) {
-      std::cerr << "LDLT factorization failed. Info: " << LDLTDenseFactor.info()
+      std::cerr << "Dense LDLT factorization failed. Info: " << LDLTDenseFactor.info()
                 << std::endl;
     }
 
@@ -357,6 +357,10 @@ class LowRankPrecond {
 
     LDLTSparseFactor.compute(Sys);
     is_initialized_ = (LDLTSparseFactor.info() == Eigen::Success);
+    if (!is_initialized_) {
+      std::cerr << "Sparse LDLT factorization failed. Info: "
+                << LDLTSparseFactor.info() << std::endl;
+    }
 
     return *this;
   }
@@ -390,6 +394,9 @@ class LowRankPrecond {
             "factorization.");
       }
       QRDenseR_ = QRDenseFactor.matrixR().topLeftCorner(rank, rank);
+    } else {
+      std::cerr << "Dense QR factorization failed. Info: " << QRDenseFactor.info()
+                << std::endl;
     }
 
     return *this;
@@ -450,6 +457,9 @@ class LowRankPrecond {
       // Cache a dense copy of the leading R block once. Reusing this avoids
       // repeated sparse->dense materialization in each solve() call.
       QRSparseR_ = QRSparseFactor.matrixR().topLeftCorner(rank, rank);
+    } else {
+      std::cerr << "Sparse QR factorization failed. Info: "
+                << QRSparseFactor.info() << std::endl;
     }
 
     return *this;

@@ -7,6 +7,15 @@
 
 namespace RankTools {
 
+enum class SolverStatus {
+  Success,
+  MaxIterReached,
+  StepTolerance,
+  SolverFailure,
+  PreSolveFailure,
+  Unknown,
+};
+
 struct AnalyticCenterResult {
   // Analytic center solution
   Matrix X;

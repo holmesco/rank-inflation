@@ -17,7 +17,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
 
-from max_clique import generate_dataset, MaxCliqueProblem
+from examples.max_clique.max_clique import generate_dataset, MaxCliqueProblem
 from ranktools import AnalyticCenterParams, LinearSolverType, LowRankPrecondMethod
 
 # ---------------------------------------------------------------------------
@@ -28,7 +28,7 @@ from ranktools import AnalyticCenterParams, LinearSolverType, LowRankPrecondMeth
 N_OUTRAT = 10
 
 # Number of randomized trials to run per outlier ratio
-N_TRIALS_PER_OUTRAT = 10
+N_TRIALS_PER_OUTRAT = 1
 
 # Range of outlier ratios (log-spaced between these bounds)
 OUTRAT_MIN = 0.1
