@@ -7,7 +7,7 @@ from scipy.sparse import csc_array
 
 import clipperpy
 from cert_tools.sdp_solvers import solve_sdp_fusion
-from ranktools import AnalyticCenter, AnalyticCenterParams, LinearSolverType
+from ranktools import AnalyticCenter, AnalyticCenterParams, LinearSolverType, LowRankPrecondMethod
 
 
 def randsphere(m,n,r):
@@ -134,18 +134,20 @@ class MaxCliqueProblem:
         else:
             self.params = AnalyticCenterParams()
             self.params.verbose = True
-            self.params.verbose = True
             self.params.lin_solver = LinearSolverType.MFCG_LRP
             self.params.lin_solve_max_iter = 200
             self.params.lin_solve_tol = 1e-4
             self.params.lrp_params.tau = 1e-5
-            self.params.delta_init = 1e-5
+            self.params.delta_init = 1e-7
             self.params.delta_min = 1e-8
             self.params.rescale_lin_sys = False
             # Turn off perturbations:
-            self.params.perturb_constraints = True
-            self.params.adaptive_perturb = True
-        
+            self.params.perturb_constraints = False
+            self.params.adaptive_perturb = False
+            self.params.lrp_params.method = LowRankPrecondMethod.SparseLDLT
+            self.params.early_stop_angle = True
+            self.params.max_angle = 1e-3
+
 
     def get_constraints(self):
         """Get the constraints of the maximum clique problem.
@@ -235,6 +237,7 @@ class MaxCliqueProblem:
         """
         soln = self.solve_clipper()
         u = soln.u / np.linalg.norm(soln.u)
+        print(f"Clipper local solution found in {soln.t} seconds")
         # Certify solution
         result = self.certify_candidate(u)
         
