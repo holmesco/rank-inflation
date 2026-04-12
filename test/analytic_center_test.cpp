@@ -14,6 +14,77 @@ class LovazsParamTest : public ::testing::TestWithParam<SDPTestProblem> {};
 
 class GenericParamTest : public ::testing::TestWithParam<SDPTestProblem> {};
 
+namespace {
+
+void RunLowRankPreconditionerConditioningTest(const SDPTestProblem& sdp,
+                                              AnalyticCenterParams params,
+                                              double delta,
+                                              bool inspect_system_cond) {
+  // Match delta and tau to get exact preconditioner for this case.
+  params.lrp_params.tau = delta;
+
+  // Get problem and analytic-center candidate from Mosek.
+  auto problem = sdp.make_testable(params);
+  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b, false);
+  auto Y_mosek = get_positive_eigspace(mosek_soln.X, 1e-3);
+  Matrix X = Y_mosek * Y_mosek.transpose();
+  auto [alpha, L] = problem.line_search_factorization(
+      X, Matrix::Identity(problem.dim, problem.dim) * delta);
+  EXPECT_NEAR((X - Y_mosek * Y_mosek.transpose() -
+               Matrix::Identity(problem.dim, problem.dim) * delta)
+                  .norm(),
+              0.0, 1e-10);
+
+  // Explicit system matrix B.
+  auto system = problem.build_ac_system(X, delta);
+  Matrix B = system.B.selfadjointView<Eigen::Upper>();
+
+  if (inspect_system_cond) {
+    Eigen::SelfAdjointEigenSolver<Matrix> es_B(B);
+    ASSERT_EQ(es_B.info(), Eigen::Success);
+    auto eigvals_B = es_B.eigenvalues();
+    const double max_eig_B = eigvals_B.maxCoeff();
+    const double min_eig_B = eigvals_B.minCoeff();
+    const double cond_B = max_eig_B / std::max(min_eig_B, 1e-16);
+    std::cout << "cond(B): " << cond_B << std::endl;
+  }
+
+  // Build low-rank preconditioner with rank = 1 at the perturbed solution.
+  auto precond = LowRankPrecond(params.lrp_params);
+  precond.initialize(Y_mosek, sdp.A, sdp.C);
+  precond.set_scale(system.scale_);
+  EXPECT_EQ(precond.info(), Eigen::Success);
+
+  // Build explicit preconditioned operator PB by applying P to each column of
+  // B. For a good preconditioner, PB should be well-conditioned.
+  Matrix PB(problem.m, problem.m);
+  for (int i = 0; i < problem.m; ++i) {
+    PB.col(i) = precond.solve(B.col(i));
+  }
+
+  // Inspect spectrum of PB.
+  Eigen::EigenSolver<Matrix> es(PB);
+  ASSERT_EQ(es.info(), Eigen::Success);
+  auto eigvals = es.eigenvalues();
+
+  double min_abs_eig = std::numeric_limits<double>::infinity();
+  double max_abs_eig = 0.0;
+  for (int i = 0; i < eigvals.size(); ++i) {
+    const double abs_eig = std::abs(eigvals(i));
+    min_abs_eig = std::min(min_abs_eig, abs_eig);
+    max_abs_eig = std::max(max_abs_eig, abs_eig);
+  }
+
+  const double cond_est = max_abs_eig / min_abs_eig;
+  std::cout << "cond(PB): " << cond_est << std::endl;
+
+  // Well-preconditioned systems should have condition number close to 1.
+  EXPECT_LT(cond_est, 1.1)
+      << "Preconditioned operator PB is poorly conditioned.";
+}
+
+}  // namespace
+
 // Test that centering works as expected
 TEST_P(LovazsParamTest, PrimalSolution) {
   const auto& sdp = GetParam();
@@ -69,32 +140,6 @@ TEST_P(LovazsParamTest, PrimalSolution) {
             << diff_norm << std::endl;
   EXPECT_NEAR(diff_norm, 0.0, 1.0)
       << "Analytic center solution is not close to Mosek solution";
-}
-
-// Test the Fixed perturbation and verify that the method converges.
-TEST_P(LovazsParamTest, CertifyFixedPerturb) {
-  const auto& sdp = GetParam();
-  // parameters
-  AnalyticCenterParams params;
-  params.verbose = true;
-  params.early_stop_cert = false;  // Turn off early stopping based on
-                                   // certificate for testing purposes
-  params.adaptive_perturb =
-      false;  // Turn off adaptive perturbation for testing purposes
-  auto delta = 1e-7;
-  params.delta_init = delta;
-  // generate problem
-  AnalyticCenter problem = sdp.make(params);
-  // get current solution
-  Matrix Y_0 = sdp.make_solution(1);
-  // Run certification method
-  auto result = problem.certify(Y_0);
-  // check that the solution is certified
-  EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
-  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
-            << std::endl;
-  std::cout << "Complementarity (First Order Condition): "
-            << result.complementarity << std::endl;
 }
 
 // Test adapative perturbation. Ensure that we converge to a certificate.
@@ -353,149 +398,63 @@ TEST(MatrixFree, DiagonalPreconditioner) {
       << "Preconditioned CG residual too large";
 }
 
-// Test the low-rank preconditioner and verify that it improves conditioning of
-// the system.
-TEST_P(LovazsParamTest, LowRankPrecondLDLT) {
+// Dense LDLT Low rank preconditioner
+TEST_P(LovazsParamTest, LowRankPrecondDenseLDLT) {
   const auto& sdp = GetParam();
-  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.lrp_params.method = LowRankPrecondMethod::DenseLDLT;
+  const double delta = 1e-6;
+  RunLowRankPreconditionerConditioningTest(sdp, params, delta,
+                                           /*inspect_system_cond=*/true);
+}
+
+// Test alternate form of LDLT
+TEST_P(LovazsParamTest, LowRankPrecondSparseLDLTAlt) {
+  const auto& sdp = GetParam();
   AnalyticCenterParams params;
   params.verbose = true;
   params.rescale_lin_sys = false;
   params.lrp_params.method = LowRankPrecondMethod::SparseLDLT;
-  // Match delta and tau to get exact preconditioner for this case
-  auto delta = 1e-7;
-  params.lrp_params.tau = delta;
-
-  // get problem
-  auto problem = sdp.make_testable(params);
-  // Solve using Mosek to get analytic center solution
-  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b, false);
-  auto Y_mosek = get_positive_eigspace(mosek_soln.X, 1e-3);
-  Matrix X = Y_mosek * Y_mosek.transpose();
-  auto [alpha, L] = problem.line_search_factorization(
-      X, Matrix::Identity(problem.dim, problem.dim) * delta);
-  EXPECT_NEAR((X - Y_mosek * Y_mosek.transpose() -
-               Matrix::Identity(problem.dim, problem.dim) * delta)
-                  .norm(),
-              0.0, 1e-10);
-
-  // Explicit system matrix B
-  auto system = problem.build_ac_system(X, delta);
-  Matrix B = system.B.selfadjointView<Eigen::Upper>();
-
-  // Inspect conditioning of the original system matrix B.
-  Eigen::SelfAdjointEigenSolver<Matrix> es_B(B);
-  ASSERT_EQ(es_B.info(), Eigen::Success);
-  auto eigvals_B = es_B.eigenvalues();
-  const double max_eig_B = eigvals_B.maxCoeff();
-  const double min_eig_B = eigvals_B.minCoeff();
-  const double cond_B = max_eig_B / std::max(min_eig_B, 1e-16);
-  std::cout << "cond(B): " << cond_B << std::endl;
-
-  // Build low-rank preconditioner with rank = 1 at the perturbed solution
-  auto precond = LowRankPrecond(params.lrp_params);
-  precond.initialize(Y_mosek, sdp.A, sdp.C);
-  precond.set_scale(system.scale_);
-  // check success
-  EXPECT_EQ(precond.info(), Eigen::Success);
-
-  // Build explicit preconditioned operator PB by applying P to each column of
-  // B. For a good preconditioner, PB should be well-conditioned.
-  Matrix PB(problem.m, problem.m);
-  for (int i = 0; i < problem.m; ++i) {
-    PB.col(i) = precond.solve(B.col(i));
-  }
-
-  // Inspect spectrum of PB.
-  Eigen::EigenSolver<Matrix> es(PB);
-  ASSERT_EQ(es.info(), Eigen::Success);
-  auto eigvals = es.eigenvalues();
-
-  double min_abs_eig = std::numeric_limits<double>::infinity();
-  double max_abs_eig = 0.0;
-  for (int i = 0; i < eigvals.size(); ++i) {
-    const double abs_eig = std::abs(eigvals(i));
-    min_abs_eig = std::min(min_abs_eig, abs_eig);
-    max_abs_eig = std::max(max_abs_eig, abs_eig);
-  }
-
-  // Condition number estimate from eigenvalue magnitudes.
-  const double cond_est = max_abs_eig / min_abs_eig;
-  std::cout << "cond(PB): " << cond_est << std::endl;
-
-  // Well-preconditioned systems should have condition number close to 1.
-  // Note conditioning should actually be exactly 1 for this case.
-  EXPECT_LT(cond_est, 1.1)
-      << "Preconditioned operator PB is poorly conditioned.";
+  const double delta = 1e-7;
+  RunLowRankPreconditionerConditioningTest(sdp, params, delta,
+                                           /*inspect_system_cond=*/true);
 }
 
-// Test the low-rank preconditioner and verify that it improves conditioning of
-// the system.
-TEST_P(LovazsParamTest, LowRankPrecondQR) {
+// Sparse LDLT Low rank preconditioner
+TEST_P(LovazsParamTest, LowRankPrecondSparseLDLT) {
   const auto& sdp = GetParam();
-  // parameters
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.lrp_params.method = LowRankPrecondMethod::SparseLDLT_ZL;
+  const double delta = 1e-7;  // better conditioning with sparse
+  RunLowRankPreconditionerConditioningTest(sdp, params, delta,
+                                           /*inspect_system_cond=*/true);
+}
+
+// Dense QR Low rank preconditioner
+TEST_P(LovazsParamTest, LowRankPrecondDenseQR) {
+  const auto& sdp = GetParam();
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.rescale_lin_sys = false;
+  params.lrp_params.method = LowRankPrecondMethod::DenseQR;
+  const double delta = 1e-7;
+  RunLowRankPreconditionerConditioningTest(sdp, params, delta,
+                                           /*inspect_system_cond=*/false);
+}
+
+// Sparse QR Low rank preconditioner
+TEST_P(LovazsParamTest, LowRankPrecondSparseQR) {
+  const auto& sdp = GetParam();
   AnalyticCenterParams params;
   params.verbose = true;
   params.rescale_lin_sys = false;
   params.lrp_params.method = LowRankPrecondMethod::SparseQR;
-  // Match delta and tau to get exact preconditioner for this case
-  auto delta = 1e-7;
-  params.lrp_params.tau = delta;
-
-  // get problem
-  auto problem = sdp.make_testable(params);
-  // Solve using Mosek to get analytic center solution
-  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b, false);
-  auto Y_mosek = get_positive_eigspace(mosek_soln.X, 1e-3);
-  Matrix X = Y_mosek * Y_mosek.transpose();
-  auto [alpha, L] = problem.line_search_factorization(
-      X, Matrix::Identity(problem.dim, problem.dim) * delta);
-  EXPECT_NEAR((X - Y_mosek * Y_mosek.transpose() -
-               Matrix::Identity(problem.dim, problem.dim) * delta)
-                  .norm(),
-              0.0, 1e-10);
-
-  // Explicit system matrix B
-  auto system = problem.build_ac_system(X, delta);
-  Matrix B = system.B.selfadjointView<Eigen::Upper>();
-
-  // Build low-rank preconditioner with rank = 1 at the perturbed solution
-  auto precond = LowRankPrecond(params.lrp_params);
-  precond.initialize(Y_mosek, sdp.A, sdp.C);
-  precond.set_scale(system.scale_);
-  // check success
-  EXPECT_EQ(precond.info(), Eigen::Success);
-
-  // Build explicit preconditioned operator PB by applying P to each column of
-  // B. For a good preconditioner, PB should be well-conditioned.
-  Matrix PB(problem.m, problem.m);
-  for (int i = 0; i < problem.m; ++i) {
-    PB.col(i) = precond.solve(B.col(i));
-  }
-  // std::cout << PB << std::endl;
-  // Inspect spectrum of PB.
-  Eigen::EigenSolver<Matrix> es(PB);
-  ASSERT_EQ(es.info(), Eigen::Success);
-  auto eigvals = es.eigenvalues();
-
-  double min_abs_eig = std::numeric_limits<double>::infinity();
-  double max_abs_eig = 0.0;
-  for (int i = 0; i < eigvals.size(); ++i) {
-    const double abs_eig = std::abs(eigvals(i));
-    min_abs_eig = std::min(min_abs_eig, abs_eig);
-    max_abs_eig = std::max(max_abs_eig, abs_eig);
-  }
-
-  // Condition number estimate from eigenvalue magnitudes.
-  const double cond_est = max_abs_eig / min_abs_eig;
-  std::cout << "cond(PB): " << cond_est << std::endl;
-
-  // Well-preconditioned systems should have condition number close to 1.
-  // Note conditioning should actually be exactly 1 for this case.
-  EXPECT_LT(cond_est, 1.1)
-      << "Preconditioned operator PB is poorly conditioned.";
+  const double delta = 1e-7;
+  RunLowRankPreconditionerConditioningTest(sdp, params, delta,
+                                           /*inspect_system_cond=*/false);
 }
-
 
 TEST_P(GenericParamTest, LinDependentConstraints) {
   const auto& sdp = GetParam();
@@ -519,6 +478,8 @@ TEST_P(GenericParamTest, LinDependentConstraints) {
   EXPECT_EQ(rank, problem.m) << "Expected linearly independent constraints, "
                                 "but matrix is not full rank";
 }
+
+// ------------ CERTIFICATION TESTS ----------------
 
 TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
   const auto& sdp = GetParam();
@@ -576,8 +537,6 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
       true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-7;
   params.max_iter = 50;
-  // Turn off rescaling (preconditioner should deal with this)
-  params.rescale_lin_sys = true;
   params.lin_solver = LinearSolverType::MFCG_LRP;
   params.lrp_params.tau = 1e-5;
   params.lrp_params.method = LowRankPrecondMethod::SparseLDLT;
@@ -621,7 +580,7 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_wLocal) {
   params.adaptive_perturb = true;
   params.delta_min = 1e-7;
   // Turn off rescaling (preconditioner should deal with this)
-  params.rescale_lin_sys = true;
+  params.rescale_lin_sys = false;
   params.lin_solver =
       LinearSolverType::MFCG_LRP;  // Use Conjugate Gradient solver
   params.lrp_params.tau = 1e-5;

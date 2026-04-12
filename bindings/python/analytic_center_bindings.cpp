@@ -102,7 +102,11 @@ PYBIND11_MODULE(ranktools, m) {
       .value("DenseLDLT", LowRankPrecondMethod::DenseLDLT,
              "Dense LDLT factorization approach")
       .value("SparseLDLT", LowRankPrecondMethod::SparseLDLT,
-             "Sparse LDLT factorization approach")
+             "Sparse LDLT factorization approach using alternate top-right "
+             "formulation")
+      .value("SparseLDLT_ZL", LowRankPrecondMethod::SparseLDLT_ZL,
+             "Sparse LDLT factorization approach using the Zhang-Lavaei (2017) "
+             "top-right formulation")
       .value("DenseQR", LowRankPrecondMethod::DenseQR,
              "Dense QR factorization approach")
       .value("SparseQR", LowRankPrecondMethod::SparseQR,
@@ -155,12 +159,6 @@ PYBIND11_MODULE(ranktools, m) {
           "tau_lrp",
           [](const AnalyticCenterParams& p) { return p.lrp_params.tau; },
           [](AnalyticCenterParams& p, double tau) { p.lrp_params.tau = tau; })
-      // Low rank approximation
-      .def_readwrite("low_rank_approx", &AnalyticCenterParams::low_rank_approx)
-      .def_readwrite("low_rank_approx_rank",
-                     &AnalyticCenterParams::low_rank_approx_rank)
-      .def_readwrite("low_rank_approx_tol",
-                     &AnalyticCenterParams::low_rank_approx_tol)
       // Adaptive perturbation
       .def_readwrite("adaptive_perturb",
                      &AnalyticCenterParams::adaptive_perturb)

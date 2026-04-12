@@ -178,7 +178,13 @@ class MultiplierDiagPreconditioner {
   bool is_initialized_;
 };
 
-enum class LowRankPrecondMethod { DenseLDLT, SparseLDLT, DenseQR, SparseQR };
+enum class LowRankPrecondMethod {
+  DenseLDLT,
+  SparseLDLT,
+  SparseLDLT_ZL,
+  DenseQR,
+  SparseQR
+};
 
 struct LowRankPrecondParams {
   // Diagonal perturbation parameter.
@@ -233,7 +239,8 @@ class LowRankPrecond {
     dim = C.cols();
     ncons = As.size() + 1;
     // Call function to build the preconditioner
-    if (params_.method == LowRankPrecondMethod::SparseLDLT) {
+    if (params_.method == LowRankPrecondMethod::SparseLDLT ||
+        params_.method == LowRankPrecondMethod::SparseLDLT_ZL) {
       build_ldlt_sparse();
     } else if (params_.method == LowRankPrecondMethod::DenseLDLT) {
       build_ldlt_dense();
@@ -258,7 +265,8 @@ class LowRankPrecond {
       return *this;
     }
     // Call the internal build function that does the actual work
-    if (params_.method == LowRankPrecondMethod::SparseLDLT) {
+    if (params_.method == LowRankPrecondMethod::SparseLDLT ||
+        params_.method == LowRankPrecondMethod::SparseLDLT_ZL) {
       build_ldlt_sparse();
     } else if (params_.method == LowRankPrecondMethod::DenseLDLT) {
       build_ldlt_dense();
@@ -284,22 +292,27 @@ class LowRankPrecond {
     }
     // compute constraint matrix
     build_constraint_mat();
+    // get top right component of the augmented system
+    auto V = build_top_right(*U_, params_.tau);
+
     // Build sparse augmented system - Eqn 23 in Zhang and Lavaei 2017
-    auto Sys = Matrix(ncons + rank_ * dim, ncons + rank_ * dim);
+    auto Sys = Matrix(ncons + V.cols(), ncons + V.cols());
     Sys.block(0, 0, ncons, ncons) =
         (A_bar_.transpose() * A_bar_).template triangularView<Eigen::Upper>() *
         std::pow(params_.tau, 2.0);
-    Sys.block(0, ncons, ncons, rank_ * dim) =
-        build_top_right(*U_, params_.tau) * params_.tau;
-    Sys.block(ncons, ncons, rank_ * dim, rank_ * dim) =
-        -Matrix::Identity(rank_ * dim, rank_ * dim) * std::pow(params_.tau, 2);
+    Sys.block(0, ncons, ncons, V.cols()) = V * params_.tau;
+    Sys.block(ncons, ncons, V.cols(), V.cols()) =
+        -Matrix::Identity(V.cols(), V.cols()) * std::pow(params_.tau, 2);
+
+    // std::cout << "Augmented system for dense LDLT factorization:\n"
+    //           << Sys << std::endl;
     // Prefactorize (LDLT)
     LDLTDenseFactor.compute(Sys.selfadjointView<Eigen::Upper>());
     // Flag that we have initialized to eigen
     is_initialized_ = (LDLTDenseFactor.info() == Eigen::Success);
     if (!is_initialized_) {
-      std::cerr << "Dense LDLT factorization failed. Info: " << LDLTDenseFactor.info()
-                << std::endl;
+      std::cerr << "Dense LDLT factorization failed. Info: "
+                << LDLTDenseFactor.info() << std::endl;
     }
 
     return *this;
@@ -321,7 +334,7 @@ class LowRankPrecond {
     top_right_sparse *= params_.tau;
     top_right_sparse.makeCompressed();
 
-    const int rdim = rank_ * dim;
+    const int rdim = top_right_sparse.cols();
     const int nsys = ncons + rdim;
     const double tau2 = std::pow(params_.tau, 2.0);
 
@@ -395,8 +408,8 @@ class LowRankPrecond {
       }
       QRDenseR_ = QRDenseFactor.matrixR().topLeftCorner(rank, rank);
     } else {
-      std::cerr << "Dense QR factorization failed. Info: " << QRDenseFactor.info()
-                << std::endl;
+      std::cerr << "Dense QR factorization failed. Info: "
+                << QRDenseFactor.info() << std::endl;
     }
 
     return *this;
@@ -470,13 +483,16 @@ class LowRankPrecond {
   template <typename Rhs>
   Eigen::VectorXd solve(const Eigen::MatrixBase<Rhs>& b) const {
     Vector result(ncons);
-    if (params_.method == LowRankPrecondMethod::SparseLDLT) {
-      auto rhs = Vector(ncons + rank_ * dim);
-      rhs << b / scale_, Vector::Zero(rank_ * dim);
+    if (params_.method == LowRankPrecondMethod::SparseLDLT ||
+        params_.method == LowRankPrecondMethod::SparseLDLT_ZL) {
+      int sysdim = LDLTSparseFactor.matrixL().rows();
+      auto rhs = Vector(sysdim);
+      rhs << b / scale_, Vector::Zero(sysdim - ncons);
       result = LDLTSparseFactor.solve(rhs).head(ncons).eval();
     } else if (params_.method == LowRankPrecondMethod::DenseLDLT) {
-      auto rhs = Vector(ncons + rank_ * dim);
-      rhs << b / scale_, Vector::Zero(rank_ * dim);
+      int sysdim = LDLTDenseFactor.matrixL().rows();
+      auto rhs = Vector(sysdim);
+      rhs << b / scale_, Vector::Zero(sysdim - ncons);
       result = LDLTDenseFactor.solve(rhs).head(ncons).eval();
     } else if (params_.method == LowRankPrecondMethod::DenseQR) {
       // Solve Sys^T Sys x = b via R^T R x = b, where Sys = [A; V] = Q R is the
@@ -516,8 +532,66 @@ class LowRankPrecond {
     return result;
   }
 
-  // Build the top right matrix, V = A_bar^T(U otimes Z)
+  // Build the top right matrix in the augmented preconditioner system
   Matrix build_top_right(const Matrix& U, double tau) const {
+    if (params_.method == LowRankPrecondMethod::SparseLDLT) {
+      return build_top_right_alt(U, tau);
+    } else {
+      return build_top_right_zhang2017(U, tau);
+    }
+  }
+
+  // Build the top right of the augmented preconditioner using alternate form
+  // that does not require a Cholesky factorization.
+  Matrix build_top_right_alt(const Matrix& U, double tau) const {
+    // Init Matrix
+    Matrix top_right(ncons, (rank_ + dim) * rank_);
+    // convenience variables
+    const double s = std::sqrt(2.0 * tau);
+    const int uaiu_size = rank_ * rank_;
+    const int aiu_size = dim * rank_;
+    const Matrix Ut = U.transpose();
+
+#ifdef RANKTOOLS_PARALLEL
+#pragma omp parallel
+#endif
+    // compute products, vectorize and store in top right block.
+    {
+      Matrix AiU(dim, rank_);
+      Matrix UAiU(rank_, rank_);
+#ifdef RANKTOOLS_PARALLEL
+#pragma omp for schedule(static)
+#endif
+      for (int i = 0; i < ncons - 1; ++i) {
+        AiU.noalias() =
+            (*As_)[i].selfadjointView<Eigen::Upper>() * U;  // dim x rank_
+        UAiU.noalias() = Ut * AiU;                          // rank_ x rank_
+        top_right.row(i).head(uaiu_size) =
+            Eigen::Map<const Eigen::RowVectorXd>(UAiU.data(), uaiu_size);
+        top_right.row(i).tail(aiu_size) =
+            Eigen::Map<const Eigen::RowVectorXd>(AiU.data(), aiu_size) * s;
+      }
+    }
+
+    // Last row uses C
+    Matrix CU(dim, rank_);
+    Matrix UCU(rank_, rank_);
+    CU.noalias() = (*C_).selfadjointView<Eigen::Upper>() * U;
+    UCU.noalias() = Ut * CU;
+    top_right.row(ncons - 1).head(uaiu_size) =
+        Eigen::Map<const Eigen::RowVectorXd>(UCU.data(), uaiu_size);
+    top_right.row(ncons - 1).tail(aiu_size) =
+        Eigen::Map<const Eigen::RowVectorXd>(CU.data(), aiu_size) * s;
+
+    return top_right;
+  }
+
+  // Build off diagonal matrix using the formulation from equation 23 of Zhang
+  // and Lavaei 2017, which is V = A_bar^T(U otimes Z) where Z Z^T = X + W0.
+  // This is the more expensive but potentially more effective formulation of
+  // the low rank preconditioner. The form of this matrix depends  V = A_bar^T(U
+  // otimes Z)
+  Matrix build_top_right_zhang2017(const Matrix& U, double tau) const {
     // Init Matrix
     Matrix top_right(ncons, rank_ * dim);
     // define convenience variables
@@ -539,7 +613,7 @@ class LowRankPrecond {
     }
 
 #ifdef RANKTOOLS_PARALLEL
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(static)
 #endif
     // compute products, vectorize and store in top right block.
     for (int i = 0; i < ncons - 1; ++i) {

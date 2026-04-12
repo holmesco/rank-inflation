@@ -39,7 +39,7 @@ class StereoLocalizationProblem:
         # Define Stereo Camera
         stereo_cam = StereoCameraModel(0.0, 0.0, 484.5, 0.24).cuda()
         # Frame tranform from vehicle to camera (sensor)
-        pert = 0.01
+        pert = 0.0 # Set to zero for now
         xi_pert = torch.tensor([[pert, pert, pert, pert, pert, pert]])
         T_s_v = se3_exp(xi_pert)[0]
 
@@ -103,12 +103,13 @@ class StereoLocalizationProblem:
         )
         return T_trg_src
 
-    def plot_targ_frames_3d(self, T_ests, is_global_min, axis_scale=0.2, title=None):
+    def plot_targ_frames_3d(self, T_ests, is_global_min, T_inits=None, axis_scale=0.2, title=None):
         """Plot target frames in 3D from estimated transforms.
 
         Args:
             T_ests (torch.Tensor): Batched transforms of shape (N, 4, 4).
             is_global_min (array-like): Boolean mask of shape (N,) where True indicates global minima.
+            T_inits (torch.Tensor | None): Optional batched initialization transforms of shape (N, 4, 4).
             axis_scale (float): Length of frame axes used in the visualization.
             title (str | None): Optional figure title.
         """
@@ -119,19 +120,54 @@ class StereoLocalizationProblem:
         if is_global_min.shape[0] != T_ests.shape[0]:
             raise ValueError("is_global_min must have shape (N,) matching T_ests.")
 
-        T_ests_np = T_ests.detach().cpu().numpy()
+        if T_inits is not None:
+            if T_inits.ndim != 3 or T_inits.shape[1:] != (4, 4):
+                raise ValueError("T_inits must have shape (N, 4, 4).")
+            if T_inits.shape[0] != T_ests.shape[0]:
+                raise ValueError("T_inits must have the same batch size as T_ests.")
+
+        # Plots should use the inverse transform T_source_target
+        T_ests_plot = torch.linalg.inv(T_ests)
+        T_ests_np = T_ests_plot.detach().cpu().numpy()
+
+        if T_inits is not None:
+            T_inits_plot = torch.linalg.inv(T_inits)
+            T_inits_np = T_inits_plot.detach().cpu().numpy()
+        else:
+            T_inits_np = None
 
         fig = plt.figure(figsize=(9, 7))
         ax = fig.add_subplot(111, projection="3d")
 
-        global_color = "tab:green"
-        local_color = "tab:red"
+        init_global_color = "tab:green"
+        init_local_color = "tab:red"
+        opt_global_color = "black"
+        opt_local_color = "tab:purple"
 
+        # Plot initializations with transparency and color by convergence result
+        if T_inits_np is not None:
+            for i in range(T_inits_np.shape[0]):
+                T0 = T_inits_np[i]
+                R0 = T0[:3, :3]
+                t0 = T0[:3, 3]
+                c0 = init_global_color if is_global_min[i] else init_local_color
+
+                ax.scatter(t0[0], t0[1], t0[2], c=c0, s=35, alpha=0.5)
+
+                ex0 = R0[:, 0] * axis_scale
+                ey0 = R0[:, 1] * axis_scale
+                ez0 = R0[:, 2] * axis_scale
+
+                ax.quiver(t0[0], t0[1], t0[2], ex0[0], ex0[1], ex0[2], color=c0, linewidth=1.0, alpha=0.5)
+                ax.quiver(t0[0], t0[1], t0[2], ey0[0], ey0[1], ey0[2], color=c0, linewidth=1.0, alpha=0.4)
+                ax.quiver(t0[0], t0[1], t0[2], ez0[0], ez0[1], ez0[2], color=c0, linewidth=1.0, alpha=0.3)
+
+        # Plot optimized poses: global in black, local in orange
         for i in range(T_ests_np.shape[0]):
             T = T_ests_np[i]
             R = T[:3, :3]
             t = T[:3, 3]
-            color = global_color if is_global_min[i] else local_color
+            color = opt_global_color if is_global_min[i] else opt_local_color
 
             ax.scatter(t[0], t[1], t[2], c=color, s=40)
 
@@ -158,6 +194,8 @@ class StereoLocalizationProblem:
 
         if T_ests_np.shape[0] > 0:
             xyz = T_ests_np[:, :3, 3]
+            if T_inits_np is not None and T_inits_np.shape[0] > 0:
+                xyz = np.vstack([xyz, T_inits_np[:, :3, 3]])
             mins = xyz.min(axis=0)
             maxs = xyz.max(axis=0)
             span = np.maximum(maxs - mins, 1e-6)
@@ -172,8 +210,10 @@ class StereoLocalizationProblem:
         ax.set_title(title if title is not None else "Estimated target frames")
         ax.set_aspect("equal", adjustable="box")
 
-        ax.scatter([], [], [], c=global_color, s=40, label="global minimum")
-        ax.scatter([], [], [], c=local_color, s=40, label="local minimum")
+        ax.scatter([], [], [], c=init_global_color, s=35, alpha=0.5, label="init → global")
+        ax.scatter([], [], [], c=init_local_color, s=35, alpha=0.5, label="init → local")
+        ax.scatter([], [], [], c=opt_global_color, s=40, label="optimized global")
+        ax.scatter([], [], [], c=opt_local_color, s=40, label="optimized local")
         ax.legend(loc="best")
         plt.tight_layout()
         plt.show()
@@ -283,13 +323,78 @@ class StereoLocalizationProblem:
         print(f"SDP solve wall time: {sdp_wall_time_s:.6f} s")
         print(f"SDP reported solver time: {sdp_solver_time_s:.6f} s")
 
+        global_mask = df["certified"]
+        local_mask = ~global_mask
+
+        global_avg_cert_time = (
+            df.loc[global_mask, "certifier_time_s"].mean() if global_mask.any() else np.nan
+        )
+        local_avg_cert_time = (
+            df.loc[local_mask, "certifier_time_s"].mean() if local_mask.any() else np.nan
+        )
+
+        print(f"Average certifier time (global minima): {global_avg_cert_time:.6f} s")
+        print(f"Average certifier time (local minima): {local_avg_cert_time:.6f} s")
+
+        global_costs = df.loc[global_mask, "optimal_cost"]
+        local_costs = df.loc[local_mask, "optimal_cost"]
+
+        global_cost_mean = global_costs.mean() if global_mask.any() else np.nan
+        global_cost_std = global_costs.std(ddof=0) if global_mask.any() else np.nan
+        print(f"Global minima cost mean: {global_cost_mean:.6e}")
+        print(f"Global minima cost std: {global_cost_std:.6e}")
+
+        # Use mean + std as a scalar comparison threshold for local minima costs
+        global_cost_threshold = global_cost_mean + global_cost_std
+        if local_mask.any() and global_mask.any():
+            all_local_greater = bool((local_costs > global_cost_threshold).all())
+            print(
+                f"All local minima costs > (global mean + std = {global_cost_threshold:.6e}): {all_local_greater}"
+            )
+        elif local_mask.any() and not global_mask.any():
+            print("Cannot compare local minima costs to global mean+std (no global minima found).")
+        else:
+            print("No local minima found to compare against global mean+std threshold.")
+        
+
         if plot_results:
+            fig_cost, ax_cost = plt.subplots(figsize=(9, 4))
+            idx = df["init"].to_numpy()
+            ax_cost.scatter(
+                idx[global_mask.to_numpy()],
+                global_costs.to_numpy(),
+                c="black",
+                s=35,
+                label="global minima cost",
+            )
+            if local_mask.any():
+                ax_cost.scatter(
+                    idx[local_mask.to_numpy()],
+                    local_costs.to_numpy(),
+                    c="tab:purple",
+                    s=35,
+                    label="local minima cost",
+                )
+
+            if global_mask.any():
+                ax_cost.axhline(global_cost_mean, color="tab:green", linestyle="-", linewidth=1.5, label="global mean")
+                ax_cost.axhline(global_cost_mean + global_cost_std, color="tab:green", linestyle="--", linewidth=1.0, label="global mean ± std")
+                ax_cost.axhline(global_cost_mean - global_cost_std, color="tab:green", linestyle="--", linewidth=1.0)
+
+            ax_cost.set_xlabel("initialization index")
+            ax_cost.set_ylabel("optimal cost")
+            ax_cost.set_title("Cost by trial with global mean/std")
+            ax_cost.legend(loc="best")
+            ax_cost.grid(alpha=0.25)
+            plt.tight_layout()
+
             is_global_min = df["certified"].to_numpy(dtype=bool)
             self.plot_targ_frames_3d(
                 T_ests,
                 is_global_min,
+                T_inits=T_inits,
                 axis_scale=plot_axis_scale,
-                title="Estimated target frames (green=global, red=local)",
+                title="Initializations and optimized target frames",
             )
 
         return df
@@ -328,5 +433,5 @@ if __name__ == "__main__":
     stereo_loc = StereoLocalizationProblem(batch_size=1, N_map=50)
     # stereo_loc.certifier.check_constraint_linear_independence()
     # stereo_loc.test_estimator_ground_truth()
-    df = stereo_loc.run_initializations_and_certify(N_init=20, plot_results=True, seed=0)
+    df = stereo_loc.run_initializations_and_certify(N_init=100, plot_results=True, seed=0)
     
