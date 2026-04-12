@@ -159,12 +159,6 @@ PYBIND11_MODULE(ranktools, m) {
           "tau_lrp",
           [](const AnalyticCenterParams& p) { return p.lrp_params.tau; },
           [](AnalyticCenterParams& p, double tau) { p.lrp_params.tau = tau; })
-      // Low rank approximation
-      .def_readwrite("low_rank_approx", &AnalyticCenterParams::low_rank_approx)
-      .def_readwrite("low_rank_approx_rank",
-                     &AnalyticCenterParams::low_rank_approx_rank)
-      .def_readwrite("low_rank_approx_tol",
-                     &AnalyticCenterParams::low_rank_approx_tol)
       // Adaptive perturbation
       .def_readwrite("adaptive_perturb",
                      &AnalyticCenterParams::adaptive_perturb)

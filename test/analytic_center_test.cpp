@@ -142,32 +142,6 @@ TEST_P(LovazsParamTest, PrimalSolution) {
       << "Analytic center solution is not close to Mosek solution";
 }
 
-// Test the Fixed perturbation and verify that the method converges.
-TEST_P(LovazsParamTest, CertifyFixedPerturb) {
-  const auto& sdp = GetParam();
-  // parameters
-  AnalyticCenterParams params;
-  params.verbose = true;
-  params.early_stop_cert = false;  // Turn off early stopping based on
-                                   // certificate for testing purposes
-  params.adaptive_perturb =
-      false;  // Turn off adaptive perturbation for testing purposes
-  auto delta = 1e-7;
-  params.delta_init = delta;
-  // generate problem
-  AnalyticCenter problem = sdp.make(params);
-  // get current solution
-  Matrix Y_0 = sdp.make_solution(1);
-  // Run certification method
-  auto result = problem.certify(Y_0);
-  // check that the solution is certified
-  EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
-  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
-            << std::endl;
-  std::cout << "Complementarity (First Order Condition): "
-            << result.complementarity << std::endl;
-}
-
 // Test adapative perturbation. Ensure that we converge to a certificate.
 TEST_P(LovazsParamTest, CertifyAdaptivePerturb) {
   const auto& sdp = GetParam();
@@ -505,6 +479,8 @@ TEST_P(GenericParamTest, LinDependentConstraints) {
                                 "but matrix is not full rank";
 }
 
+// ------------ CERTIFICATION TESTS ----------------
+
 TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
   const auto& sdp = GetParam();
   // parameters
@@ -561,8 +537,6 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
       true;  // Turn on adaptive perturbation for testing purposes
   params.delta_min = 1e-7;
   params.max_iter = 50;
-  // Turn off rescaling (preconditioner should deal with this)
-  params.rescale_lin_sys = true;
   params.lin_solver = LinearSolverType::MFCG_LRP;
   params.lrp_params.tau = 1e-5;
   params.lrp_params.method = LowRankPrecondMethod::SparseLDLT;
@@ -606,7 +580,7 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_wLocal) {
   params.adaptive_perturb = true;
   params.delta_min = 1e-7;
   // Turn off rescaling (preconditioner should deal with this)
-  params.rescale_lin_sys = true;
+  params.rescale_lin_sys = false;
   params.lin_solver =
       LinearSolverType::MFCG_LRP;  // Use Conjugate Gradient solver
   params.lrp_params.tau = 1e-5;

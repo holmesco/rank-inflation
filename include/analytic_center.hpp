@@ -102,15 +102,6 @@ struct AnalyticCenterParams {
   // Line search lower bound
   double alpha_min = 1e-10;
 
-  // Low Rank Approximation
-  // ----------------
-  // enable low rank approximation for certificate matrix in centering step
-  bool low_rank_approx = false;
-  // rank for low rank approximation of certificate matrix
-  int low_rank_approx_rank = 5;
-  // tolerance for low rank approximation of certificate matrix
-  double low_rank_approx_tol = 1e-6;
-
   // Early stop parameters
   // -------------------------
   // enable for certificate check during centering
