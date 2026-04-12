@@ -298,8 +298,8 @@ class LowRankPrecond {
     Sys.block(ncons, ncons, V.cols(), V.cols()) =
         -Matrix::Identity(V.cols(), V.cols()) * std::pow(params_.tau, 2);
 
-    std::cout << "Augmented system for dense LDLT factorization:\n"
-              << Sys << std::endl;
+    // std::cout << "Augmented system for dense LDLT factorization:\n"
+    //           << Sys << std::endl;
     // Prefactorize (LDLT)
     LDLTDenseFactor.compute(Sys.selfadjointView<Eigen::Upper>());
     // Flag that we have initialized to eigen
@@ -483,7 +483,7 @@ class LowRankPrecond {
       rhs << b / scale_, Vector::Zero(sysdim - ncons);
       result = LDLTSparseFactor.solve(rhs).head(ncons).eval();
     } else if (params_.method == LowRankPrecondMethod::DenseLDLT) {
-      int sysdim = LDLTSparseFactor.matrixL().rows();
+      int sysdim = LDLTDenseFactor.matrixL().rows();
       auto rhs = Vector(sysdim);
       rhs << b / scale_, Vector::Zero(sysdim - ncons);
       result = LDLTDenseFactor.solve(rhs).head(ncons).eval();
