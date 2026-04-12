@@ -178,7 +178,13 @@ class MultiplierDiagPreconditioner {
   bool is_initialized_;
 };
 
-enum class LowRankPrecondMethod { DenseLDLT, SparseLDLT, DenseQR, SparseQR };
+enum class LowRankPrecondMethod {
+  DenseLDLT,
+  SparseLDLT,
+  SparseLDLT_ZL,
+  DenseQR,
+  SparseQR
+};
 
 struct LowRankPrecondParams {
   // Diagonal perturbation parameter.
@@ -194,8 +200,6 @@ struct LowRankPrecondParams {
   // LDLT Threshold for treating small eigenvalues as zero. This is used in the
   // dense
   double ldlt_zero_thresh = 1e-14;
-  // Flag for alternate preconditioner formulation for ldlt
-  bool ldlt_alt_form = true;
 };
 
 // Low Rank Preconditioner for the Lagrange multiplier system.
@@ -235,7 +239,8 @@ class LowRankPrecond {
     dim = C.cols();
     ncons = As.size() + 1;
     // Call function to build the preconditioner
-    if (params_.method == LowRankPrecondMethod::SparseLDLT) {
+    if (params_.method == LowRankPrecondMethod::SparseLDLT ||
+        params_.method == LowRankPrecondMethod::SparseLDLT_ZL) {
       build_ldlt_sparse();
     } else if (params_.method == LowRankPrecondMethod::DenseLDLT) {
       build_ldlt_dense();
@@ -260,7 +265,8 @@ class LowRankPrecond {
       return *this;
     }
     // Call the internal build function that does the actual work
-    if (params_.method == LowRankPrecondMethod::SparseLDLT) {
+    if (params_.method == LowRankPrecondMethod::SparseLDLT ||
+        params_.method == LowRankPrecondMethod::SparseLDLT_ZL) {
       build_ldlt_sparse();
     } else if (params_.method == LowRankPrecondMethod::DenseLDLT) {
       build_ldlt_dense();
@@ -477,7 +483,8 @@ class LowRankPrecond {
   template <typename Rhs>
   Eigen::VectorXd solve(const Eigen::MatrixBase<Rhs>& b) const {
     Vector result(ncons);
-    if (params_.method == LowRankPrecondMethod::SparseLDLT) {
+    if (params_.method == LowRankPrecondMethod::SparseLDLT ||
+        params_.method == LowRankPrecondMethod::SparseLDLT_ZL) {
       int sysdim = LDLTSparseFactor.matrixL().rows();
       auto rhs = Vector(sysdim);
       rhs << b / scale_, Vector::Zero(sysdim - ncons);
@@ -527,7 +534,7 @@ class LowRankPrecond {
 
   // Build the top right matrix in the augmented preconditioner system
   Matrix build_top_right(const Matrix& U, double tau) const {
-    if (params_.ldlt_alt_form) {
+    if (params_.method == LowRankPrecondMethod::SparseLDLT) {
       return build_top_right_alt(U, tau);
     } else {
       return build_top_right_zhang2017(U, tau);
@@ -541,24 +548,41 @@ class LowRankPrecond {
     Matrix top_right(ncons, (rank_ + dim) * rank_);
     // convenience variables
     const double s = std::sqrt(2.0 * tau);
+    const int uaiu_size = rank_ * rank_;
+    const int aiu_size = dim * rank_;
+    const Matrix Ut = U.transpose();
 
 #ifdef RANKTOOLS_PARALLEL
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel
 #endif
     // compute products, vectorize and store in top right block.
-    for (int i = 0; i < ncons; ++i) {
-      Matrix AiU;
-      if (i < ncons - 1) {
-        AiU = (*As_)[i].selfadjointView<Eigen::Upper>() * U;  // dim x rank_
-      } else {
-        AiU = (*C_).selfadjointView<Eigen::Upper>() * U;  // dim x rank_
+    {
+      Matrix AiU(dim, rank_);
+      Matrix UAiU(rank_, rank_);
+#ifdef RANKTOOLS_PARALLEL
+#pragma omp for schedule(static)
+#endif
+      for (int i = 0; i < ncons - 1; ++i) {
+        AiU.noalias() =
+            (*As_)[i].selfadjointView<Eigen::Upper>() * U;  // dim x rank_
+        UAiU.noalias() = Ut * AiU;                          // rank_ x rank_
+        top_right.row(i).head(uaiu_size) =
+            Eigen::Map<const Eigen::RowVectorXd>(UAiU.data(), uaiu_size);
+        top_right.row(i).tail(aiu_size) =
+            Eigen::Map<const Eigen::RowVectorXd>(AiU.data(), aiu_size) * s;
       }
-      Matrix UAiU = U.transpose() * AiU;  // rank_ x rank_
-      top_right.row(i).head(UAiU.size()) =
-          Eigen::Map<const Eigen::VectorXd>(UAiU.data(), UAiU.size());
-      top_right.row(i).tail(AiU.size()) =
-          Eigen::Map<const Eigen::VectorXd>(AiU.data(), AiU.size()) * s;
     }
+
+    // Last row uses C
+    Matrix CU(dim, rank_);
+    Matrix UCU(rank_, rank_);
+    CU.noalias() = (*C_).selfadjointView<Eigen::Upper>() * U;
+    UCU.noalias() = Ut * CU;
+    top_right.row(ncons - 1).head(uaiu_size) =
+        Eigen::Map<const Eigen::RowVectorXd>(UCU.data(), uaiu_size);
+    top_right.row(ncons - 1).tail(aiu_size) =
+        Eigen::Map<const Eigen::RowVectorXd>(CU.data(), aiu_size) * s;
+
     return top_right;
   }
 
@@ -589,7 +613,7 @@ class LowRankPrecond {
     }
 
 #ifdef RANKTOOLS_PARALLEL
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(static)
 #endif
     // compute products, vectorize and store in top right block.
     for (int i = 0; i < ncons - 1; ++i) {

@@ -102,7 +102,11 @@ PYBIND11_MODULE(ranktools, m) {
       .value("DenseLDLT", LowRankPrecondMethod::DenseLDLT,
              "Dense LDLT factorization approach")
       .value("SparseLDLT", LowRankPrecondMethod::SparseLDLT,
-             "Sparse LDLT factorization approach")
+             "Sparse LDLT factorization approach using alternate top-right "
+             "formulation")
+      .value("SparseLDLT_ZL", LowRankPrecondMethod::SparseLDLT_ZL,
+             "Sparse LDLT factorization approach using the Zhang-Lavaei (2017) "
+             "top-right formulation")
       .value("DenseQR", LowRankPrecondMethod::DenseQR,
              "Dense QR factorization approach")
       .value("SparseQR", LowRankPrecondMethod::SparseQR,

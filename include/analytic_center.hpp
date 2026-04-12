@@ -50,7 +50,7 @@ struct AnalyticCenterParams {
   // Rescale linear system for centering
   // Rescaling is akin to scaling the log det objective by delta and improves
   // conditioning.
-  bool rescale_lin_sys = true;
+  bool rescale_lin_sys = false;
   // Select linear solver for centering step
   LinearSolverType lin_solver = LinearSolverType::LDLT;
   

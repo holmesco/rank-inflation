@@ -424,9 +424,19 @@ TEST(MatrixFree, DiagonalPreconditioner) {
       << "Preconditioned CG residual too large";
 }
 
-// Test the low-rank preconditioner and verify that it improves conditioning of
-// the system.
-TEST_P(LovazsParamTest, LowRankPrecondLDLTAlt) {
+// Dense LDLT Low rank preconditioner
+TEST_P(LovazsParamTest, LowRankPrecondDenseLDLT) {
+  const auto& sdp = GetParam();
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.lrp_params.method = LowRankPrecondMethod::DenseLDLT;
+  const double delta = 1e-6;
+  RunLowRankPreconditionerConditioningTest(sdp, params, delta,
+                                           /*inspect_system_cond=*/true);
+}
+
+// Test alternate form of LDLT
+TEST_P(LovazsParamTest, LowRankPrecondSparseLDLTAlt) {
   const auto& sdp = GetParam();
   AnalyticCenterParams params;
   params.verbose = true;
@@ -437,23 +447,31 @@ TEST_P(LovazsParamTest, LowRankPrecondLDLTAlt) {
                                            /*inspect_system_cond=*/true);
 }
 
-// Test the low-rank preconditioner and verify that it improves conditioning of
-// the system.
-TEST_P(LovazsParamTest, LowRankPrecondLDLT) {
+// Sparse LDLT Low rank preconditioner
+TEST_P(LovazsParamTest, LowRankPrecondSparseLDLT) {
   const auto& sdp = GetParam();
   AnalyticCenterParams params;
   params.verbose = true;
-  params.rescale_lin_sys = false;
-  params.lrp_params.method = LowRankPrecondMethod::SparseLDLT;
-  params.lrp_params.ldlt_alt_form = false;
-  const double delta = 1e-7;
+  params.lrp_params.method = LowRankPrecondMethod::SparseLDLT_ZL;
+  const double delta = 1e-7;  // better conditioning with sparse
   RunLowRankPreconditionerConditioningTest(sdp, params, delta,
                                            /*inspect_system_cond=*/true);
 }
 
-// Test the low-rank preconditioner and verify that it improves conditioning of
-// the system.
-TEST_P(LovazsParamTest, LowRankPrecondQR) {
+// Dense QR Low rank preconditioner
+TEST_P(LovazsParamTest, LowRankPrecondDenseQR) {
+  const auto& sdp = GetParam();
+  AnalyticCenterParams params;
+  params.verbose = true;
+  params.rescale_lin_sys = false;
+  params.lrp_params.method = LowRankPrecondMethod::DenseQR;
+  const double delta = 1e-7;
+  RunLowRankPreconditionerConditioningTest(sdp, params, delta,
+                                           /*inspect_system_cond=*/false);
+}
+
+// Sparse QR Low rank preconditioner
+TEST_P(LovazsParamTest, LowRankPrecondSparseQR) {
   const auto& sdp = GetParam();
   AnalyticCenterParams params;
   params.verbose = true;
