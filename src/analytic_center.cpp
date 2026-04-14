@@ -293,9 +293,7 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
     // compute violation
     sys.violation(i) = sys.d(i) - val;
     // adjusted rhs to include violation if enabled
-    if (params_.reduce_violation) {
-      sys.d(i) += sys.violation(i);
-    }
+    sys.d(i) += sys.violation(i);
   }
   // Rescaling for linear system
   sys.scale_ = params_.rescale_lin_sys ? (1.0 / delta) : 1.0;

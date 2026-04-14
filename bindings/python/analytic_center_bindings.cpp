@@ -133,8 +133,6 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("verbose", &AnalyticCenterParams::verbose)
       .def_readwrite("tol_rank_sol", &AnalyticCenterParams::tol_rank_sol)
       .def_readwrite("tol_step_norm", &AnalyticCenterParams::tol_step_norm)
-      .def_readwrite("reduce_violation",
-                     &AnalyticCenterParams::reduce_violation)
       .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
       .def_readwrite("rescale_lin_sys", &AnalyticCenterParams::rescale_lin_sys)
       .def_readwrite("perturb_constraints",

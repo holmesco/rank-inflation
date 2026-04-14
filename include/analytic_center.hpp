@@ -43,13 +43,11 @@ struct AnalyticCenterParams {
   double tol_rank_sol = 1.0E-4;
   // tolerance for step size (terminate if below)
   double tol_step_norm = 1e-8;
-  // reduce violation in centering step
-  bool reduce_violation = true;
   // max number of iterations for centering
   int max_iter = 50;
-  // Rescale linear system for centering
-  // Rescaling is akin to scaling the log det objective by delta and improves
-  // conditioning.
+  // Rescale KKT System by delta. Rescaling is akin to scaling the log det
+  // objective by delta and improves conditioning. NOTE: This should only be
+  // required if using the diagonal preconditioner.
   bool rescale_lin_sys = false;
   // Select linear solver for centering step
   LinearSolverType lin_solver = LinearSolverType::LDLT;
