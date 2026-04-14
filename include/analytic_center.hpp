@@ -53,13 +53,15 @@ struct AnalyticCenterParams {
   bool rescale_lin_sys = false;
   // Select linear solver for centering step
   LinearSolverType lin_solver = LinearSolverType::LDLT;
-  
+
   // Adaptive Perturbation Parameters
   // -------------------------
   // Flag to turn on perturbation of the constraints by delta
-  bool perturb_constraints = true;
-  // perturbation of cost that is active when perturb_constraints is false
-  double cost_perturb = 1e-6;
+  bool perturb_constraints = false;
+  // Flag to turn on perturbation of the cost by delta
+  bool perturb_cost = true;
+  // perturbation of cost that is active when perturb_cost is false
+  double cost_offset = 1e-6;
   // enable adaptive perturbation for centering
   bool adaptive_perturb = true;
   // final delta for centering (should be small to get close to boundary, but
@@ -80,14 +82,13 @@ struct AnalyticCenterParams {
   double delta_dec_step_min = 0.9;
   // update factor for adjusting delta in adaptive centering
   double delta_dec = 0.6;
-  
 
   // Iterative Linear Solve Parameters
   // -----------------
   // max number of iterations for iterative linear solvers (CG and MFCG)
-  int lin_solve_max_iter = 200;
+  int lin_solve_max_iter = 500;
   // tolerance for iterative linear solvers (CG and MFCG)
-  double lin_solve_tol = 1e-4;
+  double lin_solve_tol = 1e-5;
   // Low rank preconditioner parameters
   LowRankPrecondParams lrp_params = LowRankPrecondParams();
 
@@ -96,7 +97,7 @@ struct AnalyticCenterParams {
   // line search enable for analytic center
   bool enable_line_search = true;
   // Line search reduction factor (should be between zero and one)
-  double ln_search_red_factor = 0.5;
+  double ln_search_red_factor = 0.8;
   // Line search initialization
   double alpha_init = 1.0;
   // Line search lower bound
@@ -169,7 +170,8 @@ class AnalyticCenter {
   // The initial perturbation is taken from params_.delta_init. Delta is used
   // to ensure we stay in the interior of the PSD cone even when the solution
   // is low rank. If delta is zero then no perturbation is applied.
-  // Returns the centered solution and the scaled multipliers for certificate checking.
+  // Returns the centered solution and the scaled multipliers for certificate
+  // checking.
   std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0) const;
 
   // Build weighted sum of constraint matrices: sum_i A_i * lambda_i

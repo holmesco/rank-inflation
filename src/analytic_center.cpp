@@ -283,10 +283,10 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
       sys.d(i) = sparse_upper_dot_dense(A_[i], X);
     } else {
       const double trace_C = C_.diagonal().sum();
-      if (params_.perturb_constraints) {
+      if (params_.perturb_cost) {
         val = rho_ + delta * trace_C;
       } else {
-        val = rho_ + params_.cost_perturb;
+        val = rho_ + params_.cost_offset;
       }
       sys.d(i) = C_.cwiseProduct(X).sum();
     }
