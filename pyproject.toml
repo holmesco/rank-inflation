@@ -6,7 +6,7 @@ build-backend = "scikit_build_core.build"
 name = "ranktools"
 version = "0.0.1"
 description = "Python bindings for RankTools AnalyticCenter solver"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
 	"numpy<2",
 	"scipy",
@@ -21,8 +21,6 @@ cmake.args = ["-DBUILD_PYTHON_BINDINGS=ON", "-DBUILD_TESTS=OFF"]
 cmake.minimum-version = "3.15"
 # The compiled module and its stub are installed to the wheel root
 wheel.install-dir = "."
-# Include pure Python sources from python/src in the wheel
-wheel.packages = ["python/src/examples"]
 
 # ---------------------------------------------------------------------------
 # Optional install-time flags (passed via pip's -C / --config-settings)
@@ -30,6 +28,6 @@ wheel.packages = ["python/src/examples"]
 # Usage examples:
 #   pip install .                                       # Release, no debug
 #   pip install . -C cmake.define.DEBUG_FLAG=ON         # Release + debug prints
-#   pip install . -C cmake.define.ENABLE_PARALLEL=ON    # turn on parallel loops
+#   pip install . -C cmake.define.ENABLE_PARALLEL=ON    # turn on parallel loops (enabled by default)
 #   pip install . -C cmake.define.CMAKE_BUILD_TYPE=Debug                     # Debug build
 #   pip install . -C cmake.define.CMAKE_BUILD_TYPE=Debug -C cmake.define.DEBUG_FLAG=ON  # both
