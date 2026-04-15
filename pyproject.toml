@@ -10,47 +10,10 @@ requires-python = ">=3.10"
 dependencies = [
 	"numpy<2",
 	"scipy",
-	"scikit-sparse==0.4.16",
-	"casadi",
-	"cvxpy",
-	"mosek",
-	"matplotlib",
-	"pandas",
-	"pybind11",
-	"pybind11-stubgen",
-	"scikit-build-core",
-	"theseus-ai",
-	"cmake",
-	"ninja",
-	"pytest",
-	"torch==2.2.1",
-	"torchaudio==2.2.1",
-	"torchvision==0.17.1",
-	"torchelastic==0.2.2",
-	"open3d>=0.19.0",
-	"asrl-pylgmath>=1.0.3",
-	"debugpy>=1.8.20",
-	"cert-tools",
 ]
 
 [project.optional-dependencies]
 test = ["pytest"]
-
-[[tool.uv.index]]
-name = "pytorch-cu121"
-url = "https://download.pytorch.org/whl/cu121"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cu121" }
-torchaudio = { index = "pytorch-cu121" }
-torchvision = { index = "pytorch-cu121" }
-cert-tools = { workspace = true }
-
-[tool.uv.workspace]
-members = [
-    "extern/certifiable-tools",
-]
 
 [tool.scikit-build]
 # Tell scikit-build-core to pass the flag that enables the pybind11 target
