@@ -51,6 +51,8 @@ struct AnalyticCenterParams {
   bool rescale_lin_sys = false;
   // Select linear solver for centering step
   LinearSolverType lin_solver = LinearSolverType::LDLT;
+  // For iterative solvers, choose whether to reuse multipliers
+  bool reuse_multipliers = true;
 
   // Adaptive Perturbation Parameters
   // -------------------------

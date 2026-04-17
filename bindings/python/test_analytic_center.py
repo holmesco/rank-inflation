@@ -38,8 +38,11 @@ def test_params():
     """Verify default parameter construction and mutation."""
     p = ranktools.AnalyticCenterParams()
     assert p.verbose is True
+    assert p.reuse_multipliers is True
     p.verbose = False
+    p.reuse_multipliers = False
     assert p.verbose is False
+    assert p.reuse_multipliers is False
     print("[PASS] AnalyticCenterParams")
 
 

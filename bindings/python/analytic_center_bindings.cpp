@@ -135,17 +135,19 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("tol_step_norm", &AnalyticCenterParams::tol_step_norm)
       .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
       .def_readwrite("rescale_lin_sys", &AnalyticCenterParams::rescale_lin_sys)
+      .def_readwrite("reuse_multipliers",
+                     &AnalyticCenterParams::reuse_multipliers)
       .def_readwrite("perturb_constraints",
                      &AnalyticCenterParams::perturb_constraints)
-            .def_readwrite("perturb_cost", &AnalyticCenterParams::perturb_cost)
+      .def_readwrite("perturb_cost", &AnalyticCenterParams::perturb_cost)
       .def_readwrite("cost_offset", &AnalyticCenterParams::cost_offset)
-            // Backward-compatible alias for older scripts.
-            .def_property(
-                    "cost_perturb",
-                    [](const AnalyticCenterParams& p) { return p.cost_offset; },
-                    [](AnalyticCenterParams& p, double cost_perturb) {
-                        p.cost_offset = cost_perturb;
-                    })
+      // Backward-compatible alias for older scripts.
+      .def_property(
+          "cost_perturb",
+          [](const AnalyticCenterParams& p) { return p.cost_offset; },
+          [](AnalyticCenterParams& p, double cost_perturb) {
+            p.cost_offset = cost_perturb;
+          })
       .def_readwrite("lin_solver", &AnalyticCenterParams::lin_solver)
       // Iterative linear solve
       .def_readwrite("lin_solve_max_iter",

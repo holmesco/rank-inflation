@@ -344,7 +344,7 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
 
     // Use previous multipliers as initial guess if available to speed up
     // convergence
-    if (prev_multipliers_.size() == m) {
+    if (prev_multipliers_.size() == m && params_.reuse_multipliers) {
       multipliers = cg.solveWithGuess(sys.d, prev_multipliers_);
     } else {
       multipliers = cg.solve(sys.d);
@@ -373,7 +373,7 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
 
     // Use previous multipliers as initial guess if available to speed up
     // convergence
-    if (prev_multipliers_.size() == m) {
+    if (prev_multipliers_.size() == m && params_.reuse_multipliers) {
       multipliers = solver.solveWithGuess(sys.d, prev_multipliers_);
     } else {
       multipliers = solver.solve(sys.d);
@@ -412,7 +412,7 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
     }
     // Use previous multipliers as initial guess if available to speed up
     // convergence
-    if (prev_multipliers_.size() == m) {
+    if (prev_multipliers_.size() == m && params_.reuse_multipliers) {
       multipliers = solver.solveWithGuess(sys.d, prev_multipliers_);
     } else {
       multipliers = solver.solve(sys.d);
