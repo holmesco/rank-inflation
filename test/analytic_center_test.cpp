@@ -479,6 +479,104 @@ TEST_P(GenericParamTest, LinDependentConstraints) {
                                 "but matrix is not full rank";
 }
 
+TEST(General, ConstructorRemovesCopiedDependentConstraints) {
+  auto sdp = make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8},
+                                   "Clique1_DependentCopyTest");
+
+  AnalyticCenterParams params;
+  params.verbose = false;
+  params.check_indep_constr = true;
+  params.tol_indep_constr = 1e-10;
+
+  // Baseline independent set from original problem.
+  AnalyticCenter baseline(sdp.C, sdp.rho, sdp.A, sdp.b, params);
+
+  // Add explicit copies of existing constraints and RHS values.
+  std::vector<Eigen::SparseMatrix<double>> A_aug = sdp.A;
+  std::vector<double> b_aug = sdp.b;
+  ASSERT_GE(A_aug.size(), 2u);
+  A_aug.push_back(A_aug[0]);
+  b_aug.push_back(b_aug[0]);
+  A_aug.push_back(A_aug[1]);
+  b_aug.push_back(b_aug[1]);
+
+  AnalyticCenter with_copies(sdp.C, sdp.rho, A_aug, b_aug, params);
+
+  // Dependent copied constraints should be removed.
+  EXPECT_EQ(with_copies.A_.size(), baseline.A_.size());
+  EXPECT_EQ(with_copies.b_.size(), baseline.b_.size());
+  EXPECT_EQ(with_copies.m, baseline.m);
+
+  // Check the copied constraints no longer appear more than once.
+  auto sparse_and_rhs_match =
+      [](const Eigen::SparseMatrix<double>& A1, double b1,
+         const Eigen::SparseMatrix<double>& A2, double b2) {
+        if (std::abs(b1 - b2) > 1e-12) {
+          return false;
+        }
+        return (Matrix(A1) - Matrix(A2)).norm() <= 1e-12;
+      };
+
+  int matches_first = 0;
+  int matches_second = 0;
+  for (int i = 0; i < static_cast<int>(with_copies.A_.size()); ++i) {
+    if (sparse_and_rhs_match(with_copies.A_[i], with_copies.b_[i], sdp.A[0],
+                             sdp.b[0])) {
+      matches_first++;
+    }
+    if (sparse_and_rhs_match(with_copies.A_[i], with_copies.b_[i], sdp.A[1],
+                             sdp.b[1])) {
+      matches_second++;
+    }
+  }
+
+  EXPECT_EQ(matches_first, 1);
+  EXPECT_EQ(matches_second, 1);
+}
+
+TEST(General, ConstructorRemovesConstraintWhenCostIsDependent) {
+  // Build a tiny SDP where C is exactly equal to A0, so one constraint should
+  // be removed to keep {constraints + cost} independent.
+  const int dim = 2;
+  std::vector<Eigen::SparseMatrix<double>> A;
+  A.reserve(2);
+
+  Eigen::SparseMatrix<double> A0(dim, dim);
+  {
+    std::vector<Eigen::Triplet<double>> t{{0, 0, 1.0}};
+    A0.setFromTriplets(t.begin(), t.end());
+  }
+  Eigen::SparseMatrix<double> A1(dim, dim);
+  {
+    std::vector<Eigen::Triplet<double>> t{{1, 1, 1.0}};
+    A1.setFromTriplets(t.begin(), t.end());
+  }
+  A.push_back(A0);
+  A.push_back(A1);
+
+  std::vector<double> b{1.0, 2.0};
+
+  // Make cost dependent with A0.
+  Matrix C = Matrix(A0);
+  double rho = 1.0;
+
+  AnalyticCenterParams params;
+  params.verbose = false;
+  params.check_indep_constr = true;
+  params.tol_indep_constr = 1e-12;
+
+  AnalyticCenter problem(C, rho, A, b, params);
+
+  // One of the two constraints must be removed, leaving one constraint + cost.
+  EXPECT_EQ(problem.A_.size(), 1u);
+  EXPECT_EQ(problem.b_.size(), 1u);
+  EXPECT_EQ(problem.m, 2);
+
+  // The kept constraint should be A1 (A0 is redundant with cost).
+  EXPECT_NEAR((Matrix(problem.A_[0]) - Matrix(A1)).norm(), 0.0, 1e-12);
+  EXPECT_NEAR(problem.b_[0], b[1], 1e-12);
+}
+
 // ------------ CERTIFICATION TESTS ----------------
 
 TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {

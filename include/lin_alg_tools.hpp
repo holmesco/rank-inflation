@@ -657,8 +657,15 @@ class LowRankPrecond {
     return top_right_sparse;
   }
 
-  // Construct the vectorized constraint matrix
-  void build_constraint_mat() {
+  // Construct the vectorized constraint matrix without requiring a class
+  // instance. The returned matrix is A_bar = [vec(A1) ... vec(Am) vec(C)],
+  // where each sparse Ai is symmetrized by mirroring its upper-triangular
+  // entries.
+  static SpMatrix build_constraint_mat(const std::vector<SpMatrix>& As,
+                                       const Matrix& C) {
+    const int dim = C.cols();
+    const int ncons = static_cast<int>(As.size()) + 1;
+
     // Build sparse constraint matrix using triplet format for efficiency
     std::vector<Eigen::Triplet<double>> triplets;
     triplets.reserve(dim * dim);  // Conservative estimate of non-zeros
@@ -666,8 +673,8 @@ class LowRankPrecond {
     for (int i = 0; i < ncons; i++) {
       if (i < ncons - 1) {
         // Use an InnerIterator to move through non-zeros only
-        for (int k = 0; k < (*As_)[i].outerSize(); ++k) {
-          for (Eigen::SparseMatrix<double>::InnerIterator it((*As_)[i], k); it;
+        for (int k = 0; k < As[i].outerSize(); ++k) {
+          for (Eigen::SparseMatrix<double>::InnerIterator it(As[i], k); it;
                ++it) {
             // Calculate vectorized row index: col * total_rows + row
             if (it.col() > it.row()) {
@@ -687,7 +694,7 @@ class LowRankPrecond {
         // For dense matrix C, vectorize it
         for (int row = 0; row < dim; ++row) {
           for (int col = 0; col < dim; ++col) {
-            double val = (*C_)(row, col);
+            double val = C(row, col);
             if (val != 0.0) {
               int row_idx = col * dim + row;
               triplets.emplace_back(row_idx, i, val);
@@ -698,10 +705,14 @@ class LowRankPrecond {
     }
 
     // Construct sparse matrix from triplets
-    A_bar_.resize(dim * dim, ncons);
-    A_bar_.setFromTriplets(triplets.begin(), triplets.end());
-    A_bar_.makeCompressed();
+    SpMatrix A_bar(dim * dim, ncons);
+    A_bar.setFromTriplets(triplets.begin(), triplets.end());
+    A_bar.makeCompressed();
+    return A_bar;
   }
+
+  // Construct the vectorized constraint matrix
+  void build_constraint_mat() { A_bar_ = build_constraint_mat(*As_, *C_); }
 
   Eigen::ComputationInfo info() const {
     return is_initialized_ ? Eigen::Success : Eigen::InvalidInput;

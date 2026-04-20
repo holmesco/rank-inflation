@@ -54,6 +54,15 @@ struct AnalyticCenterParams {
   // For iterative solvers, choose whether to reuse multipliers
   bool reuse_multipliers = true;
 
+  // Linear Independence Check
+  // -------------------------
+  // tolerance for checking linear independence of constraints (used in problem
+  // validation)
+  double tol_indep_constr = 1e-3;
+  // flag to enable checking linear independence of constraints (used in problem
+  // validation)
+  bool check_indep_constr = false;
+
   // Adaptive Perturbation Parameters
   // -------------------------
   // Flag to turn on perturbation of the constraints by delta
@@ -140,6 +149,14 @@ class AnalyticCenter {
   int m;
   // cost matrix
   const Matrix C_;
+
+ protected:
+  // Stored copies of constraints and RHS. These may be filtered in the
+  // constructor if dependent constraints are detected.
+  std::vector<Eigen::SparseMatrix<double>> A_storage_;
+  std::vector<double> b_storage_;
+
+ public:
   // optimal cost value
   // NOTE: this is non-const because we may want to change it after the problem
   // is defined.

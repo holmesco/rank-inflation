@@ -137,6 +137,10 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("rescale_lin_sys", &AnalyticCenterParams::rescale_lin_sys)
       .def_readwrite("reuse_multipliers",
                      &AnalyticCenterParams::reuse_multipliers)
+      .def_readwrite("check_indep_constr",
+                     &AnalyticCenterParams::check_indep_constr)
+      .def_readwrite("tol_indep_constr",
+                     &AnalyticCenterParams::tol_indep_constr)
       .def_readwrite("perturb_constraints",
                      &AnalyticCenterParams::perturb_constraints)
       .def_readwrite("perturb_cost", &AnalyticCenterParams::perturb_cost)

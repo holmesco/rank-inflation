@@ -2,6 +2,8 @@
 
 #include <valgrind/callgrind.h>
 
+#include <algorithm>
+
 namespace RankTools {
 
 AnalyticCenter::AnalyticCenter(
@@ -9,13 +11,175 @@ AnalyticCenter::AnalyticCenter(
     const std::vector<Eigen::SparseMatrix<double>>& A,
     const std::vector<double>& b, AnalyticCenterParams params)
     : C_(C),
-      A_(A),
+      A_storage_(A),
+      b_storage_(b),
       rho_(rho),
-      b_(b),
+      A_(A_storage_),
+      b_(b_storage_),
       params_(params),
       dim(C.rows()),
       m(A.size() + 1),
-      lr_solver(nullptr) {}
+      lr_solver(nullptr) {
+  if (!params_.check_indep_constr) {
+    return;
+  }
+
+  const int initial_constraints = static_cast<int>(A_storage_.size());
+  if (initial_constraints == 0) {
+    if (params_.verbose) {
+      std::cout << "Constraint independence check: initial constraints = 0, "
+                   "final constraints = 0"
+                << std::endl;
+    }
+    m = 1;
+    return;
+  }
+
+  // Build vectorized matrix [vec(A1) ... vec(Am) vec(C)].
+  SpMatrix A_bar = LowRankPrecond::build_constraint_mat(A_storage_, C_);
+
+  Eigen::SparseQR<SpMatrix, Eigen::COLAMDOrdering<int>> qr;
+  qr.setPivotThreshold(params_.tol_indep_constr);
+  qr.compute(A_bar);
+  if (qr.info() != Eigen::Success) {
+    throw std::runtime_error(
+        "AnalyticCenter: sparse QR decomposition failed during constraint "
+        "independence check.");
+  }
+
+  const int ncols = A_bar.cols();
+  const int cost_col = ncols - 1;
+  const int rank = qr.rank();
+  const auto& pidx = qr.colsPermutation().indices();
+
+  // Rank-revealing pivot columns (original column indices).
+  std::vector<int> basis_cols;
+  basis_cols.reserve(rank);
+  for (int k = 0; k < rank; ++k) {
+    basis_cols.push_back(pidx(k));
+  }
+
+  const bool cost_in_basis = std::find(basis_cols.begin(), basis_cols.end(),
+                                       cost_col) != basis_cols.end();
+
+  std::vector<bool> keep_constraint(initial_constraints, false);
+
+  if (cost_in_basis) {
+    // Keep pivot constraints (exclude the cost column).
+    for (int col : basis_cols) {
+      if (col >= 0 && col < cost_col) {
+        keep_constraint[col] = true;
+      }
+    }
+  } else {
+    // Cost is dependent on the pivot basis. Enforce keeping cost and keep a
+    // maximal independent subset of constraints with it.
+    auto build_submatrix = [&](const std::vector<int>& cols) {
+      std::vector<Eigen::Triplet<double>> trips;
+      size_t reserve_nnz = 0;
+      for (int old_col : cols) {
+        reserve_nnz += static_cast<size_t>(A_bar.col(old_col).nonZeros());
+      }
+      trips.reserve(reserve_nnz);
+
+      for (int new_col = 0; new_col < static_cast<int>(cols.size());
+           ++new_col) {
+        const int old_col = cols[new_col];
+        for (SpMatrix::InnerIterator it(A_bar, old_col); it; ++it) {
+          trips.emplace_back(it.row(), new_col, it.value());
+        }
+      }
+
+      SpMatrix sub(A_bar.rows(), static_cast<int>(cols.size()));
+      sub.setFromTriplets(trips.begin(), trips.end());
+      sub.makeCompressed();
+      return sub;
+    };
+
+    auto rank_of_cols = [&](const std::vector<int>& cols) {
+      SpMatrix sub = build_submatrix(cols);
+      Eigen::SparseQR<SpMatrix, Eigen::COLAMDOrdering<int>> qr_sub;
+      qr_sub.setPivotThreshold(params_.tol_indep_constr);
+      qr_sub.compute(sub);
+      if (qr_sub.info() != Eigen::Success) {
+        return -1;
+      }
+      return static_cast<int>(qr_sub.rank());
+    };
+
+    std::vector<int> basis_constraints;
+    basis_constraints.reserve(basis_cols.size());
+    for (int col : basis_cols) {
+      if (col >= 0 && col < cost_col) {
+        basis_constraints.push_back(col);
+      }
+    }
+
+    // Try replacing one pivot constraint with cost to preserve rank.
+    bool found = false;
+    if (!basis_constraints.empty()) {
+      for (int drop_idx = 0;
+           drop_idx < static_cast<int>(basis_constraints.size()); ++drop_idx) {
+        std::vector<int> test_cols;
+        test_cols.reserve(rank);
+        for (int i = 0; i < static_cast<int>(basis_constraints.size()); ++i) {
+          if (i != drop_idx) {
+            test_cols.push_back(basis_constraints[i]);
+          }
+        }
+        test_cols.push_back(cost_col);
+        if (rank_of_cols(test_cols) == rank) {
+          for (int c : basis_constraints) {
+            keep_constraint[c] = true;
+          }
+          keep_constraint[basis_constraints[drop_idx]] = false;
+          found = true;
+          break;
+        }
+      }
+    }
+
+    if (!found) {
+      // Fallback: greedy incremental rank test while always including cost.
+      std::vector<int> chosen;
+      chosen.push_back(cost_col);
+      int current_rank = rank_of_cols(chosen);
+
+      for (int ci = 0; ci < initial_constraints; ++ci) {
+        std::vector<int> trial = chosen;
+        trial.push_back(ci);
+        int trial_rank = rank_of_cols(trial);
+        if (trial_rank > current_rank) {
+          chosen.push_back(ci);
+          current_rank = trial_rank;
+          keep_constraint[ci] = true;
+        }
+      }
+    }
+  }
+
+  std::vector<Eigen::SparseMatrix<double>> A_filtered;
+  std::vector<double> b_filtered;
+  A_filtered.reserve(A_storage_.size());
+  b_filtered.reserve(b_storage_.size());
+
+  for (int i = 0; i < initial_constraints; ++i) {
+    if (keep_constraint[i]) {
+      A_filtered.push_back(A_storage_[i]);
+      b_filtered.push_back(b_storage_[i]);
+    }
+  }
+
+  A_storage_.swap(A_filtered);
+  b_storage_.swap(b_filtered);
+  m = static_cast<int>(A_storage_.size()) + 1;
+
+  if (params_.verbose) {
+    std::cout << "Constraint independence check: initial constraints = "
+              << initial_constraints
+              << ", final constraints = " << A_storage_.size() << std::endl;
+  }
+}
 
 Vector AnalyticCenter::eval_constraints(const Matrix& X) const {
   // Loop through constraints, evaluating gradient and constraint value
