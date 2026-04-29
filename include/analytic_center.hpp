@@ -45,10 +45,11 @@ struct AnalyticCenterParams {
   double tol_step_norm = 1e-8;
   // max number of iterations for centering
   int max_iter = 50;
-  // Rescale KKT System by delta. Rescaling is akin to scaling the log det
-  // objective by delta and improves conditioning. NOTE: This should only be
-  // required if using the diagonal preconditioner.
+  // Rescale KKT System by fixed factor. Rescaling is akin to scaling the log
+  // det objective by delta and can improve conditioning. NOTE: This should only
+  // be required if using the diagonal preconditioner with the CG method.
   bool rescale_lin_sys = false;
+  double rescaling_factor = 1e-5;
   // Select linear solver for centering step
   LinearSolverType lin_solver = LinearSolverType::LDLT;
   // For iterative solvers, choose whether to reuse multipliers
@@ -62,6 +63,8 @@ struct AnalyticCenterParams {
   // flag to enable checking linear independence of constraints (used in problem
   // validation)
   bool check_indep_constr = false;
+  // initial perturbation value for centering/certification
+  double delta = 1e-5;
 
   // Adaptive Perturbation Parameters
   // -------------------------
@@ -69,28 +72,22 @@ struct AnalyticCenterParams {
   bool perturb_constraints = false;
   // Flag to turn on perturbation of the cost by delta
   bool perturb_cost = true;
-  // perturbation of cost that is active when perturb_cost is false
-  double cost_offset = 1e-6;
+  // Initial perturbation of cost constraint
+  double eps_cost = 1e-5;
+  // Initial perturbation of other constraints
+  double eps_constr = 1e-5;
   // enable adaptive perturbation for centering
   bool adaptive_perturb = true;
-  // final delta for centering (should be small to get close to boundary, but
-  // not too small to cause numerical issues)
-  double delta_min = 1e-7;
-  // initial perturbation value for centering/certification
-  double delta_init = 1e-5;
-  // Max step size for increasing perturbation. If the step size is above this
-  // threshold, then we consider that the step size is too large and we increase
-  // the perturbation parameter to encourage more central steps.
-  double delta_inc_step_max = 0.1;
-  // update factor for adjusting delta in adaptive centering
-  double delta_inc = 2.0;
-  // Min step size for decreasing perturbation. If the step size is below this
-  // threshold, then we consider that the step size is sufficiently small and we
-  // decrease the perturbation parameter to allow for more aggressive steps
-  // towards the boundary.
-  double delta_dec_step_min = 0.9;
-  // update factor for adjusting delta in adaptive centering
-  double delta_dec = 0.6;
+  // final value for multiplier applied to perturbation of cost and constraints
+  double eps_mult_min = 1e-2;
+  // Threshold for increasing perturbation. If the step size alpha from the line search is below this threshold, then the perturbation is increased for the next iteration.
+  double eps_inc_step_thresh = 0.1;
+  // Factor for increasing perturbation. If the step size alpha from the line search is below eps_inc_step_thresh, then the perturbation is multiplied by this factor for the next iteration.
+  double eps_inc = 2.0;
+  // Threshold for decreasing perturbation. If the step size alpha from the line search is above this threshold, then the perturbation is decreased for the next iteration.
+  double eps_dec_step_thresh = 0.9;
+  // Factor for decreasing perturbation. If the step size alpha from the line search is above eps_dec_step_thresh, then the perturbation is multiplied by this factor for the next iteration.
+  double eps_dec = 0.6;
 
   // Iterative Linear Solve Parameters
   // -----------------
@@ -184,7 +181,7 @@ class AnalyticCenter {
 
   // Centering method to compute the analytic center of the current
   // feasible region starting from X_0.
-  // The initial perturbation is taken from params_.delta_init. Delta is used
+  // The initial perturbation is taken from params_.delta. Delta is used
   // to ensure we stay in the interior of the PSD cone even when the solution
   // is low rank. If delta is zero then no perturbation is applied.
   // Returns the centered solution and the scaled multipliers for certificate
@@ -222,7 +219,7 @@ class AnalyticCenter {
   // Builds and solves the system of equations for the analytic center step,
   // returning the optimal multipliers and the current violation of constraints
   std::pair<Vector, Vector> get_multipliers(const Matrix& Z, const Matrix& Y_0,
-                                            double delta) const;
+                                            double eps_mult) const;
 
   // Intermediate representation of the analytic center linear system
   // Note: it may be more efficient to use references here.
@@ -247,7 +244,7 @@ class AnalyticCenter {
   };
 
   // Constructs the linear system (H, d, violation) for the analytic center step
-  LinSysData build_ac_system(const Matrix& X, double delta) const;
+  LinSysData build_ac_system(const Matrix& X, double eps_mult) const;
 
   // Solves the linear system H * multipliers = d using the configured solver
   Vector solve_ac_system(const LinSysData& system, const Matrix& Y_0) const;

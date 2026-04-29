@@ -96,7 +96,7 @@ TEST_P(LovazsParamTest, PrimalSolution) {
   params.max_iter = 50;
   params.rescale_lin_sys = true;
   double delta = 1e-5;
-  params.delta_init = delta;
+  params.delta = delta;
   params.perturb_cost = true;
   params.perturb_constraints = true;
   params.adaptive_perturb = true;
@@ -156,7 +156,7 @@ TEST_P(LovazsParamTest, CertEarlyStopping) {
   params.max_iter = 50;
   params.rescale_lin_sys = true;
   double delta = 1e-5;
-  params.delta_init = delta;
+  params.delta = delta;
   params.perturb_cost = true;
   params.perturb_constraints = true;
   params.adaptive_perturb = true;
@@ -198,16 +198,17 @@ TEST_P(LovazsParamTest, CertifyLDLT) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.early_stop_cert = false;  
+  params.early_stop_cert = true;
   params.rescale_lin_sys = true;
   params.max_iter = 50;
   params.perturb_cost = true;
   params.perturb_constraints = true;
   params.adaptive_perturb = true;
   params.lin_solver = LinearSolverType::LDLT;
-  auto delta = 1e-5;
-  params.delta_init = delta;
-  params.delta_min = 1e-8;
+  params.delta = 1e-5;
+  params.eps_cost = 1e-5;
+  params.eps_constr = 1e-5;
+  params.eps_mult_min = 1e-4;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
@@ -231,15 +232,16 @@ TEST_P(LovazsParamTest, CertifyConjGrad) {
   params.verbose = true;
   params.early_stop_cert = false;  // Turn off early stopping based on
                                    // certificate for testing purposes
-  params.adaptive_perturb =
-      true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-8;
+  params.adaptive_perturb = true;
+  params.perturb_cost = true;
+  params.perturb_constraints = true;
+  params.eps_mult_min = 1e-3;
   params.max_iter = 50;
   // use rescaling to be consistent with the system in Sremac 2021
   params.rescale_lin_sys = true;
+  params.rescaling_factor = 1e-5;
   params.lin_solver = LinearSolverType::CG;  // Use Conjugate Gradient solver
-  auto delta = 1e-5;
-  params.delta_init = delta;
+  params.delta = 1e-5;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
@@ -285,8 +287,7 @@ TEST(MatrixFree, Product) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.rescale_lin_sys =
-      true;  // Use rescaling for consistency with Sremac 2021
+  params.rescale_lin_sys =true;  
   auto delta = 1e-7;
   // generate problem
   auto problem = sdp.make_testable(params);
@@ -296,9 +297,11 @@ TEST(MatrixFree, Product) {
   auto [alpha, L] = problem.line_search_factorization(
       X, Matrix::Identity(problem.dim, problem.dim) * delta);
   // Build the explicit system to get the true diagonal of B
-  auto system = problem.build_ac_system(X, delta);
+  double eps_mult = 2.0;
+  auto system = problem.build_ac_system(X, eps_mult);
   // Build the matrix-free operator
-  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, 1 / delta);
+  double scale = 1/ (params.eps_cost * eps_mult);
+  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, scale);
   // Test on columns of identity
   auto Id = Matrix::Identity(sdp.dim, sdp.dim);
   for (int i = 0; i < sdp.dim; i++) {
@@ -319,6 +322,8 @@ TEST(MatrixFree, Product) {
   }
 }
 
+// PRECONDITIONER TESTS
+
 TEST(MatrixFree, DiagonalPreconditioner) {
   // Load a test problem
   auto sdp = make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8}, "Clique1");
@@ -335,9 +340,11 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   auto [alpha, L] = problem.line_search_factorization(
       X, Matrix::Identity(problem.dim, problem.dim) * delta);
   // Build the explicit system to get the true diagonal of B
-  auto system = problem.build_ac_system(X, delta);
-  // Build the matrix-free operator and preconditioner
-  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, 1 / delta);
+  double eps_mult = 2.0;
+  auto system = problem.build_ac_system(X, eps_mult);
+  // Build the matrix-free operator
+  double scale = 1/ (params.eps_cost * eps_mult);
+  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, scale);
   MultiplierDiagPreconditioner precond;
   precond.compute(lin_op);
   // Check that the preconditioner computed successfully
@@ -567,7 +574,7 @@ TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
       false;  // Turn off early stopping based on solution deviation
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-8;
+  params.eps_mult_min = 1e-3;
   params.max_iter = 50;
   // use rescaling to be consistent with the system in Sremac 2021
   params.rescale_lin_sys = true;
@@ -575,7 +582,7 @@ TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
       LinearSolverType::MFCG_DP;  // Use Conjugate Gradient solver with diagonal
                                   // preconditioner
   auto delta = 1e-5;
-  params.delta_init = delta;
+  params.delta = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
@@ -610,14 +617,14 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   params.early_stop_cert = true;
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-7;
+  params.eps_mult_min = 1e-2;
   params.max_iter = 50;
   params.lin_solver = LinearSolverType::MFCG_LRP;
   params.lrp_params.tau = 1e-5;
   params.lrp_params.method = LowRankPrecondMethod::SparseLDLT;
   // Initialize delta
   auto delta = 1e-5;
-  params.delta_init = delta;
+  params.delta = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // Update cost based on the mosek solution
@@ -653,15 +660,14 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_wLocal) {
   params.max_iter = 20;
   params.max_angle = 1e-2;
   params.adaptive_perturb = true;
-  params.delta_min = 1e-7;
-  // Turn off rescaling (preconditioner should deal with this)
+  params.eps_mult_min = 1e-2;
   params.rescale_lin_sys = false;
   params.lin_solver =
       LinearSolverType::MFCG_LRP;  // Use Conjugate Gradient solver
   params.lrp_params.tau = 1e-5;
   // set initial delta
   auto delta = 1e-5;
-  params.delta_init = delta;
+  params.delta = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
