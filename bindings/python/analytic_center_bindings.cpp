@@ -135,23 +135,28 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("tol_step_norm", &AnalyticCenterParams::tol_step_norm)
       .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
       .def_readwrite("rescale_lin_sys", &AnalyticCenterParams::rescale_lin_sys)
+      .def_readwrite("rescaling_factor", &AnalyticCenterParams::rescaling_factor)
       .def_readwrite("reuse_multipliers",
                      &AnalyticCenterParams::reuse_multipliers)
       .def_readwrite("check_indep_constr",
                      &AnalyticCenterParams::check_indep_constr)
       .def_readwrite("tol_indep_constr",
                      &AnalyticCenterParams::tol_indep_constr)
+      .def_readwrite("delta", &AnalyticCenterParams::delta)
       .def_readwrite("perturb_constraints",
                      &AnalyticCenterParams::perturb_constraints)
       .def_readwrite("perturb_cost", &AnalyticCenterParams::perturb_cost)
-      .def_readwrite("cost_offset", &AnalyticCenterParams::cost_offset)
-      // Backward-compatible alias for older scripts.
-      .def_property(
-          "cost_perturb",
-          [](const AnalyticCenterParams& p) { return p.cost_offset; },
-          [](AnalyticCenterParams& p, double cost_perturb) {
-            p.cost_offset = cost_perturb;
-          })
+      .def_readwrite("eps_cost", &AnalyticCenterParams::eps_cost)
+      .def_readwrite("eps_constr", &AnalyticCenterParams::eps_constr)
+      .def_readwrite("adaptive_perturb",
+                     &AnalyticCenterParams::adaptive_perturb)
+      .def_readwrite("eps_mult_min", &AnalyticCenterParams::eps_mult_min)
+      .def_readwrite("eps_inc_step_thresh",
+                     &AnalyticCenterParams::eps_inc_step_thresh)
+      .def_readwrite("eps_inc", &AnalyticCenterParams::eps_inc)
+      .def_readwrite("eps_dec_step_thresh",
+                     &AnalyticCenterParams::eps_dec_step_thresh)
+      .def_readwrite("eps_dec", &AnalyticCenterParams::eps_dec)
       .def_readwrite("lin_solver", &AnalyticCenterParams::lin_solver)
       // Iterative linear solve
       .def_readwrite("lin_solve_max_iter",
@@ -160,28 +165,19 @@ PYBIND11_MODULE(ranktools, m) {
       .def_property(
           "lrp_params",
           [](AnalyticCenterParams& p) -> LowRankPrecondParams& {
-            return p.lrp_params;
+    return p.lrp_params;
           },
           [](AnalyticCenterParams& p, const LowRankPrecondParams& lrp) {
-            p.lrp_params = lrp;
+    p.lrp_params = lrp;
           },
           py::return_value_policy::reference_internal)
       // Backward-compatible alias for older scripts.
       .def_property(
           "tau_lrp",
-          [](const AnalyticCenterParams& p) { return p.lrp_params.tau; },
-          [](AnalyticCenterParams& p, double tau) { p.lrp_params.tau = tau; })
-      // Adaptive perturbation
-      .def_readwrite("adaptive_perturb",
-                     &AnalyticCenterParams::adaptive_perturb)
-      .def_readwrite("delta_init", &AnalyticCenterParams::delta_init)
-      .def_readwrite("delta_min", &AnalyticCenterParams::delta_min)
-      .def_readwrite("delta_inc_step_max",
-                     &AnalyticCenterParams::delta_inc_step_max)
-      .def_readwrite("delta_inc", &AnalyticCenterParams::delta_inc)
-      .def_readwrite("delta_dec_step_min",
-                     &AnalyticCenterParams::delta_dec_step_min)
-      .def_readwrite("delta_dec", &AnalyticCenterParams::delta_dec)
+          [](const AnalyticCenterParams& p) {
+    return p.lrp_params.tau; },
+          [](AnalyticCenterParams& p, double tau) {
+    p.lrp_params.tau = tau; })
       // Line search
       .def_readwrite("enable_line_search",
                      &AnalyticCenterParams::enable_line_search)
@@ -204,8 +200,8 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("tol_cert_centrality",
                      &AnalyticCenterParams::tol_cert_centrality)
       .def("__repr__", [](const AnalyticCenterParams& p) {
-        return "<AnalyticCenterParams max_iter=" + std::to_string(p.max_iter) +
-               " verbose=" + (p.verbose ? "True" : "False") + ">";
+    return "<AnalyticCenterParams max_iter=" + std::to_string(p.max_iter) +
+           " verbose=" + (p.verbose ? "True" : "False") + ">";
       });
 
   // ---- AnalyticCenterResult ----
@@ -219,9 +215,9 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readonly("complementarity", &AnalyticCenterResult::complementarity)
       .def_readonly("solver_time", &AnalyticCenterResult::solver_time)
       .def("__repr__", [](const AnalyticCenterResult& r) {
-        return "<AnalyticCenterResult certified=" +
-               std::string(r.certified ? "True" : "False") +
-               " min_eig=" + std::to_string(r.min_eig) + ">";
+    return "<AnalyticCenterResult certified=" +
+           std::string(r.certified ? "True" : "False") +
+           " min_eig=" + std::to_string(r.min_eig) + ">";
       });
 
   // ---- AnalyticCenter (via PyAnalyticCenter wrapper) ----
@@ -252,7 +248,7 @@ params : AnalyticCenterParams, optional
       .def_property(
           "params", py::overload_cast<>(&PyAnalyticCenter::params),
           [](PyAnalyticCenter& self, const AnalyticCenterParams& p) {
-            self.params() = p;
+    self.params() = p;
           },
           py::return_value_policy::reference_internal)
       .def("eval_constraints", &PyAnalyticCenter::eval_constraints,
@@ -261,7 +257,7 @@ params : AnalyticCenterParams, optional
            R"pbdoc(
 Run analytic centering to certify the local solution Y_0.
 
-Uses the initial perturbation value from params.delta_init.
+Uses the initial perturbation value from params.delta.
 
 Parameters
 ----------
@@ -277,7 +273,7 @@ AnalyticCenterResult
            R"pbdoc(
 Compute the analytic center starting from Y_0.
 
-Uses the initial perturbation value from params.delta_init.
+Uses the initial perturbation value from params.delta.
 
 Parameters
 ----------
@@ -336,7 +332,7 @@ tuple(min_eig, complementarity)
       .def_readonly("S", &SDPResult::S)
       .def_readonly("obj_value", &SDPResult::obj_value)
       .def("__repr__", [](const SDPResult& r) {
-        return "<SDPResult obj_value=" + std::to_string(r.obj_value) + ">";
+    return "<SDPResult obj_value=" + std::to_string(r.obj_value) + ">";
       });
 
   // ---- solve_sdp_mosek ----
@@ -344,8 +340,9 @@ tuple(min_eig, complementarity)
       "solve_sdp_mosek",
       [](const Eigen::MatrixXd& C, std::vector<Eigen::SparseMatrix<double>> As,
          std::vector<double> b,
-         bool verbose) { return solve_sdp_mosek(C, As, b, verbose); },
-      py::arg("C"), py::arg("A"), py::arg("b"), py::arg("verbose") = true,
+         bool verbose) {
+    return solve_sdp_mosek(C, As, b, verbose); },
+      py::arg("C"), py::arg("As"), py::arg("b"), py::arg("verbose") = true,
       R"pbdoc(
 Solve a semidefinite program using MOSEK.
 
@@ -358,7 +355,7 @@ Parameters
 ----------
 C : numpy.ndarray (n, n)
     Cost matrix.
-A : list of scipy.sparse matrices
+As : list of scipy.sparse matrices
     Constraint matrices (each n x n).
 b : list of float
     Right-hand side values.
@@ -384,18 +381,18 @@ SDPResult
       .def_readwrite("max_iter", &RankReductionParams::max_iter)
       .def_readwrite("verbose", &RankReductionParams::verbose)
       .def("__repr__", [](const RankReductionParams& p) {
-        return "<RankReductionParams targ_rank=" + std::to_string(p.targ_rank) +
-               " verbose=" + (p.verbose ? "True" : "False") + ">";
+    return "<RankReductionParams targ_rank=" + std::to_string(p.targ_rank) +
+           " verbose=" + (p.verbose ? "True" : "False") + ">";
       });
 
   // ---- rank_reduction ----
   m.def(
       "rank_reduction",
-      [](std::vector<Eigen::SparseMatrix<double>> A, const Matrix& V_init,
+      [](std::vector<Eigen::SparseMatrix<double>> As, const Matrix& V_init,
          RankReductionParams params) {
-        return rank_reduction(A, V_init, std::move(params));
+    return rank_reduction(As, V_init, std::move(params));
       },
-      py::arg("A"), py::arg("V_init"),
+      py::arg("As"), py::arg("V_init"),
       py::arg("params") = RankReductionParams(),
       R"pbdoc(
 Reduce the rank of an SDP solution.
@@ -406,7 +403,7 @@ Implements the rank reduction algorithm from:
 
 Parameters
 ----------
-A : list of scipy.sparse matrices
+As : list of scipy.sparse matrices
     Constraint matrices (each n×n, upper-triangular storage).
 V_init : numpy.ndarray (n, r)
     Initial low-rank factor; the SDP solution is X = V_init @ V_init.T.
