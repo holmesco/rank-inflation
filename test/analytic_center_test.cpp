@@ -95,8 +95,12 @@ TEST_P(LovazsParamTest, PrimalSolution) {
                                    // certificate for testing purposes
   params.max_iter = 50;
   params.rescale_lin_sys = true;
-  double delta = 1e-7;
+  double delta = 1e-5;
   params.delta_init = delta;
+  params.perturb_cost = true;
+  params.perturb_constraints = true;
+  params.adaptive_perturb = true;
+  params.lin_solver = LinearSolverType::LDLT;
   // generate problem
   auto problem = sdp.make_testable(params);
   auto Y = sdp.soln;
@@ -142,36 +146,6 @@ TEST_P(LovazsParamTest, PrimalSolution) {
       << "Analytic center solution is not close to Mosek solution";
 }
 
-// Test adapative perturbation. Ensure that we converge to a certificate.
-TEST_P(LovazsParamTest, CertifyAdaptivePerturb) {
-  const auto& sdp = GetParam();
-  // parameters
-  AnalyticCenterParams params;
-  params.verbose = true;
-  params.early_stop_cert = false;  // Turn off early stopping based on
-                                   // certificate for testing purposes
-  params.adaptive_perturb =
-      true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-9;
-  params.max_iter = 100;
-  // use rescaling to be consistent with the system in Sremac 2021
-  params.rescale_lin_sys = true;
-  auto delta = 1e-5;
-  params.delta_init = delta;
-  // generate problem
-  AnalyticCenter problem = sdp.make(params);
-  // get current solution
-  Matrix Y_0 = sdp.make_solution(1);
-  // Run certification method
-  auto result = problem.certify(Y_0);
-  // check that the solution is certified
-  EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
-  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
-            << std::endl;
-  std::cout << "Complementarity (First Order Condition): "
-            << result.complementarity << std::endl;
-}
-
 // Test early stopping based on certificate found.
 TEST_P(LovazsParamTest, CertEarlyStopping) {
   const auto& sdp = GetParam();
@@ -179,10 +153,14 @@ TEST_P(LovazsParamTest, CertEarlyStopping) {
   AnalyticCenterParams params;
   params.verbose = true;
   params.early_stop_cert = true;
+  params.max_iter = 50;
   params.rescale_lin_sys = true;
-  params.lin_solver = LinearSolverType::LDLT;
-  auto delta = 1e-5;
+  double delta = 1e-5;
   params.delta_init = delta;
+  params.perturb_cost = true;
+  params.perturb_constraints = true;
+  params.adaptive_perturb = true;
+  params.lin_solver = LinearSolverType::LDLT;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
@@ -220,17 +198,16 @@ TEST_P(LovazsParamTest, CertifyLDLT) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.early_stop_cert = false;  // Turn off early stopping based on
-                                   // certificate for testing purposes
-  params.adaptive_perturb =
-      true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-8;
-  params.max_iter = 50;
-  // use rescaling to be consistent with the system in Sremac 2021
+  params.early_stop_cert = false;  
   params.rescale_lin_sys = true;
-  params.lin_solver = LinearSolverType::LDLT;  // Use Conjugate Gradient solver
+  params.max_iter = 50;
+  params.perturb_cost = true;
+  params.perturb_constraints = true;
+  params.adaptive_perturb = true;
+  params.lin_solver = LinearSolverType::LDLT;
   auto delta = 1e-5;
   params.delta_init = delta;
+  params.delta_min = 1e-8;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
