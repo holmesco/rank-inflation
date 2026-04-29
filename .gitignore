@@ -13,6 +13,5 @@ python/examples/
 *.png
 *.csv
 *.so
-*.pyi
 callgrind*
 uv.lock
