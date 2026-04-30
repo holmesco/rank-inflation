@@ -58,6 +58,12 @@ class PyAnalyticCenter {
     return build_adjoint(multipliers);
   }
 
+  void export_problem(const std::string& file_path,
+                      const std::string& problem_name,
+                      const Matrix& solution) const {
+    ac_.export_problem(file_path, problem_name, solution);
+  }
+
   std::pair<double, double> eval_certificate(const Matrix& H,
                                              const Matrix& Y) const {
     return ac_.eval_certificate(H, Y);
@@ -135,7 +141,8 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("tol_step_norm", &AnalyticCenterParams::tol_step_norm)
       .def_readwrite("max_iter", &AnalyticCenterParams::max_iter)
       .def_readwrite("rescale_lin_sys", &AnalyticCenterParams::rescale_lin_sys)
-      .def_readwrite("rescaling_factor", &AnalyticCenterParams::rescaling_factor)
+      .def_readwrite("rescaling_factor",
+                     &AnalyticCenterParams::rescaling_factor)
       .def_readwrite("reuse_multipliers",
                      &AnalyticCenterParams::reuse_multipliers)
       .def_readwrite("check_indep_constr",
@@ -165,19 +172,17 @@ PYBIND11_MODULE(ranktools, m) {
       .def_property(
           "lrp_params",
           [](AnalyticCenterParams& p) -> LowRankPrecondParams& {
-    return p.lrp_params;
+            return p.lrp_params;
           },
           [](AnalyticCenterParams& p, const LowRankPrecondParams& lrp) {
-    p.lrp_params = lrp;
+            p.lrp_params = lrp;
           },
           py::return_value_policy::reference_internal)
       // Backward-compatible alias for older scripts.
       .def_property(
           "tau_lrp",
-          [](const AnalyticCenterParams& p) {
-    return p.lrp_params.tau; },
-          [](AnalyticCenterParams& p, double tau) {
-    p.lrp_params.tau = tau; })
+          [](const AnalyticCenterParams& p) { return p.lrp_params.tau; },
+          [](AnalyticCenterParams& p, double tau) { p.lrp_params.tau = tau; })
       // Line search
       .def_readwrite("enable_line_search",
                      &AnalyticCenterParams::enable_line_search)
@@ -200,8 +205,8 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readwrite("tol_cert_centrality",
                      &AnalyticCenterParams::tol_cert_centrality)
       .def("__repr__", [](const AnalyticCenterParams& p) {
-    return "<AnalyticCenterParams max_iter=" + std::to_string(p.max_iter) +
-           " verbose=" + (p.verbose ? "True" : "False") + ">";
+        return "<AnalyticCenterParams max_iter=" + std::to_string(p.max_iter) +
+               " verbose=" + (p.verbose ? "True" : "False") + ">";
       });
 
   // ---- AnalyticCenterResult ----
@@ -215,9 +220,9 @@ PYBIND11_MODULE(ranktools, m) {
       .def_readonly("complementarity", &AnalyticCenterResult::complementarity)
       .def_readonly("solver_time", &AnalyticCenterResult::solver_time)
       .def("__repr__", [](const AnalyticCenterResult& r) {
-    return "<AnalyticCenterResult certified=" +
-           std::string(r.certified ? "True" : "False") +
-           " min_eig=" + std::to_string(r.min_eig) + ">";
+        return "<AnalyticCenterResult certified=" +
+               std::string(r.certified ? "True" : "False") +
+               " min_eig=" + std::to_string(r.min_eig) + ">";
       });
 
   // ---- AnalyticCenter (via PyAnalyticCenter wrapper) ----
@@ -248,7 +253,7 @@ params : AnalyticCenterParams, optional
       .def_property(
           "params", py::overload_cast<>(&PyAnalyticCenter::params),
           [](PyAnalyticCenter& self, const AnalyticCenterParams& p) {
-    self.params() = p;
+            self.params() = p;
           },
           py::return_value_policy::reference_internal)
       .def("eval_constraints", &PyAnalyticCenter::eval_constraints,
@@ -292,6 +297,22 @@ tuple(X, multipliers)
            &PyAnalyticCenter::build_certificate_from_dual,
            py::arg("multipliers"),
            "Backward-compatible alias for build_adjoint(multipliers).")
+      .def("export_problem", &PyAnalyticCenter::export_problem,
+           py::arg("file_path"), py::arg("problem_name"), py::arg("solution"),
+           R"pbdoc(
+Export the current problem to a text file.
+
+The file format matches `load_problem_from_file` in the C++ test helpers.
+
+Parameters
+----------
+file_path : str
+    Destination file path.
+problem_name : str
+    Value written to the `name` field.
+solution : numpy.ndarray
+    Solution matrix written in the `soln` block.
+)pbdoc")
       .def("eval_certificate", &PyAnalyticCenter::eval_certificate,
            py::arg("H"), py::arg("Y"),
            R"pbdoc(
@@ -332,7 +353,7 @@ tuple(min_eig, complementarity)
       .def_readonly("S", &SDPResult::S)
       .def_readonly("obj_value", &SDPResult::obj_value)
       .def("__repr__", [](const SDPResult& r) {
-    return "<SDPResult obj_value=" + std::to_string(r.obj_value) + ">";
+        return "<SDPResult obj_value=" + std::to_string(r.obj_value) + ">";
       });
 
   // ---- solve_sdp_mosek ----
@@ -340,8 +361,7 @@ tuple(min_eig, complementarity)
       "solve_sdp_mosek",
       [](const Eigen::MatrixXd& C, std::vector<Eigen::SparseMatrix<double>> As,
          std::vector<double> b,
-         bool verbose) {
-    return solve_sdp_mosek(C, As, b, verbose); },
+         bool verbose) { return solve_sdp_mosek(C, As, b, verbose); },
       py::arg("C"), py::arg("As"), py::arg("b"), py::arg("verbose") = true,
       R"pbdoc(
 Solve a semidefinite program using MOSEK.
@@ -381,8 +401,8 @@ SDPResult
       .def_readwrite("max_iter", &RankReductionParams::max_iter)
       .def_readwrite("verbose", &RankReductionParams::verbose)
       .def("__repr__", [](const RankReductionParams& p) {
-    return "<RankReductionParams targ_rank=" + std::to_string(p.targ_rank) +
-           " verbose=" + (p.verbose ? "True" : "False") + ">";
+        return "<RankReductionParams targ_rank=" + std::to_string(p.targ_rank) +
+               " verbose=" + (p.verbose ? "True" : "False") + ">";
       });
 
   // ---- rank_reduction ----
@@ -390,7 +410,7 @@ SDPResult
       "rank_reduction",
       [](std::vector<Eigen::SparseMatrix<double>> As, const Matrix& V_init,
          RankReductionParams params) {
-    return rank_reduction(As, V_init, std::move(params));
+        return rank_reduction(As, V_init, std::move(params));
       },
       py::arg("As"), py::arg("V_init"),
       py::arg("params") = RankReductionParams(),

@@ -32,6 +32,7 @@ message(STATUS "Eigen Version: ${EIGEN3_VERSION_STRING} ${EIGEN3_VERSION}")
 find_package(OpenMP REQUIRED)
 find_package(Boost REQUIRED)
 find_package(Boost REQUIRED COMPONENTS filesystem system)
+find_package(yaml-cpp REQUIRED)
 message(STATUS "Boost Version: ${Boost_VERSION}")
 
 # ----- MOSEK ------ 
@@ -62,6 +63,7 @@ endif()
 
 # source files
 file(GLOB RANK_TOOLS_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+list(FILTER RANK_TOOLS_SOURCE_FILES EXCLUDE REGEX "analytic_center_cli\\.cpp$")
 add_library(rank_tools SHARED)
 target_sources(rank_tools PRIVATE ${RANK_TOOLS_SOURCE_FILES})
 
@@ -79,6 +81,10 @@ if(ENABLE_PARALLEL)
   target_link_libraries(rank_tools PUBLIC OpenMP::OpenMP_CXX)
 endif()
 target_link_libraries(rank_tools PUBLIC ${FUSION_LIB} ${MOSEK_LIB})
+
+add_executable(analytic_center_certify src/analytic_center_cli.cpp)
+target_link_libraries(analytic_center_certify PRIVATE rank_tools)
+target_link_libraries(analytic_center_certify PRIVATE yaml-cpp)
 
 # debug flag  
 if(ENABLE_DEBUG)

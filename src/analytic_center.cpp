@@ -3,6 +3,7 @@
 #include <valgrind/callgrind.h>
 
 #include <algorithm>
+#include <fstream>
 
 #ifdef RANKTOOLS_PARALLEL
 #include <omp.h>
@@ -704,6 +705,61 @@ std::pair<double, Matrix> AnalyticCenter::line_search_factorization(
   L_chol.noalias() = solver.transpositionsP().transpose() * L_chol;
 
   return {alpha, L_chol};
+}
+
+void AnalyticCenter::export_problem(const std::filesystem::path& file_path,
+                                    const std::string& problem_name,
+                                    const Matrix& solution) const {
+  std::ofstream out(file_path);
+  if (!out) {
+    throw std::runtime_error("Failed to open problem file for writing: " +
+                             file_path.string());
+  }
+
+  // name
+  out << "name\n" << problem_name << "\n";
+
+  // dim
+  out << "dim\n" << dim << "\n";
+
+  // C
+  out << "C\n" << (dim * dim) << "\n";
+  for (int i = 0; i < dim; ++i) {
+    for (int j = 0; j < dim; ++j) {
+      out << C_(i, j) << "\n";
+    }
+  }
+
+  // constraints
+  const int n_constraints = static_cast<int>(A_storage_.size());
+  out << "constraints\n" << n_constraints << "\n";
+  for (int k = 0; k < n_constraints; ++k) {
+    const auto& A = A_storage_[k];
+    const int rows = static_cast<int>(A.rows());
+    const int cols = static_cast<int>(A.cols());
+    const int nnz = static_cast<int>(A.nonZeros());
+    out << "A\n" << rows << " " << cols << " " << nnz << "\n";
+
+    // iterate over non-zeros (works for column-major Eigen::SparseMatrix)
+    for (int outer = 0; outer < A.outerSize(); ++outer) {
+      for (Eigen::SparseMatrix<double>::InnerIterator it(A, outer); it; ++it) {
+        out << it.row() << " " << it.col() << " " << it.value() << "\n";
+      }
+    }
+
+    out << "b\n" << b_storage_[k] << "\n";
+  }
+
+  // solution (soln)
+  int soln_rows = static_cast<int>(solution.rows());
+  int soln_cols = static_cast<int>(solution.cols());
+  int soln_count = soln_rows * soln_cols;
+  out << "soln\n" << soln_rows << " " << soln_cols << " " << soln_count << "\n";
+  for (int i = 0; i < soln_rows; ++i) {
+    for (int j = 0; j < soln_cols; ++j) {
+      out << solution(i, j) << "\n";
+    }
+  }
 }
 
 }  // namespace RankTools

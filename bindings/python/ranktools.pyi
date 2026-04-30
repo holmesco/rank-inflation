@@ -82,6 +82,21 @@ class AnalyticCenter:
         """
         Evaluate constraint violations at X.
         """
+    def export_problem(self, file_path: str, problem_name: str, solution: numpy.ndarray) -> None:
+        """
+        Export the current problem to a text file.
+        
+        The file format matches `load_problem_from_file` in the C++ test helpers.
+        
+        Parameters
+        ----------
+        file_path : str
+            Destination file path.
+        problem_name : str
+            Value written to the `name` field.
+        solution : numpy.ndarray
+            Solution matrix written in the `soln` block.
+        """
     def get_analytic_center(self, Y_0: numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray]:
         """
         Compute the analytic center starting from Y_0.

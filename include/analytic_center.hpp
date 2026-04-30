@@ -1,6 +1,7 @@
 #pragma once
 #include <Eigen/IterativeLinearSolvers>
 #include <chrono>
+#include <filesystem>
 
 #include "lin_alg_tools.hpp"
 #include "utils.hpp"
@@ -80,13 +81,21 @@ struct AnalyticCenterParams {
   bool adaptive_perturb = true;
   // final value for multiplier applied to perturbation of cost and constraints
   double eps_mult_min = 1e-2;
-  // Threshold for increasing perturbation. If the step size alpha from the line search is below this threshold, then the perturbation is increased for the next iteration.
+  // Threshold for increasing perturbation. If the step size alpha from the line
+  // search is below this threshold, then the perturbation is increased for the
+  // next iteration.
   double eps_inc_step_thresh = 0.1;
-  // Factor for increasing perturbation. If the step size alpha from the line search is below eps_inc_step_thresh, then the perturbation is multiplied by this factor for the next iteration.
+  // Factor for increasing perturbation. If the step size alpha from the line
+  // search is below eps_inc_step_thresh, then the perturbation is multiplied by
+  // this factor for the next iteration.
   double eps_inc = 2.0;
-  // Threshold for decreasing perturbation. If the step size alpha from the line search is above this threshold, then the perturbation is decreased for the next iteration.
+  // Threshold for decreasing perturbation. If the step size alpha from the line
+  // search is above this threshold, then the perturbation is decreased for the
+  // next iteration.
   double eps_dec_step_thresh = 0.9;
-  // Factor for decreasing perturbation. If the step size alpha from the line search is above eps_dec_step_thresh, then the perturbation is multiplied by this factor for the next iteration.
+  // Factor for decreasing perturbation. If the step size alpha from the line
+  // search is above eps_dec_step_thresh, then the perturbation is multiplied by
+  // this factor for the next iteration.
   double eps_dec = 0.6;
 
   // Iterative Linear Solve Parameters
@@ -204,6 +213,14 @@ class AnalyticCenter {
   // of the provided solution.
   std::pair<double, double> check_certificate(const Matrix& H,
                                               const Matrix& Y) const;
+
+  // Export the current problem to a text file following the format expected
+  // by `load_problem_from_file` in test/include/generic_sdp_problems.hpp.
+  // `problem_name` is written as the "name" field. `solution` is an
+  // optional matrix describing a known solution (can be empty with 0 rows).
+  void export_problem(const std::filesystem::path& file_path,
+                      const std::string& problem_name,
+                      const Matrix& solution) const;
 
  protected:
   // Previous multipliers for iterative linear system solvers
