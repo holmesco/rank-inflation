@@ -186,16 +186,22 @@ class AnalyticCenter {
   // Returns the final result, including the centered primal solution, the
   // certificate matrix, the optimal multipliers, and the certificate
   // information (minimum eigenvalue and complementarity).
-  AnalyticCenterResult certify(const Matrix& Y_0) const;
+  // If perturb is provided, it will be used as the initial perturbation matrix;
+  // otherwise, params_.delta * Identity is used as the fallback.
+  AnalyticCenterResult certify(const Matrix& Y_0,
+                               const Matrix* perturb = nullptr) const;
 
   // Centering method to compute the analytic center of the current
   // feasible region starting from X_0.
   // The initial perturbation is taken from params_.delta. Delta is used
   // to ensure we stay in the interior of the PSD cone even when the solution
   // is low rank. If delta is zero then no perturbation is applied.
+  // If perturb is provided, it will be used as the initial perturbation matrix;
+  // otherwise, params_.delta * Identity is used as the fallback.
   // Returns the centered solution and the scaled multipliers for certificate
   // checking.
-  std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0) const;
+  std::pair<Matrix, Vector> get_analytic_center(
+      const Matrix& Y_0, const Matrix* perturb = nullptr) const;
 
   // Build weighted sum of constraint matrices: sum_i A_i * lambda_i
   // Note: to build certificate for SDP, the multipliers should be rescaled by

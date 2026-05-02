@@ -17,9 +17,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(BUILD_TESTS "Build testsuite" ON)
 option(BUILD_PYTHON_BINDINGS "Build pybind11 Python bindings" OFF)
-option(ENABLE_DEBUG "Print additional debugging information" OFF)
 option(ENABLE_TIMING "Print out timing data" OFF)
 option(ENABLE_PARALLEL "Enable OpenMP parallelization of hot loops" ON)
+option(PROFILING "Enable profiling flags" OFF)
 
 ###############################################################################
 # Dependencies
@@ -86,10 +86,12 @@ add_executable(analytic_center_certify src/analytic_center_cli.cpp)
 target_link_libraries(analytic_center_certify PRIVATE rank_tools)
 target_link_libraries(analytic_center_certify PRIVATE yaml-cpp)
 
-# debug flag  
-if(ENABLE_DEBUG)
-        message(STATUS "Enabling debug flag")
-        target_compile_definitions(rank_tools PRIVATE DEBUG)
+if(PROFILING)
+  message(STATUS "Enabling profiling flags")
+  target_compile_options(rank_tools PRIVATE -pg -g -O0 -fno-omit-frame-pointer)
+  target_link_options(rank_tools PRIVATE -pg)
+  target_compile_options(analytic_center_certify PRIVATE -pg -g -O0 -fno-omit-frame-pointer)
+  target_link_options(analytic_center_certify PRIVATE -pg)
 endif()
 
 if(ENABLE_TIMING)

@@ -33,16 +33,19 @@ class AnalyticCenter:
         """
         Backward-compatible alias for build_adjoint(multipliers).
         """
-    def certify(self, Y_0: numpy.ndarray) -> AnalyticCenterResult:
+    def certify(self, Y_0: numpy.ndarray, perturb: numpy.ndarray = None) -> AnalyticCenterResult:
         """
         Run analytic centering to certify the local solution Y_0.
         
-        Uses the initial perturbation value from params.delta.
+        If perturb is provided, it is used as the initial perturbation matrix.
+        Otherwise, params.delta * Identity is used as the fallback.
         
         Parameters
         ----------
         Y_0 : numpy.ndarray (n, r)
             Initial low-rank factor.
+        perturb : numpy.ndarray (n, n), optional
+            Initial perturbation matrix. If not provided, uses params.delta * Identity.
         
         Returns
         -------
@@ -97,16 +100,19 @@ class AnalyticCenter:
         solution : numpy.ndarray
             Solution matrix written in the `soln` block.
         """
-    def get_analytic_center(self, Y_0: numpy.ndarray) -> tuple[numpy.ndarray, numpy.ndarray]:
+    def get_analytic_center(self, Y_0: numpy.ndarray, perturb: numpy.ndarray = None) -> tuple[numpy.ndarray, numpy.ndarray]:
         """
         Compute the analytic center starting from Y_0.
         
-        Uses the initial perturbation value from params.delta.
+        If perturb is provided, it is used as the initial perturbation matrix.
+        Otherwise, params.delta * Identity is used as the fallback.
         
         Parameters
         ----------
         Y_0 : numpy.ndarray (n, r)
             Initial point (low-rank factor; X_0 = Y_0 @ Y_0.T).
+        perturb : numpy.ndarray (n, n), optional
+            Initial perturbation matrix. If not provided, uses params.delta * Identity.
         
         Returns
         -------

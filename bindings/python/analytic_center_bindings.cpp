@@ -42,12 +42,14 @@ class PyAnalyticCenter {
     return ac_.eval_constraints(X);
   }
 
-  AnalyticCenterResult certify(const Matrix& Y_0) const {
-    return ac_.certify(Y_0);
+  AnalyticCenterResult certify(const Matrix& Y_0,
+                               const Matrix* perturb = nullptr) const {
+    return ac_.certify(Y_0, perturb);
   }
 
-  std::pair<Matrix, Vector> get_analytic_center(const Matrix& Y_0) const {
-    return ac_.get_analytic_center(Y_0);
+  std::pair<Matrix, Vector> get_analytic_center(
+      const Matrix& Y_0, const Matrix* perturb = nullptr) const {
+    return ac_.get_analytic_center(Y_0, perturb);
   }
 
   Matrix build_adjoint(const Vector& coeffs) const {
@@ -259,31 +261,38 @@ params : AnalyticCenterParams, optional
       .def("eval_constraints", &PyAnalyticCenter::eval_constraints,
            py::arg("X"), "Evaluate constraint violations at X.")
       .def("certify", &PyAnalyticCenter::certify, py::arg("Y_0"),
+           py::arg("perturb") = nullptr,
            R"pbdoc(
 Run analytic centering to certify the local solution Y_0.
 
-Uses the initial perturbation value from params.delta.
+If perturb is provided, it is used as the initial perturbation matrix.
+Otherwise, params.delta * Identity is used as the fallback.
 
 Parameters
 ----------
 Y_0 : numpy.ndarray (n, r)
     Initial low-rank factor.
+perturb : numpy.ndarray (n, n), optional
+    Initial perturbation matrix. If not provided, uses params.delta * Identity.
 
 Returns
 -------
 AnalyticCenterResult
 )pbdoc")
       .def("get_analytic_center", &PyAnalyticCenter::get_analytic_center,
-           py::arg("Y_0"),
+           py::arg("Y_0"), py::arg("perturb") = nullptr,
            R"pbdoc(
 Compute the analytic center starting from Y_0.
 
-Uses the initial perturbation value from params.delta.
+If perturb is provided, it is used as the initial perturbation matrix.
+Otherwise, params.delta * Identity is used as the fallback.
 
 Parameters
 ----------
 Y_0 : numpy.ndarray (n, r)
     Initial point (low-rank factor; X_0 = Y_0 @ Y_0.T).
+perturb : numpy.ndarray (n, n), optional
+    Initial perturbation matrix. If not provided, uses params.delta * Identity.
 
 Returns
 -------

@@ -240,7 +240,8 @@ std::pair<double, double> AnalyticCenter::check_certificate(
   return {psd, complementarity};
 }
 
-AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0) const {
+AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0,
+                                             const Matrix* perturb) const {
   if (params_.verbose) {
     int omp_threads = 1;
 #ifdef RANKTOOLS_PARALLEL
@@ -253,7 +254,7 @@ AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0) const {
   // Run analtyic center solve
   CALLGRIND_START_INSTRUMENTATION;
   auto start = std::chrono::high_resolution_clock::now();
-  auto [X, mult_scaled] = get_analytic_center(Y_0);
+  auto [X, mult_scaled] = get_analytic_center(Y_0, perturb);
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> elapsed = end - start;
   CALLGRIND_STOP_INSTRUMENTATION;
@@ -293,17 +294,21 @@ AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0) const {
 }
 
 std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
-    const Matrix& Y_0) const {
+    const Matrix& Y_0, const Matrix* perturb) const {
   int n_iter = 0;         // number of iterations
   double eps_mult = 1.0;  // multiplier for perturbations
   Matrix X =
       Y_0 * Y_0.transpose();  // initial solution (not necessarily feasible)
   // store rank of candidate solution
   rank_init = Y_0.cols();
+  // Use provided perturbation if available, otherwise use params_.delta *
+  // Identity
+  Matrix initial_perturb = (perturb != nullptr)
+                               ? *perturb
+                               : (Matrix::Identity(dim, dim) * params_.delta);
   auto [alpha, L] = line_search_factorization(
-      X, Matrix::Identity(dim, dim) *
-             params_.delta);  // Initial line search to ensure
-                              // PSDness of the starting point
+      X, initial_perturb);  // Initial line search to ensure
+                            // PSDness of the starting point
   // Optimality certificate
   Matrix H;
   double complementarity = std::nan("");
