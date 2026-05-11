@@ -17,9 +17,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(BUILD_TESTS "Build testsuite" ON)
 option(BUILD_PYTHON_BINDINGS "Build pybind11 Python bindings" OFF)
-option(ENABLE_DEBUG "Print additional debugging information" OFF)
 option(ENABLE_TIMING "Print out timing data" OFF)
 option(ENABLE_PARALLEL "Enable OpenMP parallelization of hot loops" ON)
+option(PROFILING "Enable profiling flags" OFF)
 
 ###############################################################################
 # Dependencies
@@ -32,6 +32,7 @@ message(STATUS "Eigen Version: ${EIGEN3_VERSION_STRING} ${EIGEN3_VERSION}")
 find_package(OpenMP REQUIRED)
 find_package(Boost REQUIRED)
 find_package(Boost REQUIRED COMPONENTS filesystem system)
+find_package(yaml-cpp REQUIRED)
 message(STATUS "Boost Version: ${Boost_VERSION}")
 
 # ----- MOSEK ------ 
@@ -62,6 +63,7 @@ endif()
 
 # source files
 file(GLOB RANK_TOOLS_SOURCE_FILES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
+list(FILTER RANK_TOOLS_SOURCE_FILES EXCLUDE REGEX "analytic_center_cli\\.cpp$")
 add_library(rank_tools SHARED)
 target_sources(rank_tools PRIVATE ${RANK_TOOLS_SOURCE_FILES})
 
@@ -80,10 +82,16 @@ if(ENABLE_PARALLEL)
 endif()
 target_link_libraries(rank_tools PUBLIC ${FUSION_LIB} ${MOSEK_LIB})
 
-# debug flag  
-if(ENABLE_DEBUG)
-        message(STATUS "Enabling debug flag")
-        target_compile_definitions(rank_tools PRIVATE DEBUG)
+add_executable(analytic_center_certify src/analytic_center_cli.cpp)
+target_link_libraries(analytic_center_certify PRIVATE rank_tools)
+target_link_libraries(analytic_center_certify PRIVATE yaml-cpp)
+
+if(PROFILING)
+  message(STATUS "Enabling profiling flags")
+  target_compile_options(rank_tools PRIVATE -pg -g -O0 -fno-omit-frame-pointer)
+  target_link_options(rank_tools PRIVATE -pg)
+  target_compile_options(analytic_center_certify PRIVATE -pg -g -O0 -fno-omit-frame-pointer)
+  target_link_options(analytic_center_certify PRIVATE -pg)
 endif()
 
 if(ENABLE_TIMING)

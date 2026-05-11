@@ -3,6 +3,11 @@
 #include <valgrind/callgrind.h>
 
 #include <algorithm>
+#include <fstream>
+
+#ifdef RANKTOOLS_PARALLEL
+#include <omp.h>
+#endif
 
 namespace RankTools {
 
@@ -235,11 +240,21 @@ std::pair<double, double> AnalyticCenter::check_certificate(
   return {psd, complementarity};
 }
 
-AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0) const {
+AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0,
+                                             const Matrix* perturb) const {
+  if (params_.verbose) {
+    int omp_threads = 1;
+#ifdef RANKTOOLS_PARALLEL
+    omp_threads = omp_get_max_threads();
+#endif
+    std::cout << "Parallelization: "
+              << " (OpenMP threads: " << omp_threads
+              << ", Eigen threads: " << Eigen::nbThreads() << ")" << std::endl;
+  }
   // Run analtyic center solve
   CALLGRIND_START_INSTRUMENTATION;
   auto start = std::chrono::high_resolution_clock::now();
-  auto [X, mult_scaled] = get_analytic_center(Y_0);
+  auto [X, mult_scaled] = get_analytic_center(Y_0, perturb);
   auto end = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> elapsed = end - start;
   CALLGRIND_STOP_INSTRUMENTATION;
@@ -279,16 +294,21 @@ AnalyticCenterResult AnalyticCenter::certify(const Matrix& Y_0) const {
 }
 
 std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
-    const Matrix& Y_0) const {
-  // Initialize
-  int n_iter = 0;
-  double delta = params_.delta_init;
-  Matrix X = Y_0 * Y_0.transpose();
+    const Matrix& Y_0, const Matrix* perturb) const {
+  int n_iter = 0;         // number of iterations
+  double eps_mult = 1.0;  // multiplier for perturbations
+  Matrix X =
+      Y_0 * Y_0.transpose();  // initial solution (not necessarily feasible)
   // store rank of candidate solution
   rank_init = Y_0.cols();
+  // Use provided perturbation if available, otherwise use params_.delta *
+  // Identity
+  Matrix initial_perturb = (perturb != nullptr)
+                               ? *perturb
+                               : (Matrix::Identity(dim, dim) * params_.delta);
   auto [alpha, L] = line_search_factorization(
-      X, Matrix::Identity(dim, dim) * delta);  // Initial line search to ensure
-                                               // PSDness of the starting point
+      X, initial_perturb);  // Initial line search to ensure
+                            // PSDness of the starting point
   // Optimality certificate
   Matrix H;
   double complementarity = std::nan("");
@@ -301,14 +321,14 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   while (n_iter < params_.max_iter) {
     // Get system of equations
     Vector violation(m);
-    std::tie(multipliers, violation) = get_multipliers(X, Y_0, delta);
+    std::tie(multipliers, violation) = get_multipliers(X, Y_0, eps_mult);
 
     // get the barrier parameter value
     barrier_param = 1 / multipliers(m - 1);
     // Dual matrix (adjoint of constraints with multipliers + cost term )
     Matrix S = build_adjoint(multipliers);
     if (params_.rescale_lin_sys) {
-      S = S / delta;
+      S = S / (eps_mult * params_.eps_cost);
     }
     // Get Newton step direction towards analytic center
     auto deltaX = X - X * S * X;
@@ -337,12 +357,12 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
       if (n_iter % 10 == 1) {
         std::printf("%6s %12s %12s %12s %12s %12s %12s %12s %12s\n", "Iter",
                     "ViolNorm", "StepNorm", "Complement.", "BarrParam", "Alpha",
-                    "Delta", "CentMetric", "Angle (rad)");
+                    "Eps. Mult.", "CentMetric", "Angle (rad)");
       }
       std::printf(
           "%6d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e\n",
           n_iter, violation.norm(), deltaX.norm(), complementarity,
-          barrier_param, alpha, delta, cent_metric, angle);
+          barrier_param, alpha, eps_mult, cent_metric, angle);
     }
 
     // Certificate Checking (Early stopping condition if the certificate is PSD)
@@ -358,7 +378,8 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
         }
       } else {
         // Build certificate matrix (rescaled adjoint)
-        double scale = params_.rescale_lin_sys ? delta : 1.0;
+        double scale =
+            params_.rescale_lin_sys ? (eps_mult * params_.eps_cost) : 1.0;
         H = S * scale / multipliers(m - 1);
         // Check complementarity condition for first order optimality
         complementarity = (Y_0.transpose() * H * Y_0).norm();
@@ -393,19 +414,19 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     }
     // Perturbation update for next iteration (if enabled)
     if (params_.adaptive_perturb) {
-      if (alpha < params_.delta_inc_step_max) {
-        delta = delta * params_.delta_inc;
-      } else if (alpha > params_.delta_dec_step_min) {
-        delta = delta * params_.delta_dec;
+      if (alpha < params_.eps_inc_step_thresh) {
+        eps_mult = eps_mult * params_.eps_inc;
+      } else if (alpha > params_.eps_dec_step_thresh) {
+        eps_mult = eps_mult * params_.eps_dec;
       }
       // Ensure delta does not go below minimum threshold
-      delta = std::max(delta, params_.delta_min);
+      eps_mult = std::max(eps_mult, params_.eps_mult_min);
     }
 
     // Check final stopping condition
     if (deltaX.norm() < params_.tol_step_norm)
       if (params_.adaptive_perturb) {
-        if (delta <= params_.delta_min) {
+        if (eps_mult <= params_.eps_mult_min) {
           if (params_.verbose) {
             std::cout << "Step norm below threshold and minimum perturbation "
                          "reached. Stopping centering."
@@ -426,8 +447,8 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
   return {X, mult_scaled};
 }
 
-AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
-                                                           double delta) const {
+AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(
+    const Matrix& X, double eps_mult) const {
   // Initialize system data
   LinSysData sys(X, dim, m);
   const int a_size = static_cast<int>(A_.size());
@@ -440,7 +461,7 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
     if (i < a_size) {
       const double trace_Ai = A_[i].diagonal().sum();
       if (params_.perturb_constraints) {
-        val = b_[i] + delta * trace_Ai;
+        val = b_[i] + params_.eps_constr * eps_mult * trace_Ai;
       } else {
         val = b_[i];
       }
@@ -448,9 +469,9 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
     } else {
       const double trace_C = C_.diagonal().sum();
       if (params_.perturb_cost) {
-        val = rho_ + delta * trace_C;
+        val = rho_ + params_.eps_cost * eps_mult * trace_C;
       } else {
-        val = rho_ + params_.cost_offset;
+        val = rho_;
       }
       sys.d(i) = C_.cwiseProduct(X).sum();
     }
@@ -460,7 +481,8 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(const Matrix& X,
     sys.d(i) += sys.violation(i);
   }
   // Rescaling for linear system
-  sys.scale_ = params_.rescale_lin_sys ? (1.0 / delta) : 1.0;
+  sys.scale_ =
+      params_.rescale_lin_sys ? (1.0 / (eps_mult * params_.eps_cost)) : 1.0;
   // Only build the LHS matrix if not using matrix-free solver.
   if (params_.lin_solver == LinearSolverType::MFCG_DP ||
       params_.lin_solver == LinearSolverType::MFCG_LRP) {
@@ -620,15 +642,14 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
   return multipliers;
 }
 
-std::pair<Vector, Vector> AnalyticCenter::get_multipliers(const Matrix& X,
-                                                          const Matrix& Y_0,
-                                                          double delta) const {
+std::pair<Vector, Vector> AnalyticCenter::get_multipliers(
+    const Matrix& X, const Matrix& Y_0, double eps_mult) const {
   // Build the system of equations for the current solution
 #ifdef TIMING
   // start a timer for building the system
   auto start = std::chrono::high_resolution_clock::now();
 #endif
-  auto sys = build_ac_system(X, delta);
+  auto sys = build_ac_system(X, eps_mult);
 
 #ifdef TIMING
   auto end = std::chrono::high_resolution_clock::now();
@@ -689,6 +710,61 @@ std::pair<double, Matrix> AnalyticCenter::line_search_factorization(
   L_chol.noalias() = solver.transpositionsP().transpose() * L_chol;
 
   return {alpha, L_chol};
+}
+
+void AnalyticCenter::export_problem(const std::filesystem::path& file_path,
+                                    const std::string& problem_name,
+                                    const Matrix& solution) const {
+  std::ofstream out(file_path);
+  if (!out) {
+    throw std::runtime_error("Failed to open problem file for writing: " +
+                             file_path.string());
+  }
+
+  // name
+  out << "name\n" << problem_name << "\n";
+
+  // dim
+  out << "dim\n" << dim << "\n";
+
+  // C
+  out << "C\n" << (dim * dim) << "\n";
+  for (int i = 0; i < dim; ++i) {
+    for (int j = 0; j < dim; ++j) {
+      out << C_(i, j) << "\n";
+    }
+  }
+
+  // constraints
+  const int n_constraints = static_cast<int>(A_storage_.size());
+  out << "constraints\n" << n_constraints << "\n";
+  for (int k = 0; k < n_constraints; ++k) {
+    const auto& A = A_storage_[k];
+    const int rows = static_cast<int>(A.rows());
+    const int cols = static_cast<int>(A.cols());
+    const int nnz = static_cast<int>(A.nonZeros());
+    out << "A\n" << rows << " " << cols << " " << nnz << "\n";
+
+    // iterate over non-zeros (works for column-major Eigen::SparseMatrix)
+    for (int outer = 0; outer < A.outerSize(); ++outer) {
+      for (Eigen::SparseMatrix<double>::InnerIterator it(A, outer); it; ++it) {
+        out << it.row() << " " << it.col() << " " << it.value() << "\n";
+      }
+    }
+
+    out << "b\n" << b_storage_[k] << "\n";
+  }
+
+  // solution (soln)
+  int soln_rows = static_cast<int>(solution.rows());
+  int soln_cols = static_cast<int>(solution.cols());
+  int soln_count = soln_rows * soln_cols;
+  out << "soln\n" << soln_rows << " " << soln_cols << " " << soln_count << "\n";
+  for (int i = 0; i < soln_rows; ++i) {
+    for (int j = 0; j < soln_cols; ++j) {
+      out << solution(i, j) << "\n";
+    }
+  }
 }
 
 }  // namespace RankTools

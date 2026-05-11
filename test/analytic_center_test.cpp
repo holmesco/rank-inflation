@@ -95,8 +95,12 @@ TEST_P(LovazsParamTest, PrimalSolution) {
                                    // certificate for testing purposes
   params.max_iter = 50;
   params.rescale_lin_sys = true;
-  double delta = 1e-7;
-  params.delta_init = delta;
+  double delta = 1e-5;
+  params.delta = delta;
+  params.perturb_cost = true;
+  params.perturb_constraints = true;
+  params.adaptive_perturb = true;
+  params.lin_solver = LinearSolverType::LDLT;
   // generate problem
   auto problem = sdp.make_testable(params);
   auto Y = sdp.soln;
@@ -142,36 +146,6 @@ TEST_P(LovazsParamTest, PrimalSolution) {
       << "Analytic center solution is not close to Mosek solution";
 }
 
-// Test adapative perturbation. Ensure that we converge to a certificate.
-TEST_P(LovazsParamTest, CertifyAdaptivePerturb) {
-  const auto& sdp = GetParam();
-  // parameters
-  AnalyticCenterParams params;
-  params.verbose = true;
-  params.early_stop_cert = false;  // Turn off early stopping based on
-                                   // certificate for testing purposes
-  params.adaptive_perturb =
-      true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-9;
-  params.max_iter = 100;
-  // use rescaling to be consistent with the system in Sremac 2021
-  params.rescale_lin_sys = true;
-  auto delta = 1e-5;
-  params.delta_init = delta;
-  // generate problem
-  AnalyticCenter problem = sdp.make(params);
-  // get current solution
-  Matrix Y_0 = sdp.make_solution(1);
-  // Run certification method
-  auto result = problem.certify(Y_0);
-  // check that the solution is certified
-  EXPECT_TRUE(result.certified) << "Analytic center failed to certify solution";
-  std::cout << "Minimum Eigenvalue of Certificate: " << result.min_eig
-            << std::endl;
-  std::cout << "Complementarity (First Order Condition): "
-            << result.complementarity << std::endl;
-}
-
 // Test early stopping based on certificate found.
 TEST_P(LovazsParamTest, CertEarlyStopping) {
   const auto& sdp = GetParam();
@@ -179,10 +153,14 @@ TEST_P(LovazsParamTest, CertEarlyStopping) {
   AnalyticCenterParams params;
   params.verbose = true;
   params.early_stop_cert = true;
+  params.max_iter = 50;
   params.rescale_lin_sys = true;
+  double delta = 1e-5;
+  params.delta = delta;
+  params.perturb_cost = true;
+  params.perturb_constraints = true;
+  params.adaptive_perturb = true;
   params.lin_solver = LinearSolverType::LDLT;
-  auto delta = 1e-5;
-  params.delta_init = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
@@ -220,17 +198,17 @@ TEST_P(LovazsParamTest, CertifyLDLT) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.early_stop_cert = false;  // Turn off early stopping based on
-                                   // certificate for testing purposes
-  params.adaptive_perturb =
-      true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-8;
-  params.max_iter = 50;
-  // use rescaling to be consistent with the system in Sremac 2021
+  params.early_stop_cert = true;
   params.rescale_lin_sys = true;
-  params.lin_solver = LinearSolverType::LDLT;  // Use Conjugate Gradient solver
-  auto delta = 1e-5;
-  params.delta_init = delta;
+  params.max_iter = 50;
+  params.perturb_cost = true;
+  params.perturb_constraints = true;
+  params.adaptive_perturb = true;
+  params.lin_solver = LinearSolverType::LDLT;
+  params.delta = 1e-5;
+  params.eps_cost = 1e-5;
+  params.eps_constr = 1e-5;
+  params.eps_mult_min = 1e-4;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
@@ -254,15 +232,16 @@ TEST_P(LovazsParamTest, CertifyConjGrad) {
   params.verbose = true;
   params.early_stop_cert = false;  // Turn off early stopping based on
                                    // certificate for testing purposes
-  params.adaptive_perturb =
-      true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-8;
+  params.adaptive_perturb = true;
+  params.perturb_cost = true;
+  params.perturb_constraints = true;
+  params.eps_mult_min = 1e-3;
   params.max_iter = 50;
   // use rescaling to be consistent with the system in Sremac 2021
   params.rescale_lin_sys = true;
+  params.rescaling_factor = 1e-5;
   params.lin_solver = LinearSolverType::CG;  // Use Conjugate Gradient solver
-  auto delta = 1e-5;
-  params.delta_init = delta;
+  params.delta = 1e-5;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
@@ -308,8 +287,7 @@ TEST(MatrixFree, Product) {
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
-  params.rescale_lin_sys =
-      true;  // Use rescaling for consistency with Sremac 2021
+  params.rescale_lin_sys = true;
   auto delta = 1e-7;
   // generate problem
   auto problem = sdp.make_testable(params);
@@ -319,9 +297,11 @@ TEST(MatrixFree, Product) {
   auto [alpha, L] = problem.line_search_factorization(
       X, Matrix::Identity(problem.dim, problem.dim) * delta);
   // Build the explicit system to get the true diagonal of B
-  auto system = problem.build_ac_system(X, delta);
+  double eps_mult = 2.0;
+  auto system = problem.build_ac_system(X, eps_mult);
   // Build the matrix-free operator
-  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, 1 / delta);
+  double scale = 1 / (params.eps_cost * eps_mult);
+  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, scale);
   // Test on columns of identity
   auto Id = Matrix::Identity(sdp.dim, sdp.dim);
   for (int i = 0; i < sdp.dim; i++) {
@@ -342,6 +322,8 @@ TEST(MatrixFree, Product) {
   }
 }
 
+// PRECONDITIONER TESTS
+
 TEST(MatrixFree, DiagonalPreconditioner) {
   // Load a test problem
   auto sdp = make_lovasz_test_case(clique1_adj, {1, 3, 4, 6, 7, 8}, "Clique1");
@@ -358,9 +340,11 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   auto [alpha, L] = problem.line_search_factorization(
       X, Matrix::Identity(problem.dim, problem.dim) * delta);
   // Build the explicit system to get the true diagonal of B
-  auto system = problem.build_ac_system(X, delta);
-  // Build the matrix-free operator and preconditioner
-  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, 1 / delta);
+  double eps_mult = 2.0;
+  auto system = problem.build_ac_system(X, eps_mult);
+  // Build the matrix-free operator
+  double scale = 1 / (params.eps_cost * eps_mult);
+  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, scale);
   MultiplierDiagPreconditioner precond;
   precond.compute(lin_op);
   // Check that the preconditioner computed successfully
@@ -590,7 +574,7 @@ TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
       false;  // Turn off early stopping based on solution deviation
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-8;
+  params.eps_mult_min = 1e-3;
   params.max_iter = 50;
   // use rescaling to be consistent with the system in Sremac 2021
   params.rescale_lin_sys = true;
@@ -598,7 +582,7 @@ TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
       LinearSolverType::MFCG_DP;  // Use Conjugate Gradient solver with diagonal
                                   // preconditioner
   auto delta = 1e-5;
-  params.delta_init = delta;
+  params.delta = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
@@ -633,14 +617,14 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   params.early_stop_cert = true;
   params.adaptive_perturb =
       true;  // Turn on adaptive perturbation for testing purposes
-  params.delta_min = 1e-7;
+  params.eps_mult_min = 1e-2;
   params.max_iter = 50;
   params.lin_solver = LinearSolverType::MFCG_LRP;
   params.lrp_params.tau = 1e-5;
   params.lrp_params.method = LowRankPrecondMethod::SparseLDLT;
   // Initialize delta
   auto delta = 1e-5;
-  params.delta_init = delta;
+  params.delta = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // Update cost based on the mosek solution
@@ -676,15 +660,14 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_wLocal) {
   params.max_iter = 20;
   params.max_angle = 1e-2;
   params.adaptive_perturb = true;
-  params.delta_min = 1e-7;
-  // Turn off rescaling (preconditioner should deal with this)
+  params.eps_mult_min = 1e-2;
   params.rescale_lin_sys = false;
   params.lin_solver =
       LinearSolverType::MFCG_LRP;  // Use Conjugate Gradient solver
   params.lrp_params.tau = 1e-5;
   // set initial delta
   auto delta = 1e-5;
-  params.delta_init = delta;
+  params.delta = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
   // get current solution
@@ -702,6 +685,69 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_wLocal) {
             << std::endl;
   std::cout << "Complementarity (First Order Condition): "
             << result.complementarity << std::endl;
+}
+
+// Test that using the optional perturbation parameter with Identity * delta
+// produces the same result as not providing the perturbation (default behavior)
+TEST_P(LovazsParamTest, PerturbationParameterEquivalence) {
+  const auto& sdp = GetParam();
+
+  // Setup parameters
+  AnalyticCenterParams params;
+  params.verbose = false;
+  params.early_stop_cert = false;
+  params.max_iter = 50;
+  params.rescale_lin_sys = true;
+  params.lin_solver = LinearSolverType::LDLT;
+  params.delta = 1e-5;
+  params.perturb_cost = true;
+  params.perturb_constraints = true;
+  params.adaptive_perturb = true;
+
+  // Create the problem
+  AnalyticCenter problem = sdp.make(params);
+
+  // Get initial solution
+  Matrix Y_0 = sdp.make_solution(1);
+
+  // Test 1: get_analytic_center without perturbation
+  auto [X_default, mult_default] = problem.get_analytic_center(Y_0);
+
+  // Test 2: get_analytic_center with perturbation = Identity * delta
+  Matrix perturb = Matrix::Identity(problem.dim, problem.dim) * params.delta;
+  auto [X_explicit, mult_explicit] = problem.get_analytic_center(Y_0, &perturb);
+
+  // Test 3: certify without perturbation
+  auto result_default = problem.certify(Y_0);
+
+  // Test 4: certify with perturbation = Identity * delta
+  auto result_explicit = problem.certify(Y_0, &perturb);
+
+  // Verify that results are the same (within numerical tolerance)
+  const double tol = 1e-10;
+
+  // Check get_analytic_center results
+  EXPECT_LT((X_default - X_explicit).norm(), tol)
+      << "Primal solutions differ when using explicit Identity*delta "
+         "perturbation";
+  EXPECT_LT((mult_default - mult_explicit).norm(), tol)
+      << "Multipliers differ when using explicit Identity*delta perturbation";
+
+  // Check certify results
+  EXPECT_LT((result_default.X - result_explicit.X).norm(), tol)
+      << "Certified primal solutions differ";
+  EXPECT_LT((result_default.H - result_explicit.H).norm(), tol)
+      << "Certified certificate matrices differ";
+  EXPECT_LT((result_default.multipliers - result_explicit.multipliers).norm(),
+            tol)
+      << "Certified multipliers differ";
+  EXPECT_NEAR(result_default.min_eig, result_explicit.min_eig, tol)
+      << "Minimum eigenvalues differ";
+  EXPECT_NEAR(result_default.complementarity, result_explicit.complementarity,
+              tol)
+      << "Complementarity values differ";
+  EXPECT_EQ(result_default.certified, result_explicit.certified)
+      << "Certification status differs";
 }
 
 INSTANTIATE_TEST_SUITE_P(

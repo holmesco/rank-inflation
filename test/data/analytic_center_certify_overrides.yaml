@@ -1,0 +1,15 @@
+# Default overrides for test files
+verbose: true
+early_stop_cert: true
+early_stop_angle: true
+max_iter: 20
+max_angle: 1e-2
+adaptive_perturb: true
+eps_mult_min: 1e-2
+rescale_lin_sys: false
+lin_solver: MFCG_LRP
+
+lrp_params:
+  tau: 1e-5
+
+delta: 1e-5

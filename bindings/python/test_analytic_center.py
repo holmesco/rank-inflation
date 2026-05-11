@@ -126,7 +126,7 @@ def test_solve_sdp_mosek():
     n = 4
     C, rho, A, b = make_simple_sdp(n)
 
-    result = ranktools.solve_sdp_mosek(C, A, b, verbose=False)
+    result = ranktools.solve_sdp_mosek(C, As=A, b=b, verbose=False)
 
     assert isinstance(result, ranktools.SDPResult)
     assert result.X.shape == (n, n)
@@ -155,7 +155,7 @@ def test_rank_reduction():
     params.verbose = False
     params.targ_rank = 1
 
-    V_red = ranktools.rank_reduction(A, V0, params)
+    V_red = ranktools.rank_reduction(As=A, V_init=V0, params=params)
     assert V_red.ndim == 2
     assert V_red.shape[0] == n
     assert V_red.shape[1] <= params.targ_rank
