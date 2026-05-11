@@ -66,8 +66,8 @@ class ConjugateGradientSolver:
         else:
             x = x_init.clone()
 
-        # Compute initial residual: r = b - B @ x
-        r = b - matvec_fn(x)
+        # Compute initial residual: r = B @ x - b
+        r = matvec_fn(x) - b
 
         # Apply preconditioner to residual: y = M^{-1} @ r
         if precond_solve_fn is not None:
@@ -76,11 +76,11 @@ class ConjugateGradientSolver:
             y = r.clone()
 
         # Initialize search direction: p = y
-        p = y.clone()
+        p = -y.clone()
 
         # Store initial residual norm for relative tolerance check
-        r_norm_init = r.norm()
-        self.residual_norms = [r_norm_init.item()]
+        b_norm = b.norm()
+        self.residual_norms = [r.norm().item()]
 
         # Main CG loop
         for k in range(self.max_iter):
@@ -90,21 +90,13 @@ class ConjugateGradientSolver:
             # Compute step size: alpha = (r^T @ y) / (p^T @ A @ p)
             rTy = torch.dot(r, y)
             pTAp = torch.dot(p, Ap)
-
-            # Check for breakdown
-            if abs(pTAp.item()) < 1e-16:
-                if self.verbose:
-                    print(f"CG: Breakdown at iteration {k}: pTAp too small")
-                self.iter_count = k
-                return x, k
-
             alpha = rTy / pTAp
 
             # Update solution: x = x + alpha * p
             x = x + alpha * p
 
-            # Update residual: r = r - alpha * A @ p
-            r_new = r - alpha * Ap
+            # Update residual: r = r + alpha * A @ p
+            r_new = r + alpha * Ap
 
             # Apply preconditioner to new residual: y_new = M^{-1} @ r_new
             if precond_solve_fn is not None:
@@ -116,8 +108,8 @@ class ConjugateGradientSolver:
             r_norm = r_new.norm()
             self.residual_norms.append(r_norm.item())
 
-            # Check convergence: ||r_new|| < tol * ||r_init||
-            if r_norm < self.tol * r_norm_init:
+            # Check convergence: ||B@x-b|| < tol * ||b||
+            if r_norm < self.tol * b_norm:
                 self.iter_count = k + 1
                 if self.verbose:
                     print(
@@ -130,8 +122,8 @@ class ConjugateGradientSolver:
             rTy_new = torch.dot(r_new, y_new)
             beta = rTy_new / rTy
 
-            # Update search direction: p = y_new + beta * p
-            p = y_new + beta * p
+            # Update search direction: p = -y_new + beta * p
+            p = -y_new + beta * p
 
             # Update for next iteration
             r = r_new
