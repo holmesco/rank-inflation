@@ -260,8 +260,17 @@ params : AnalyticCenterParams, optional
           py::return_value_policy::reference_internal)
       .def("eval_constraints", &PyAnalyticCenter::eval_constraints,
            py::arg("X"), "Evaluate constraint violations at X.")
-      .def("certify", &PyAnalyticCenter::certify, py::arg("Y_0"),
-           py::arg("perturb") = nullptr,
+      .def("certify",
+           [](const PyAnalyticCenter& self, const Matrix& Y_0,
+              const py::object& perturb = py::none()) {
+             if (perturb.is_none()) {
+               return self.certify(Y_0, nullptr);
+             } else {
+               auto perturb_mat = perturb.cast<Matrix>();
+               return self.certify(Y_0, &perturb_mat);
+             }
+           },
+           py::arg("Y_0"), py::arg("perturb") = py::none(),
            R"pbdoc(
 Run analytic centering to certify the local solution Y_0.
 
@@ -279,8 +288,17 @@ Returns
 -------
 AnalyticCenterResult
 )pbdoc")
-      .def("get_analytic_center", &PyAnalyticCenter::get_analytic_center,
-           py::arg("Y_0"), py::arg("perturb") = nullptr,
+      .def("get_analytic_center",
+           [](const PyAnalyticCenter& self, const Matrix& Y_0,
+              const py::object& perturb = py::none()) {
+             if (perturb.is_none()) {
+               return self.get_analytic_center(Y_0, nullptr);
+             } else {
+               auto perturb_mat = perturb.cast<Matrix>();
+               return self.get_analytic_center(Y_0, &perturb_mat);
+             }
+           },
+           py::arg("Y_0"), py::arg("perturb") = py::none(),
            R"pbdoc(
 Compute the analytic center starting from Y_0.
 

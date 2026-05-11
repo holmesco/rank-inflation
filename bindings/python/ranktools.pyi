@@ -33,7 +33,7 @@ class AnalyticCenter:
         """
         Backward-compatible alias for build_adjoint(multipliers).
         """
-    def certify(self, Y_0: numpy.ndarray, perturb: numpy.ndarray = None) -> AnalyticCenterResult:
+    def certify(self, Y_0: numpy.ndarray, perturb: numpy.ndarray | None = None) -> AnalyticCenterResult:
         """
         Run analytic centering to certify the local solution Y_0.
         
