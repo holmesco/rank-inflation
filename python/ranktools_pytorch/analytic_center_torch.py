@@ -12,11 +12,80 @@ import scipy.sparse as sp
 
 from .lin_alg_torch import MatrixFreeLagrangeOperator, LowRankPrecond
 from .solvers import ConjugateGradientSolver
-from .certificate import eval_certificate, check_certificate_psd, build_adjoint
+from .certificate import (
+    eval_certificate,
+    check_certificate_psd,
+    build_adjoint,
+    compute_complementarity,
+)
 from .utils import (
     line_search_factorization,
     eval_constraints,
 )
+from ranktools import AnalyticCenterParams, LinearSolverType, LowRankPrecondMethod
+
+
+def defaultAnalyicCenterParams() -> AnalyticCenterParams:
+    params = AnalyticCenterParams()
+
+    # Verbosity
+    params.verbose = True
+
+    # Rank / step tolerances
+    params.tol_rank_sol = 1.0e-4
+    params.tol_step_norm = 1.0e-8
+    params.max_iter = 50
+
+    # Linear system scaling
+    params.rescale_lin_sys = False
+    params.rescaling_factor = 1.0e-5
+    params.lin_solver = LinearSolverType.LDLT
+    params.reuse_multipliers = True
+
+    # Linear independence check
+    params.tol_indep_constr = 1.0e-3
+    params.check_indep_constr = False
+    params.delta = 1.0e-5
+
+    # Adaptive perturbation
+    params.perturb_constraints = False
+    params.perturb_cost = True
+    params.eps_cost = 1.0e-5
+    params.eps_constr = 1.0e-5
+    params.adaptive_perturb = True
+    params.eps_mult_min = 1.0e-2
+    params.eps_inc_step_thresh = 0.1
+    params.eps_inc = 2.0
+    params.eps_dec_step_thresh = 0.9
+    params.eps_dec = 0.6
+
+    # Iterative solver
+    params.lin_solve_max_iter = 500
+    params.lin_solve_tol = 1.0e-5
+
+    # Low-rank preconditioner params
+    params.lrp_params.tau = 1.0e-5
+    params.lrp_params.method = LowRankPrecondMethod.SparseLDLT
+    params.lrp_params.use_approx = False
+    params.lrp_params.ldlt_zero_thresh = 1.0e-14
+
+    # Line search
+    params.enable_line_search = True
+    params.ln_search_red_factor = 0.8
+    params.alpha_init = 1.0
+    params.alpha_min = 1.0e-10
+
+    # Early stop parameters
+    params.early_stop_cert = True
+    params.tol_cert_psd = 1.0e-5
+    params.tol_cert_complementarity = 1.0e-5
+    params.tol_cert_primal_feas = 1.0e-5
+    params.early_stop_angle = False
+    params.max_angle = 1.0e-2
+    params.use_cert_centrality_metric = False
+    params.tol_cert_centrality = 1.0e-5
+
+    return params
 
 
 @dataclass
@@ -32,41 +101,6 @@ class AnalyticCenterResult:
     complementarity: float  # First-order optimality measure
     solver_time: float  # Total solve time in seconds
     num_iters: int  # Number of centering iterations
-
-# TODO this should be using the existing AnalyticCenterParams
-@dataclass
-class AnalyticCenterParams:
-    """Parameters for analytic center computation."""
-
-    # Verbosity
-    verbose: bool = True
-
-    # Convergence tolerances
-    tol_step_norm: float = 1e-8
-    max_iter: int = 50
-
-    # Iterative linear solver parameters
-    lin_solve_max_iter: int = 500
-    lin_solve_tol: float = 1e-5
-
-    # Preconditioner parameters
-    precond_tau: float = 1e-5
-
-    # Line search parameters
-    enable_line_search: bool = True
-    ln_search_red_factor: float = 0.8
-    alpha_init: float = 1.0
-    alpha_min: float = 1e-10
-
-    # Early stopping for certificate
-    early_stop_cert: bool = True
-    tol_cert_psd: float = 1e-5
-    tol_cert_complementarity: float = 1e-5
-
-    # Perturbation parameters
-    delta: float = 1e-5
-    eps_cost: float = 1e-5
-    eps_constr: float = 1e-5
 
 
 class AnalyticCenterPyTorch:
@@ -88,7 +122,7 @@ class AnalyticCenterPyTorch:
         rho: float,
         A_list: List[sp.spmatrix],
         b: torch.Tensor,
-        params: Optional[AnalyticCenterParams] = None,
+        params: AnalyticCenterParams = defaultAnalyicCenterParams(),
         device: torch.device = torch.device("cpu"),
     ):
         """
@@ -118,6 +152,8 @@ class AnalyticCenterPyTorch:
             tol=self.params.lin_solve_tol,
             verbose=False,
         )
+        # preconditioner
+        self.precond: None | LowRankPrecond = None
 
     def certify(
         self,
@@ -197,9 +233,8 @@ class AnalyticCenterPyTorch:
         X = X.to(device=self.device)
 
         # Ensure PSD via line search
-        # TODO lost support for custom perturbation on solution. 
         try:
-            alpha, L = line_search_factorization(
+            alpha, X, L = line_search_factorization(
                 X, self.params.delta * torch.eye(self.n, device=self.device)
             )
         except RuntimeError:
@@ -210,43 +245,48 @@ class AnalyticCenterPyTorch:
         eps_mult = 1.0  # Perturbation multiplier
         multipliers = torch.ones(self.m, device=self.device, dtype=torch.float64)
 
+        # Set up preconditioner
+        self.precond = LowRankPrecond(
+            U=Y_0,
+            A_list=self.A_list,
+            C=self.C,
+            tau=self.params.precond_tau,
+            device=self.device,
+        )
+
         # Main centering loop
+        cert_complementarity = False
+        cert_psd = False
+        small_step = False
         for iter_idx in range(self.params.max_iter):
             # Step 1: Evaluate constraints
             violation = eval_constraints(X, self.A_list, self.b, self.C, self.rho)
             violation_norm = violation.norm()
 
             # Step 2: Get multipliers (solve KKT system via CG)
-            multipliers = self._solve_for_multipliers(X)
-
+            multipliers = self._solve_for_multipliers(X, eps_mult)
+            barrier = 1 / multipliers[-1]
             # Step 3: Compute Newton step direction
             S = build_adjoint(multipliers, self.A_list, self.C)
             S = (S + S.T) / 2
 
-            # dZ = Z - Z @ S @ Z (standard centering direction)
-            dZ = X - X @ S @ X
-            dZ_norm = dZ.norm()
+            # delta_X = X - X @ S @ X (standard centering direction)
+            delta_X = X - X @ S @ X
+            delta_X_norm = delta_X.norm()
 
             # Step 4: Line search for PSDness
-            try:
-                alpha, L = line_search_factorization(
-                    X,
-                    dZ,
-                    alpha_init=self.params.alpha_init,
-                    alpha_min=self.params.alpha_min,
-                )
-            except RuntimeError as e:
-                if self.params.verbose:
-                    print(f"Line search failed at iteration {iter_idx}: {e}")
-                break
-
+            alpha, X_new, L = line_search_factorization(
+                X,
+                delta_X,
+                alpha_init=self.params.alpha_init,
+                alpha_min=self.params.alpha_min,
+            )
             # Step 5: Update solution
-            # TODO This matrix was already computed in the line search. Should reuse it instead of recomputing the sum
-            X = X + alpha * dZ
+            X = X_new
 
             # Step 6: Print iteration info
             # TODO Logging should not use print statements because they can slow down GPU code.
-            if self.params.verbose and (iter_idx + 1) % 10 == 1:
+            if self.params.verbose:
                 print(
                     f"{'Iter':>5} {'Violation':>12} {'StepNorm':>12} "
                     f"{'Alpha':>12} {'EpsMult':>12}"
@@ -254,40 +294,33 @@ class AnalyticCenterPyTorch:
 
             if self.params.verbose:
                 print(
-                    f"{iter_idx+1:5d} {violation_norm:12.6e} {dZ_norm:12.6e} "
+                    f"{iter_idx+1:5d} {violation_norm:12.6e} {delta_X_norm:12.6e} "
                     f"{alpha:12.6e} {eps_mult:12.6e}"
                 )
 
-            # Step 7: Check convergence
-            if dZ_norm < self.params.tol_step_norm:
-                if self.params.verbose:
-                    print(f"Converged at iteration {iter_idx + 1}")
-                self._num_iters = iter_idx + 1
-                break
-
-            # Step 8: Early stopping with certificate
+            # Early stopping with certificate
             if self.params.early_stop_cert and iter_idx > 0:
-                # TODO why are we rebuilding the adjoint here? We already have S. Also this should be divided by the barrier parameter.
-                H = build_adjoint(multipliers, self.A_list, self.C)
-                H = (H + H.T) / 2
-                min_eig, complementarity = eval_certificate(H, Y_0)
+                # Construct the certificate matrix by rescaling the multipliers
+                H = build_adjoint(multipliers * barrier, self.A_list, self.C)
+                complementarity = compute_complementarity(H, Y_0)
+                cert_complementarity = (
+                    complementarity < self.params.tol_cert_complementarity
+                )
+                cert_psd = check_certificate_psd(H, tol=self.params.tol_cert_psd)
 
-                if (
-                    check_certificate_psd(H, tol=self.params.tol_cert_psd)
-                    and complementarity.item() <= self.params.tol_cert_complementarity
-                ):
-                    if self.params.verbose:
-                        print(
-                            f"Certificate found! Stopping at iteration {iter_idx + 1}"
-                        )
-                    self._num_iters = iter_idx + 1
-                    break
-        else:
-            self._num_iters = self.params.max_iter
+            # Check step size
+            small_step = (
+                delta_X_norm < self.params.tol_step_norm
+                and alpha <= self.params.alpha_min
+            )
+
+            # Check stopping conditions
+            if (cert_complementarity and cert_psd) or (small_step):
+                break
 
         return X, multipliers
 
-    def _solve_for_multipliers(self, X: torch.Tensor, Y0: torch.Tensor) -> torch.Tensor:
+    def _solve_for_multipliers(self, X: torch.Tensor, eps_mult: float) -> torch.Tensor:
         """
         Solve for Lagrange multipliers using CG with matrix-free operator.
 
@@ -311,37 +344,47 @@ class AnalyticCenterPyTorch:
             device=self.device,
         ).matvec
 
-        # Construct preconditioner
-        # TODO: Preconditioner should only occur once overall.
-        try:
-            precond = LowRankPrecond(
-                X=X,
-                A_list=self.A_list,
-                C=self.C,
-                tau=self.params.precond_tau,
-                device=self.device,
-            )
-            precond_solve_fn = precond.solve
-        except RuntimeError as e:
-            if self.params.verbose:
-                print(
-                    f"Preconditioner construction failed: {e}, using no preconditioner"
-                )
-            precond_solve_fn = None
+        # Construct RHS (matches C++ build_ac_system)
+        # d_i = tr(A_i X) + (tr(A_i X) - val_i)
+        # val_i = b_i (+ eps_mult * eps_constr * tr(A_i) if perturb_constraints)
+        # val_cost = rho (+ eps_mult * eps_cost * tr(C) if perturb_cost)
+        dtype = X.dtype
+        device = X.device
+        m = len(self.A_list) + 1
+        d = torch.zeros(m, dtype=dtype, device=device)
 
-        # Construct RHS (simplified: just violation vector)
-        d = eval_constraints(X, self.A_list, self.b, self.C, self.rho)
-        d = d.to(device=self.device)
+        # Precompute trace(C)
+        trace_C = torch.diagonal(self.C).sum()
+
+        for i in range(len(self.A_list)):
+            A_i = self.A_list[i]
+            trace_Ai = float(A_i.diagonal().sum())
+            A_i_dense = torch.from_numpy(A_i.toarray()).to(dtype=dtype, device=device)
+            trace_Ai_X = (A_i_dense * X).sum()
+
+            if self.params.perturb_constraints:
+                val = self.b[i] + eps_mult * self.params.eps_constr * trace_Ai
+            else:
+                val = self.b[i]
+
+            violation = trace_Ai_X - val
+            d[i] = trace_Ai_X + violation
+
+        trace_C_X = (self.C * X).sum()
+        if self.params.perturb_cost:
+            val_cost = self.rho + eps_mult * self.params.eps_cost * trace_C
+        else:
+            val_cost = self.rho
+        violation_cost = trace_C_X - val_cost
+        d[-1] = trace_C_X + violation_cost
 
         # Solve via CG
+        assert self.precond is not None, ValueError("Preconditioner was not defined.")
         multipliers, num_iters = self.cg_solver.solve(
             b=d,
             matvec_fn=matvec_fn,
-            precond_solve_fn=precond_solve_fn,
+            precond_solve_fn=self.precond.solve,
         )
-
-        if self.params.verbose and False:  # Disabled by default
-            print(f"  CG: {num_iters} iterations")
 
         return multipliers
 

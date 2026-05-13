@@ -8,46 +8,47 @@ import scipy.sparse as sp
 
 
 def line_search_factorization(
-    Z: torch.Tensor,
-    dZ: torch.Tensor,
+    X: torch.Tensor,
+    dX: torch.Tensor,
     alpha_init: float = 1.0,
     alpha_min: float = 1e-10,
     reduction_factor: float = 0.8,
-) -> Tuple[float, torch.Tensor]:
+) -> Tuple[float, torch.Tensor, torch.Tensor]:
     """
     Line search to maintain PSD constraint using Cholesky factorization.
 
-    Finds the largest step size alpha in [0, 1] such that Z + alpha * dZ
+    Finds the largest step size alpha in [0, 1] such that X + alpha * dX
     remains positive definite.
 
     Args:
-        Z: Current matrix (n × n), must be PSD
-        dZ: Search direction (n × n)
+        X: Current matrix (n × n), must be PSD
+        dX: Search direction (n × n)
         alpha_init: Initial step size (default: 1.0)
         alpha_min: Minimum step size before failure (default: 1e-10)
         reduction_factor: Backtracking factor (default: 0.8)
 
     Returns:
-        (alpha, L) - step size and Cholesky factor L of Z_new
+        (alpha, X_new, L) - step size, updated matrix, and Cholesky factor L
     """
     alpha = alpha_init
-    device = Z.device
-    dtype = Z.dtype
+    device = X.device
+    dtype = X.dtype
 
     while alpha > alpha_min:
-        Z_new = Z + alpha * dZ
+        X_new = X + alpha * dX
         try:
             # Fast Cholesky factorization on GPU
-            L = torch.linalg.cholesky(Z_new)
-            return alpha, L
+            L = torch.linalg.cholesky(X_new)
+            return alpha, X_new, L
         except RuntimeError:
             # Not PSD, reduce step size
             alpha *= reduction_factor
 
-    raise RuntimeError(
-        f"Line search failed: cannot maintain PSDness. "
-        f"Final alpha = {alpha:.6e}, min_alpha = {alpha_min:.6e}"
-    )
+    # Minimum step size reached
+    # Need to handle this case better
+    X_new = X + alpha_min * dX 
+    L = None
+    return alpha_min, X_new, L
 
 
 def eval_constraints(
@@ -152,5 +153,3 @@ def sparse_upper_triangular_to_symmetric(A_sparse: sp.spmatrix) -> sp.csr_matrix
         Full symmetric matrix (A + A^T - diag(A))
     """
     return A_sparse + A_sparse.T - sp.diags(A_sparse.diagonal())
-
-

@@ -37,11 +37,25 @@ def eval_certificate(
 
     # Compute complementarity: ||Y_0^T @ H @ Y_0||
     # This checks the first-order optimality condition
-    HY = H @ Y_0
-    YtHY = Y_0.T @ HY
-    complementarity = YtHY.norm()
+    complementarity = compute_complementarity(H, Y_0)
 
     return min_eig, complementarity
+
+
+def compute_complementarity(H: torch.Tensor, Y_0: torch.Tensor) -> torch.Tensor:
+    """
+    Compute the complementarity condition: ||Y_0^T @ H @ Y_0||.
+
+    Args:
+        H: Certificate matrix (n × n)
+        Y_0: Initial solution matrix (n × r)
+
+    Returns:
+        Complementarity norm (should be near zero)
+    """
+    HY = H @ Y_0
+    YtHY = Y_0.T @ HY
+    return YtHY.norm()
 
 
 def check_certificate_psd(
