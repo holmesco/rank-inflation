@@ -62,7 +62,7 @@ class MatrixFreeLagrangeOperator:
         Args:
             X: Current primal solution (n × n, symmetric, dense)
             A_list: List of m sparse constraint matrices (scipy sparse format, upper-triangular)
-            C: Cost matrix (n × n, dense)
+            C: Cost matrix (n × n, dense), only upper-triangular part is used
             scale: Scaling factor for the operator (perturbation parameter)
             device: Torch device (CPU or GPU)
         """
@@ -88,7 +88,7 @@ class MatrixFreeLagrangeOperator:
 
         # Step 1: Build S = sum_i A_i * y_i + C * y_{m-1}
         # Start with cost term
-        S = y[-1] * self.C
+        S = y[-1] * torch.triu(self.C)
 
         # Add constraint terms (convert sparse to dense on GPU)
         for i in range(len(self.A_list)):
@@ -146,7 +146,7 @@ class SparseLDLTPreconditioner:
         """
         self.X = X
         self.A_list = A_list
-        self.C = C
+        self.C = torch.triu(C)
         self.tau = tau
         self.device = device
         self.n = X.shape[0]
@@ -286,3 +286,4 @@ class SparseLDLTPreconditioner:
         x = torch.from_numpy(x_np).to(dtype=torch.float64, device=self.device)
 
         return x
+

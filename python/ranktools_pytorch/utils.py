@@ -82,6 +82,7 @@ def eval_constraints(
 
     violations = torch.zeros(m, dtype=dtype, device=device)
 
+    # TODO note sure why we are converting to dense here. We should be able to do sparse-dense multiplication on GPU directly. Once running should test this.
     # Evaluate sparse constraints
     for i in range(len(A_list)):
         A_i_dense = torch.from_numpy(A_list[i].toarray()).to(dtype=dtype, device=device)
@@ -153,37 +154,3 @@ def sparse_upper_triangular_to_symmetric(A_sparse: sp.spmatrix) -> sp.csr_matrix
     return A_sparse + A_sparse.T - sp.diags(A_sparse.diagonal())
 
 
-def get_multipliers_newton(
-    X: torch.Tensor,
-    Y_0: torch.Tensor,
-    A_list: List[sp.spmatrix],
-    b: torch.Tensor,
-    C: torch.Tensor,
-    rho: float,
-    eps_mult: float = 1.0,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    Compute Lagrange multipliers for the Newton step (simplified version).
-
-    This is a placeholder for the full Newton system solve.
-    In practice, this would solve the KKT system to get multipliers.
-
-    Args:
-        X: Current primal solution
-        Y_0: Initial solution
-        A_list: Constraint matrices
-        b: Constraint RHS
-        C: Cost matrix
-        rho: Cost constraint value
-        eps_mult: Perturbation multiplier
-
-    Returns:
-        (multipliers, violation) - multiplier vector and constraint violations
-    """
-    # Placeholder: would implement full KKT solve
-    # For now, return approximate multipliers
-    violation = eval_constraints(X, A_list, b, C, rho)
-    m = len(A_list) + 1
-    multipliers = torch.ones(m, dtype=X.dtype, device=X.device)
-
-    return multipliers, violation

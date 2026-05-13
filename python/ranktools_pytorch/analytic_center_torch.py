@@ -16,7 +16,6 @@ from .certificate import eval_certificate, check_certificate_psd, build_adjoint
 from .utils import (
     line_search_factorization,
     eval_constraints,
-    get_multipliers_newton,
 )
 
 
@@ -34,7 +33,7 @@ class AnalyticCenterResult:
     solver_time: float  # Total solve time in seconds
     num_iters: int  # Number of centering iterations
 
-
+# TODO this should be using the existing AnalyticCenterParams
 @dataclass
 class AnalyticCenterParams:
     """Parameters for analytic center computation."""
@@ -96,14 +95,14 @@ class AnalyticCenterPyTorch:
         Initialize analytic center certifier.
 
         Args:
-            C: Cost matrix (n × n, dense)
+            C: Cost matrix (n × n, dense) only upper-triangular part is used
             rho: Constraint value for cost (scalar)
             A_list: List of m constraint matrices (sparse, upper-triangular)
             b: Right-hand side for constraints (m,)
             params: Algorithm parameters
             device: Torch device (cuda or cpu)
         """
-        self.C = C.to(device=device, dtype=torch.float64)
+        self.C = torch.triu(C).to(device=device, dtype=torch.float64)
         self.rho = rho
         self.A_list = A_list  # Keep as scipy sparse
         self.b = b.to(device=device, dtype=torch.float64)
@@ -198,6 +197,7 @@ class AnalyticCenterPyTorch:
         X = X.to(device=self.device)
 
         # Ensure PSD via line search
+        # TODO lost support for custom perturbation on solution. 
         try:
             alpha, L = line_search_factorization(
                 X, self.params.delta * torch.eye(self.n, device=self.device)
@@ -241,9 +241,11 @@ class AnalyticCenterPyTorch:
                 break
 
             # Step 5: Update solution
+            # TODO This matrix was already computed in the line search. Should reuse it instead of recomputing the sum
             X = X + alpha * dZ
 
             # Step 6: Print iteration info
+            # TODO Logging should not use print statements because they can slow down GPU code.
             if self.params.verbose and (iter_idx + 1) % 10 == 1:
                 print(
                     f"{'Iter':>5} {'Violation':>12} {'StepNorm':>12} "
@@ -265,6 +267,7 @@ class AnalyticCenterPyTorch:
 
             # Step 8: Early stopping with certificate
             if self.params.early_stop_cert and iter_idx > 0:
+                # TODO why are we rebuilding the adjoint here? We already have S. Also this should be divided by the barrier parameter.
                 H = build_adjoint(multipliers, self.A_list, self.C)
                 H = (H + H.T) / 2
                 min_eig, complementarity = eval_certificate(H, Y_0)
@@ -284,7 +287,7 @@ class AnalyticCenterPyTorch:
 
         return X, multipliers
 
-    def _solve_for_multipliers(self, X: torch.Tensor) -> torch.Tensor:
+    def _solve_for_multipliers(self, X: torch.Tensor, Y0: torch.Tensor) -> torch.Tensor:
         """
         Solve for Lagrange multipliers using CG with matrix-free operator.
 
@@ -309,6 +312,7 @@ class AnalyticCenterPyTorch:
         ).matvec
 
         # Construct preconditioner
+        # TODO: Preconditioner should only occur once overall.
         try:
             precond = SparseLDLTPreconditioner(
                 X=X,
