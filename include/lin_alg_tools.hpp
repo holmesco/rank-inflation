@@ -719,14 +719,15 @@ class LowRankPrecond {
   }
 
  private:
-  bool is_initialized_;
-  const Matrix* U_;
-  const Matrix* C_;
-  const std::vector<Eigen::SparseMatrix<double>>* As_;
-  int rank_;
-  int dim;
-  int ncons;
-  double scale_;
+  bool is_initialized_;  // Tracks whether factorization/preconditioner is built
+  const Matrix* U_;      // Pointer to current low-rank factor U
+  const Matrix* C_;      // Pointer to cost matrix C
+  const std::vector<Eigen::SparseMatrix<double>>*
+      As_;        // Pointer to constraint matrices
+  int rank_;      // Rank of U (number of columns)
+  int dim;        // Dimension of decision matrix (C.cols())
+  int ncons;      // Number of constraints (As size + 1 for C)
+  double scale_;  // Scaling applied to the linear operator
 
   // built constraint matrix A_bar = [vec(A1) ... vec(Am) vec(C)]
   Eigen::SparseMatrix<double> A_bar_;

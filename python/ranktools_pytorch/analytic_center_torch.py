@@ -10,7 +10,7 @@ from typing import List, Optional, Tuple
 import torch
 import scipy.sparse as sp
 
-from .lin_alg_torch import MatrixFreeLagrangeOperator, SparseLDLTPreconditioner
+from .lin_alg_torch import MatrixFreeLagrangeOperator, LowRankPrecond
 from .solvers import ConjugateGradientSolver
 from .certificate import eval_certificate, check_certificate_psd, build_adjoint
 from .utils import (
@@ -314,7 +314,7 @@ class AnalyticCenterPyTorch:
         # Construct preconditioner
         # TODO: Preconditioner should only occur once overall.
         try:
-            precond = SparseLDLTPreconditioner(
+            precond = LowRankPrecond(
                 X=X,
                 A_list=self.A_list,
                 C=self.C,

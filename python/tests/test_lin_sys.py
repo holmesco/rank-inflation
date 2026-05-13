@@ -7,7 +7,7 @@ import torch
 
 from ranktools_pytorch.lin_alg_torch import (
     MatrixFreeLagrangeOperator,
-    SparseLDLTPreconditioner,
+    LowRankPrecond,
 )
 from .fixtures import (
     clique1_adj,
@@ -94,20 +94,22 @@ def test_matrix_free_operator_matches_explicit(adj, clique, name):
         (clique4_adj, [0, 1, 2], "Clique4_Disconnected"),
     ],
 )
-def test_sparse_ldlt_preconditioner_conditioning(adj, clique, name):
+def test_dense_lr_preconditioner_conditioning(adj, clique, name):
     sdp = make_lovasz_test_case(adj, clique, name)
     Y_0 = sdp.make_solution(1)
-    X = Y_0 @ Y_0.T + 1e-3 * torch.eye(sdp.dim, dtype=torch.float64)
+    Y_0 = torch.ones(Y_0.shape)
+    tau = 1e-5
+    X = Y_0 @ Y_0.T + tau * torch.eye(sdp.dim, dtype=torch.float64)
 
     scale = 1.0
     B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale)
     m = B_explicit.shape[0]
-
-    precond = SparseLDLTPreconditioner(X=X, A_list=sdp.A, C=sdp.C, tau=1e-3)
-
+    
+    precond = LowRankPrecond(U=Y_0, A_list=sdp.A, C=sdp.C, tau=tau, method="DenseLDLT")
     PB = torch.zeros_like(B_explicit)
     for i in range(m):
         PB[:, i] = precond.solve(B_explicit[:, i])
 
     cond_est = _condition_number_from_eigvals(PB)
     assert cond_est < 1.2, f"Preconditioned operator poorly conditioned: {cond_est}"
+

@@ -6,6 +6,7 @@ from typing import List, Tuple, Optional, Callable
 import torch
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
+import scipy.linalg as la
 import numpy as np
 
 
@@ -116,174 +117,244 @@ class MatrixFreeLagrangeOperator:
         return output
 
 
-class SparseLDLTPreconditioner:
+class LowRankPrecond:
     """
-    Sparse LDLT preconditioner for the Lagrange multiplier system.
+    Low-rank preconditioner for the Lagrange multiplier system.
 
-    Uses scipy.sparse for sparse factorization (on CPU), provides interface
-    for preconditioning on GPU via forward/backward solves.
-
-    Implementation follows equation 23 of Zhang and Lavaei 2017.
+    Implements the DenseLDLT and SparseLDLT variants of the augmented-system
+    preconditioner from Zhang and Lavaei (2017). The construction mirrors the
+    C++ implementation in lin_alg_tools.hpp.
     """
 
     def __init__(
         self,
-        X: torch.Tensor,
+        U: torch.Tensor,
         A_list: List[sp.spmatrix],
         C: torch.Tensor,
         tau: float = 1e-5,
+        method: str = "DenseLDLT",
+        use_approx: bool = False,
         device: torch.device = torch.device("cpu"),
     ):
-        """
-        Initialize and build sparse LDLT preconditioner.
-
-        Args:
-            X: Current primal solution (n × n)
-            A_list: List of m sparse constraint matrices (upper-triangular)
-            C: Cost matrix (n × n)
-            tau: Diagonal perturbation parameter
-            device: Torch device
-        """
-        self.X = X
+        self.U = U.to(device)
         self.A_list = A_list
-        self.C = torch.triu(C)
+        self.C = torch.triu(C).to(device)
         self.tau = tau
+        self.method = method.name if hasattr(method, "name") else str(method)
+        self.use_approx = use_approx
         self.device = device
-        self.n = X.shape[0]
+        self.n = U.shape[0]
+        self.r = U.shape[1]
         self.m = len(A_list) + 1
+        self.scale = 1.0
         self.is_initialized = False
 
-        self.ldlt_factor = None
+        self._sparse_factor = None
+        self._dense_ldlt = None
         self._build_preconditioner()
 
-    def _build_preconditioner(self):
-        """Build the sparse LDLT factorization of the augmented system."""
-        # Step 1: Build constraint matrix A_bar = [vec(A1) ... vec(Am) vec(C)]
-        A_bar = self._build_constraint_matrix()
+    def set_scale(self, scale: float) -> None:
+        self.scale = scale
 
-        # Step 2: Build top-right block V = A_bar^T @ (U ⊗ Z)
-        # For simplicity, use low-rank approximation if needed
-        V_sparse = self._build_top_right_block()
+    def _build_preconditioner(self) -> None:
+        if self.method == "DenseLDLT":
+            self.build_ldlt_dense()
+        elif self.method in ("SparseLDLT", "SparseLDLT_ZL"):
+            self.build_ldlt_sparse()
+        else:
+            raise NotImplementedError(
+                f"LowRankPrecond only supports DenseLDLT and SparseLDLT. "
+                f"Got method={self.method}."
+            )
 
-        # Step 3: Assemble augmented system (stays sparse)
-        # [tau^2 * (A_bar^T A_bar),  tau * V;
-        #  tau * V^T,                -tau^2 * I]
+    def build_ldlt_dense(self) -> None:
+        if self.U is None or self.C is None or self.A_list is None:
+            raise RuntimeError("LowRankPrecond: Problem data not set.")
+
+        A_bar = self.build_constraint_matrix(self.A_list, self.C)
+        V = self.build_top_right(self.U, self.tau)
+
         tau2 = self.tau**2
+        AtA = (A_bar.T @ A_bar).toarray()
+
+        n_sys = self.m + V.shape[1]
+        Sys = np.zeros((n_sys, n_sys), dtype=np.float64)
+        Sys[: self.m, : self.m] = AtA * tau2
+        Sys[: self.m, self.m :] = V * self.tau
+        Sys[self.m :, self.m :] = -np.eye(V.shape[1]) * tau2
+
+        try:
+            # Note: ldl already permutes the L matrix so that it isn't upper triangular
+            L, D, perm = la.ldl(Sys, lower=False)
+            self._dense_ldlt = (L[perm, :], D, perm)
+            self.is_initialized = True
+        except Exception as exc:
+            raise RuntimeError(f"Dense LDLT factorization failed: {exc}")
+
+    def build_ldlt_sparse(self) -> None:
+        if self.U is None or self.C is None or self.A_list is None:
+            raise RuntimeError("LowRankPrecond: Problem data not set.")
+
+        A_bar = self.build_constraint_matrix(self.A_list, self.C)
+        V_sparse = self.build_top_right_sparse(self.U, self.tau)
+        V_sparse = V_sparse * self.tau
+        V_sparse = V_sparse.tocsc()
+
+        rdim = V_sparse.shape[1]
+        nsys = self.m + rdim
+        tau2 = self.tau**2
+
         AtA = A_bar.T @ A_bar
 
-        # Build triplet format for efficiency
         row_indices = []
         col_indices = []
         values = []
 
-        # Top-left block: tau^2 * AtA
         AtA_coo = AtA.tocoo()
         for i, j, v in zip(AtA_coo.row, AtA_coo.col, AtA_coo.data):
             row_indices.append(i)
             col_indices.append(j)
             values.append(tau2 * v)
 
-        # Top-right block: tau * V and bottom-left: tau * V^T
         V_coo = V_sparse.tocoo()
         for i, j, v in zip(V_coo.row, V_coo.col, V_coo.data):
             row_indices.append(i)
             col_indices.append(self.m + j)
-            values.append(self.tau * v)
-            # Symmetric: V^T
+            values.append(v)
             row_indices.append(self.m + j)
             col_indices.append(i)
-            values.append(self.tau * v)
+            values.append(v)
 
-        # Bottom-right block: -tau^2 * I
-        r_dim = V_sparse.shape[1]
-        for i in range(r_dim):
+        for i in range(rdim):
             row_indices.append(self.m + i)
             col_indices.append(self.m + i)
             values.append(-tau2)
 
-        # Assemble sparse matrix
-        n_sys = self.m + r_dim
         augmented_sys = sp.csr_matrix(
-            (values, (row_indices, col_indices)), shape=(n_sys, n_sys)
-        )
-        augmented_sys = augmented_sys.tocsc()
+            (values, (row_indices, col_indices)), shape=(nsys, nsys)
+        ).tocsc()
         augmented_sys.sum_duplicates()
 
-        # Factorize with sparse LDLT
         try:
-            self.ldlt_factor = spla.splu(
+            self._sparse_factor = spla.splu(
                 augmented_sys, permc_spec="COLAMD", diag_pivot_thresh=0.1
             )
             self.is_initialized = True
-        except Exception as e:
-            raise RuntimeError(f"Sparse LDLT factorization failed: {e}")
+        except Exception as exc:
+            raise RuntimeError(f"Sparse LDLT factorization failed: {exc}")
 
-    def _build_constraint_matrix(self) -> sp.csr_matrix:
-        """
-        Build vectorized constraint matrix A_bar = [vec(A1) ... vec(Am) vec(C)].
+    @staticmethod
+    def build_constraint_matrix(
+        A_list: List[sp.spmatrix], C: torch.Tensor
+    ) -> sp.csr_matrix:
+        dim = C.shape[0]
+        ncons = len(A_list) + 1
 
-        Returns:
-            Sparse matrix of shape (n^2, m)
-        """
-        n = self.n
-        m_const = self.m - 1  # Number of linear constraints
+        rows: List[int] = []
+        cols: List[int] = []
+        vals: List[float] = []
 
-        triplets = []
+        for i, A in enumerate(A_list):
+            A_coo = A.tocoo()
+            for r, c, v in zip(A_coo.row, A_coo.col, A_coo.data):
+                if c > r:
+                    row_idx = c * dim + r
+                    rows.append(row_idx)
+                    cols.append(i)
+                    vals.append(v)
+                    row_idx = r * dim + c
+                    rows.append(row_idx)
+                    cols.append(i)
+                    vals.append(v)
+                elif c == r:
+                    row_idx = c * dim + r
+                    rows.append(row_idx)
+                    cols.append(i)
+                    vals.append(v)
 
-        # Vectorize each constraint matrix
-        for k in range(m_const):
-            A_k = self.A_list[k].tocoo()
-            for i, j, v in zip(A_k.row, A_k.col, A_k.data):
-                row = i * n + j
-                col = k
-                triplets.append((row, col, v))
+        C_np = C.detach().cpu().numpy()
+        for r in range(dim):
+            for c in range(r, dim):
+                v = C_np[r, c]
+                if v != 0.0:
+                    row_idx = c * dim + r
+                    rows.append(row_idx)
+                    cols.append(ncons - 1)
+                    vals.append(v)
+                    if c != r:
+                        row_idx = r * dim + c
+                        rows.append(row_idx)
+                        cols.append(ncons - 1)
+                        vals.append(v)
 
-        # Vectorize cost matrix C
-        C_np = self.C.cpu().numpy()
-        C_sparse = sp.csr_matrix(C_np)
-        C_coo = C_sparse.tocoo()
-        for i, j, v in zip(C_coo.row, C_coo.col, C_coo.data):
-            row = i * n + j
-            col = m_const
-            triplets.append((row, col, v))
+        if not rows:
+            return sp.csr_matrix((dim * dim, ncons))
 
-        rows, cols, vals = zip(*triplets)
-        A_bar = sp.csr_matrix((vals, (rows, cols)), shape=(n * n, self.m))
-        return A_bar
+        return sp.csr_matrix((vals, (rows, cols)), shape=(dim * dim, ncons))
 
-    def _build_top_right_block(self) -> sp.csr_matrix:
-        """
-        Build top-right block V = A_bar^T @ (U ⊗ Z).
+    def build_top_right(self, U: torch.Tensor, tau: float) -> np.ndarray:
+        U_np = U.detach().cpu().numpy()
+        dim, rank = U_np.shape
+        top_right = np.zeros((self.m, (rank + dim) * rank), dtype=np.float64)
 
-        For simplicity, returns zero matrix (can be improved with low-rank approx).
+        s = np.sqrt(2.0 * tau)
+        uaiu_size = rank * rank
+        aiu_size = dim * rank
 
-        Returns:
-            Sparse matrix of shape (m, r)
-        """
-        # Placeholder: low-rank structure not used in basic version
-        return sp.csr_matrix((self.m, 0))
+        for i, A in enumerate(self.A_list):
+            A_sym = A + A.T - sp.diags(A.diagonal())
+            AiU = A_sym @ U_np
+            UAiU = U_np.T @ AiU
+            top_right[i, :uaiu_size] = UAiU.reshape(-1, order="F")
+            top_right[i, uaiu_size:] = AiU.reshape(-1, order="F") * s
+
+        C_sym = self._symmetrize_dense(self.C)
+        CU = C_sym @ U_np
+        UCU = U_np.T @ CU
+        top_right[self.m - 1, :uaiu_size] = UCU.reshape(-1, order="F")
+        top_right[self.m - 1, uaiu_size:] = CU.reshape(-1, order="F") * s
+
+        return top_right
+
+    def build_top_right_sparse(self, U: torch.Tensor, tau: float) -> sp.csr_matrix:
+        top_right_dense = self.build_top_right(U, tau)
+        vmax = np.max(np.abs(top_right_dense)) if top_right_dense.size else 0.0
+        drop_tol = max(1e-14, 1e-12 * vmax)
+        if drop_tol > 0.0:
+            top_right_dense[np.abs(top_right_dense) < drop_tol] = 0.0
+        return sp.csr_matrix(top_right_dense)
+
+    @staticmethod
+    def _symmetrize_dense(C: torch.Tensor) -> np.ndarray:
+        C_np = C.detach().cpu().numpy()
+        C_upper = np.triu(C_np)
+        return C_upper + C_upper.T - np.diag(np.diag(C_upper))
 
     def solve(self, b: torch.Tensor) -> torch.Tensor:
-        """
-        Apply preconditioner: x = M^{-1} @ b.
-
-        Args:
-            b: Right-hand side vector (m,) on GPU
-
-        Returns:
-            Solution vector (m,) on GPU
-        """
         if not self.is_initialized:
             raise RuntimeError("Preconditioner not initialized")
 
-        # Move to CPU for sparse solve
-        b_np = b.cpu().numpy()
+        b_np = b.detach().cpu().numpy() / self.scale
 
-        # Solve with sparse LDLT
-        x_np = self.ldlt_factor.solve(b_np)
+        if self.method == "DenseLDLT":
+            L, D, perm = self._dense_ldlt
+            # pad rhs vector with zeros
+            b_np = np.concatenate((b_np, np.zeros(L.shape[0] - self.m)))
+            # Permute and solve
+            b_perm = b_np[perm]
+            y = la.solve_triangular(L, b_perm, lower=False, unit_diagonal=True)
+            z = np.linalg.solve(D, y)
+            x_perm = la.solve_triangular(L.T, z, lower=True, unit_diagonal=True)
+            x_np = np.empty_like(x_perm)
+            x_np[perm] = x_perm
+            x_np = x_np[: self.m]
+        else:
+            sysdim = self._sparse_factor.L.shape[0]
+            rhs = np.zeros(sysdim, dtype=np.float64)
+            rhs[: self.m] = b_np
+            x_np = self._sparse_factor.solve(rhs)[: self.m]
 
-        # Move back to original device
-        x = torch.from_numpy(x_np).to(dtype=torch.float64, device=self.device)
+        return torch.from_numpy(x_np).to(dtype=torch.float64, device=self.device)
 
-        return x
 
+LowRankPreconditioner = LowRankPrecond
