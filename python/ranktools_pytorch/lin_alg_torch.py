@@ -9,6 +9,8 @@ import scipy.sparse.linalg as spla
 import scipy.linalg as la
 import numpy as np
 
+from ranktools_pytorch.certificate import build_adjoint, build_adjoint_batched
+
 
 def sparse_upper_dot_dense(
     A_upper_sparse: sp.spmatrix, M: torch.Tensor
@@ -41,7 +43,7 @@ def sparse_upper_dot_dense(
     return torch.tensor(result, dtype=M.dtype, device=M.device)
 
 
-class MatrixFreeLagrangeOperator:
+class KKTMatrixOperator:
     """
     Matrix-free linear operator for the Lagrange multiplier system.
 
@@ -54,6 +56,7 @@ class MatrixFreeLagrangeOperator:
         X: torch.Tensor,
         A_list: List[sp.spmatrix],
         C: torch.Tensor,
+        A_batched: Optional[torch.Tensor] = None,
         scale: float = 1.0,
         device: torch.device = torch.device("cpu"),
     ):
@@ -74,6 +77,11 @@ class MatrixFreeLagrangeOperator:
         self.device = device
         self.n = X.shape[0]
         self.m = len(A_list) + 1  # +1 for cost constraint
+        if A_batched is not None:
+            self.A_batch = A_batched.to(device)
+            self.batch_constraints = True
+        else:
+            self.batch_constraints = False
 
     def matvec(self, y: torch.Tensor) -> torch.Tensor:
         """
@@ -85,23 +93,29 @@ class MatrixFreeLagrangeOperator:
         Returns:
             Result vector (m,)
         """
+        if self.batch_constraints:
+            return self._matvec_batched(y)
+        else:
+            return self.matvec_loop(y)
+
+    def _matvec_batched(self, y: torch.Tensor) -> torch.Tensor:
+        y = y.to(self.device)
+        # Build Adjoint
+        S = build_adjoint_batched(y, self.A_batch, scale=1.0)
+        # Compute X @ S @ X
+        XS = self.X @ S
+        XSX = XS @ self.X.T
+        # Compute output traces tr(A_i^T @ XSX) = A_i dot XSX for each constraint using batch
+        out = (self.A_batch * XSX).sum(dim=(1, 2)) * self.scale
+        return out
+
+    def matvec_loop(self, y: torch.Tensor) -> torch.Tensor:
         y = y.to(self.device)
 
-        # Step 1: Build S = sum_i A_i * y_i + C * y_{m-1}
-        # Start with cost term
-        S = y[-1] * torch.triu(self.C)
+        # Build Adjoint
+        S = build_adjoint(y, self.A_list, torch.triu(self.C), scale=1.0)
 
-        # Add constraint terms (convert sparse to dense on GPU)
-        for i in range(len(self.A_list)):
-            A_i_dense = torch.from_numpy(self.A_list[i].toarray()).to(
-                dtype=torch.float64, device=self.device
-            )
-            S = S + y[i] * A_i_dense
-
-        # Ensure S is symmetric (since A_i are symmetric, copy lower to upper)
-        S = S + S.T - torch.diag(S.diag())
-
-        # Step 2: Compute X @ S @ X (batched matrix multiplications on GPU)
+        # Step 2: Compute X @ S @ X
         XS = self.X @ S
         XSX = XS @ self.X.T
 
@@ -150,7 +164,7 @@ class DiagonalPreconditioner:
         upper = torch.triu(mat)
         return upper + upper.T - torch.diag(torch.diagonal(upper))
 
-    def compute(self, op: MatrixFreeLagrangeOperator) -> "DiagonalPreconditioner":
+    def compute(self, op: KKTMatrixOperator) -> "DiagonalPreconditioner":
         """Compute diagonal preconditioner from a matrix-free operator."""
         return self.compute_from_data(op.X, op.A_list, op.C, op.scale)
 

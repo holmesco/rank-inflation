@@ -6,7 +6,7 @@ import pytest
 import torch
 
 from ranktools_pytorch.lin_alg_torch import (
-    MatrixFreeLagrangeOperator,
+    KKTMatrixOperator,
     LowRankPrecond,
 )
 from ranktools_pytorch.utils import line_search_factorization
@@ -72,7 +72,7 @@ def test_matrix_free_operator_matches_explicit(adj, clique, name):
     )  # Perturb to ensure PSD
 
     scale = 1.0
-    lin_op = MatrixFreeLagrangeOperator(X=X, A_list=sdp.A, C=sdp.C, scale=scale)
+    lin_op = KKTMatrixOperator(X=X, A_list=sdp.A, C=sdp.C, scale=scale)
 
     B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale)
     m = B_explicit.shape[0]
@@ -122,7 +122,7 @@ def test_cg_preconditioned_inverse_matches_exact(adj, clique, name):
     X = Y_0 @ Y_0.T + tau * torch.eye(sdp.dim, dtype=torch.float64)
 
     scale = 1.0
-    lin_op = MatrixFreeLagrangeOperator(X=X, A_list=sdp.A, C=sdp.C, scale=scale)
+    lin_op = KKTMatrixOperator(X=X, A_list=sdp.A, C=sdp.C, scale=scale)
     B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale)
     m = B_explicit.shape[0]
 
@@ -159,7 +159,7 @@ def test_cg_preconditioned_inverse_right_inverse_low_tol(adj, clique, name):
     X = Y_0 @ Y_0.T + tau * torch.eye(sdp.dim, dtype=torch.float64)
 
     scale = 1.0
-    lin_op = MatrixFreeLagrangeOperator(X=X, A_list=sdp.A, C=sdp.C, scale=scale)
+    lin_op = KKTMatrixOperator(X=X, A_list=sdp.A, C=sdp.C, scale=scale)
     B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale)
     m = B_explicit.shape[0]
 
@@ -180,4 +180,3 @@ def test_cg_preconditioned_inverse_right_inverse_low_tol(adj, clique, name):
     right_inverse = B_explicit @ B_inv_cg
 
     torch.testing.assert_close(right_inverse, I, atol=1e-4, rtol=0.0)
-   

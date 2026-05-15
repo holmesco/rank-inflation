@@ -143,7 +143,7 @@ def test_certify_lovasz_theta_cg_solve(adj, clique, name):
 # TESTS ON STANARD RANK 1 PROBLEMS
 problem_names = ["test_prob_10G"]
 @pytest.mark.parametrize("name", problem_names)
-def test_certify_lovasz_theta_cg_solve(name):
+def test_certify_standard_cg_solve(name):
     sdp = load_problem_from_file(name)
     Y_0 = sdp.soln
     

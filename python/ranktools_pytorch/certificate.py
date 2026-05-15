@@ -7,6 +7,7 @@ import torch
 
 from ranktools_pytorch.utils import symmetrize_dense
 
+
 def eval_certificate(
     H: torch.Tensor,
     Y_0: torch.Tensor,
@@ -114,5 +115,29 @@ def build_adjoint(
 
     # Symmetrize the upper triangular matrix
     S = symmetrize_dense(torch.triu(S)) * scale
-    
+
     return S
+
+
+def build_adjoint_batched(
+    multipliers: torch.Tensor,
+    A_batch: torch.Tensor,
+    scale: float = 1.0,
+) -> torch.Tensor:
+    """
+    Build the adjoint (dual matrix) from multipliers using batched constraints.
+
+    Computes: S = scale * sum_i multiplier_i * A_i
+
+    Args:
+        multipliers: Lagrange multipliers (m,)
+        A_batch: Batched constraint/cost matrices (m × n × n), already symmetrized
+        scale: Scaling factor
+
+    Returns:
+        Dual matrix S (n × n), dense and symmetrized
+    """
+    # Weighted sum across batch dimension
+    S = (multipliers[:, None, None] * A_batch).sum(dim=0)
+
+    return S * scale

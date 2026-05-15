@@ -152,9 +152,11 @@ def sparse_upper_triangular_to_symmetric(A_sparse: sp.spmatrix) -> sp.csr_matrix
 
 
 def symmetrize_dense(mat: torch.Tensor) -> torch.Tensor:
-    """Symmetrize a dense matrix by copying upper triangle to lower."""
-    return mat + mat.T - torch.diag(mat.diag())
-
+    """Symmetrize a dense matrix (supports batched tensors)."""
+    if mat.ndim < 2:
+        raise ValueError("mat must be at least 2D.")
+    diag = torch.diagonal(mat, dim1=-2, dim2=-1)
+    return mat + mat.transpose(-2, -1) - torch.diag_embed(diag)
 
 def symmetrize_sparse_to_torch(mat: sp.spmatrix) -> torch.Tensor:
     """Convert sparse matrix to dense torch tensor and symmetrize."""
