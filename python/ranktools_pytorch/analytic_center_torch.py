@@ -185,7 +185,6 @@ class AnalyticCenterPyTorch:
         # Build certificate matrix
         multipliers = multipliers / multipliers[-1]
         H = build_adjoint(multipliers, self.A_list, self.C)
-        H = H + H.T - torch.diag(torch.diagonal(H))
 
         # Evaluate certificate
         min_eig, complementarity = eval_certificate(H, Y_0)
@@ -269,16 +268,13 @@ class AnalyticCenterPyTorch:
             multipliers, violation = self._solve_for_multipliers(X, eps_mult)
             violation_norm = violation.norm()
             barrier = 1 / multipliers[-1]
-            # Step 3: Compute Newton step direction
+            # Compute the dual matrix (adjoint) for the Newton step
             S = build_adjoint(multipliers, self.A_list, self.C)
-            # Symmetrize upper-triangular S
-            S = S + S.T - torch.diag(torch.diagonal(S))
-
             # Define the Newton step
             delta_X = X - X @ S @ X
             delta_X_norm = delta_X.norm()
-
             #  Line search for PSDness
+            L_prev = L.clone()
             alpha, X_new, L = line_search_factorization(
                 X,
                 delta_X,
@@ -292,7 +288,7 @@ class AnalyticCenterPyTorch:
             # compute complementarity
             complementarity = compute_complementarity(H, Y_0)
             # compute centrality metric
-            centrality = (L.T @ S @ L - torch.eye(self.dim, device=self.device)).norm()
+            centrality = (L_prev.T @ S @ L_prev - torch.eye(self.dim, device=self.device)).norm()
             # Compute deviation angle
             cos_angle = (Y_0.T @ X @ Y_0).trace() / Y_0.norm() ** 2 / X.norm()
             angle = torch.acos(torch.clamp(cos_angle, -1.0, 1.0)).item()

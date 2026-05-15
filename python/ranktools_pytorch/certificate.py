@@ -5,6 +5,7 @@ Certificate evaluation utilities.
 from typing import Tuple
 import torch
 
+from ranktools_pytorch.utils import symmetrize_dense
 
 def eval_certificate(
     H: torch.Tensor,
@@ -98,7 +99,7 @@ def build_adjoint(
         scale: Scaling factor
 
     Returns:
-        Dual matrix S (n × n), upper triagular
+        Dual matrix S (n × n), dense and symmetrized
     """
     device = C.device
     dtype = C.dtype
@@ -111,4 +112,7 @@ def build_adjoint(
         A_i_dense = torch.from_numpy(A_list[i].toarray()).to(dtype=dtype, device=device)
         S = S + multipliers[i] * A_i_dense
 
-    return scale * torch.triu(S)
+    # Symmetrize the upper triangular matrix
+    S = symmetrize_dense(torch.triu(S)) * scale
+    
+    return S
