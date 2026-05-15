@@ -64,8 +64,8 @@ def defaultAnalyicCenterParams() -> AnalyticCenterParams:
     params.lin_solve_tol = 1.0e-5
 
     # Low-rank preconditioner params
-    params.lrp_params.tau = 1.0e-5
-    params.lrp_params.method = LowRankPrecondMethod.SparseLDLT
+    params.lrp_params.tau = 1.0e-4
+    params.lrp_params.method = LowRankPrecondMethod.DenseLDLT
     params.lrp_params.use_approx = False
     params.lrp_params.ldlt_zero_thresh = 1.0e-14
 
@@ -150,10 +150,11 @@ class AnalyticCenterPyTorch:
         self.cg_solver = ConjugateGradientSolver(
             max_iter=self.params.lin_solve_max_iter,
             tol=self.params.lin_solve_tol,
-            verbose=False,
         )
         # preconditioner
         self.precond: None | LowRankPrecond = None
+        # Stored multipliers
+        self.multipliers_stored_: None | torch.Tensor = None
 
     def certify(
         self,
@@ -250,7 +251,8 @@ class AnalyticCenterPyTorch:
             U=Y_0,
             A_list=self.A_list,
             C=self.C,
-            tau=self.params.precond_tau,
+            tau=self.params.lrp_params.tau,
+            method="DenseLDLT",
             device=self.device,
         )
 
@@ -334,33 +336,32 @@ class AnalyticCenterPyTorch:
         Returns:
             Multipliers (m,)
         """
+        
         # Construct matrix-free operator
-        scale = self.params.eps_cost  # Perturbation scale
-        matvec_fn = MatrixFreeLagrangeOperator(
+        linop = MatrixFreeLagrangeOperator(
             X=X,
             A_list=self.A_list,
             C=self.C,
-            scale=scale,
             device=self.device,
-        ).matvec
+        )
 
         # Construct RHS (matches C++ build_ac_system)
-        # d_i = tr(A_i X) + (tr(A_i X) - val_i)
-        # val_i = b_i (+ eps_mult * eps_constr * tr(A_i) if perturb_constraints)
-        # val_cost = rho (+ eps_mult * eps_cost * tr(C) if perturb_cost)
         dtype = X.dtype
         device = X.device
         m = len(self.A_list) + 1
         d = torch.zeros(m, dtype=dtype, device=device)
 
+        # Symmetrize upper-triangular C for trace computations
+        C_sym = self.C + self.C.T - torch.diag(torch.diagonal(self.C))
         # Precompute trace(C)
-        trace_C = torch.diagonal(self.C).sum()
+        trace_C = torch.diagonal(C_sym).sum()
 
         for i in range(len(self.A_list)):
             A_i = self.A_list[i]
             trace_Ai = float(A_i.diagonal().sum())
             A_i_dense = torch.from_numpy(A_i.toarray()).to(dtype=dtype, device=device)
-            trace_Ai_X = (A_i_dense * X).sum()
+            A_i_sym = A_i_dense + A_i_dense.T - torch.diag(torch.diagonal(A_i_dense))
+            trace_Ai_X = (A_i_sym * X).sum()
 
             if self.params.perturb_constraints:
                 val = self.b[i] + eps_mult * self.params.eps_constr * trace_Ai
@@ -370,7 +371,7 @@ class AnalyticCenterPyTorch:
             violation = trace_Ai_X - val
             d[i] = trace_Ai_X + violation
 
-        trace_C_X = (self.C * X).sum()
+        trace_C_X = (C_sym * X).sum()
         if self.params.perturb_cost:
             val_cost = self.rho + eps_mult * self.params.eps_cost * trace_C
         else:
@@ -379,12 +380,19 @@ class AnalyticCenterPyTorch:
         d[-1] = trace_C_X + violation_cost
 
         # Solve via CG
-        assert self.precond is not None, ValueError("Preconditioner was not defined.")
-        multipliers, num_iters = self.cg_solver.solve(
+        assert self.precond is not None and self.precond.is_initialized, ValueError(
+            "Preconditioner was not defined or was not initialized properly."
+        )
+
+        cg_result = self.cg_solver.solve(
             b=d,
-            matvec_fn=matvec_fn,
+            matvec_fn=linop.matvec,
             precond_solve_fn=self.precond.solve,
         )
+        multipliers = cg_result.solution
+        # Update stored multipliers
+        if self.params.reuse_multipliers:
+            self.multipliers_stored_ = multipliers
 
         return multipliers
 

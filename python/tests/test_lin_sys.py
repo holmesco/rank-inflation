@@ -9,6 +9,7 @@ from ranktools_pytorch.lin_alg_torch import (
     MatrixFreeLagrangeOperator,
     LowRankPrecond,
 )
+from ranktools_pytorch.utils import line_search_factorization
 from ranktools_pytorch.solvers import ConjugateGradientSolver
 from .fixtures import (
     clique1_adj,
@@ -17,6 +18,13 @@ from .fixtures import (
     clique4_adj,
     make_lovasz_test_case,
 )
+
+PARAM_CLIQUES = [
+    (clique1_adj, [1, 3, 4, 6, 7, 8], "Clique1"),
+    (clique2_adj, [0, 2, 3, 5, 6, 8, 9], "Clique2"),
+    (clique3_adj, [4, 10, 13, 14, 15, 16, 17, 18], "Clique3_Large20x20"),
+    (clique4_adj, [0, 1, 2], "Clique4_Disconnected"),
+]
 
 
 # Symmetrize a dense matrix that may store only the upper triangle.
@@ -54,15 +62,7 @@ def _condition_number_from_eigvals(matrix: torch.Tensor) -> torch.Tensor:
     return max_abs / min_abs
 
 
-@pytest.mark.parametrize(
-    "adj,clique,name",
-    [
-        (clique1_adj, [1, 3, 4, 6, 7, 8], "Clique1"),
-        (clique2_adj, [0, 2, 3, 5, 6, 8, 9], "Clique2"),
-        (clique3_adj, [4, 10, 13, 14, 15, 16, 17, 18], "Clique3_Large20x20"),
-        (clique4_adj, [0, 1, 2], "Clique4_Disconnected"),
-    ],
-)
+@pytest.mark.parametrize("adj,clique,name", PARAM_CLIQUES)
 def test_matrix_free_operator_matches_explicit(adj, clique, name):
     # Verify matrix-free operator matches explicit dense construction.
     sdp = make_lovasz_test_case(adj, clique, name)
@@ -91,20 +91,11 @@ def test_matrix_free_operator_matches_explicit(adj, clique, name):
     )
 
 
-@pytest.mark.parametrize(
-    "adj,clique,name",
-    [
-        (clique1_adj, [1, 3, 4, 6, 7, 8], "Clique1"),
-        (clique2_adj, [0, 2, 3, 5, 6, 8, 9], "Clique2"),
-        (clique3_adj, [4, 10, 13, 14, 15, 16, 17, 18], "Clique3_Large20x20"),
-        (clique4_adj, [0, 1, 2], "Clique4_Disconnected"),
-    ],
-)
+@pytest.mark.parametrize("adj,clique,name", PARAM_CLIQUES)
 def test_dense_lr_preconditioner_conditioning(adj, clique, name):
     # Check the low-rank preconditioner improves conditioning.
     sdp = make_lovasz_test_case(adj, clique, name)
     Y_0 = sdp.make_solution(1)
-    Y_0 = torch.ones(Y_0.shape)
     tau = 1e-5
     X = Y_0 @ Y_0.T + tau * torch.eye(sdp.dim, dtype=torch.float64)
 
@@ -121,20 +112,11 @@ def test_dense_lr_preconditioner_conditioning(adj, clique, name):
     assert cond_est < 1.2, f"Preconditioned operator poorly conditioned: {cond_est}"
 
 
-@pytest.mark.parametrize(
-    "adj,clique,name",
-    [
-        (clique1_adj, [1, 3, 4, 6, 7, 8], "Clique1"),
-        (clique2_adj, [0, 2, 3, 5, 6, 8, 9], "Clique2"),
-        (clique3_adj, [4, 10, 13, 14, 15, 16, 17, 18], "Clique3_Large20x20"),
-        (clique4_adj, [0, 1, 2], "Clique4_Disconnected"),
-    ],
-)
+@pytest.mark.parametrize("adj,clique,name", PARAM_CLIQUES)
 def test_cg_preconditioned_inverse_matches_exact(adj, clique, name):
     # Solve B x = e_i with CG+preconditioner and compare to explicit inverse.
     sdp = make_lovasz_test_case(adj, clique, name)
     Y_0 = sdp.make_solution(1)
-    Y_0 = torch.ones(Y_0.shape)
     # Note tau must be set large for this test to ensure that B is actually invertible and not horribly conditioned.
     tau = 1e-1
     X = Y_0 @ Y_0.T + tau * torch.eye(sdp.dim, dtype=torch.float64)
@@ -151,12 +133,12 @@ def test_cg_preconditioned_inverse_matches_exact(adj, clique, name):
     B_inv_cg = torch.zeros_like(B_explicit)
     for i in range(m):
         rhs = I[:, i]
-        sol, _ = cg.solve(
+        result = cg.solve(
             b=rhs,
             matvec_fn=lin_op.matvec,
             precond_solve_fn=precond.solve,
         )
-        B_inv_cg[:, i] = sol
+        B_inv_cg[:, i] = result.solution
 
     B_inv_explicit = torch.linalg.solve(B_explicit, I)
 
@@ -168,20 +150,11 @@ def test_cg_preconditioned_inverse_matches_exact(adj, clique, name):
     )
 
 
-@pytest.mark.parametrize(
-    "adj,clique,name",
-    [
-        (clique1_adj, [1, 3, 4, 6, 7, 8], "Clique1"),
-        (clique2_adj, [0, 2, 3, 5, 6, 8, 9], "Clique2"),
-        (clique3_adj, [4, 10, 13, 14, 15, 16, 17, 18], "Clique3_Large20x20"),
-        (clique4_adj, [0, 1, 2], "Clique4_Disconnected"),
-    ],
-)
+@pytest.mark.parametrize("adj,clique,name", PARAM_CLIQUES)
 def test_cg_preconditioned_inverse_right_inverse_low_tol(adj, clique, name):
     # Verify B * B_inv_cg ≈ I (right-inverse) at loose tolerance.
     sdp = make_lovasz_test_case(adj, clique, name)
     Y_0 = sdp.make_solution(1)
-    Y_0 = torch.ones(Y_0.shape)
     tau = 1e-4
     X = Y_0 @ Y_0.T + tau * torch.eye(sdp.dim, dtype=torch.float64)
 
@@ -197,18 +170,14 @@ def test_cg_preconditioned_inverse_right_inverse_low_tol(adj, clique, name):
     B_inv_cg = torch.zeros_like(B_explicit)
     for i in range(m):
         rhs = I[:, i]
-        sol, _ = cg.solve(
+        result = cg.solve(
             b=rhs,
             matvec_fn=lin_op.matvec,
             precond_solve_fn=precond.solve,
         )
-        B_inv_cg[:, i] = sol
+        B_inv_cg[:, i] = result.solution
 
     right_inverse = B_explicit @ B_inv_cg
 
-    torch.testing.assert_close(
-        right_inverse,
-        I,
-        atol=1e-4,
-        rtol=0.0
-    )
+    torch.testing.assert_close(right_inverse, I, atol=1e-4, rtol=0.0)
+   

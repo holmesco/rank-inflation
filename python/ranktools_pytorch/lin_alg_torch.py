@@ -112,9 +112,96 @@ class MatrixFreeLagrangeOperator:
             output[i] = sparse_upper_dot_dense(self.A_list[i], XSX) * self.scale
 
         # Cost constraint trace
-        output[-1] = (self.C * XSX).sum() * self.scale
+        C_sym = self.C + self.C.T - torch.diag(torch.diagonal(self.C))
+        output[-1] = (C_sym * XSX).sum() * self.scale
 
         return output
+
+
+class DiagonalPreconditioner:
+    """
+    Diagonal preconditioner for the matrix-free Lagrange multiplier system.
+
+    Mirrors the C++ MultiplierDiagPreconditioner by using
+    diag_i = tr((A_i X) (A_i X)) and diag_cost = tr((C X) (C X)).
+    """
+
+    def __init__(
+        self,
+        X: Optional[torch.Tensor] = None,
+        A_list: Optional[List[sp.spmatrix]] = None,
+        C: Optional[torch.Tensor] = None,
+        scale: float = 1.0,
+        device: torch.device = torch.device("cpu"),
+    ):
+        self.inv_diag: Optional[torch.Tensor] = None
+        self.is_initialized = False
+        self.scale = scale
+        self.device = device
+        self.X: Optional[torch.Tensor] = X
+        self.A_list: Optional[List[sp.spmatrix]] = A_list
+        self.C: Optional[torch.Tensor] = C
+
+        if X is not None and A_list is not None and C is not None:
+            self.compute_from_data(X, A_list, C, scale)
+
+    @staticmethod
+    def _symmetrize_dense_upper(mat: torch.Tensor) -> torch.Tensor:
+        upper = torch.triu(mat)
+        return upper + upper.T - torch.diag(torch.diagonal(upper))
+
+    def compute(self, op: MatrixFreeLagrangeOperator) -> "DiagonalPreconditioner":
+        """Compute diagonal preconditioner from a matrix-free operator."""
+        return self.compute_from_data(op.X, op.A_list, op.C, op.scale)
+
+    def compute_from_data(
+        self,
+        X: Optional[torch.Tensor],
+        A_list: Optional[List[sp.spmatrix]] = None,
+        C: Optional[torch.Tensor] = None,
+        scale: float = 1.0,
+    ) -> "DiagonalPreconditioner":
+        """Compute diagonal preconditioner from problem data."""
+        if X is not None:
+            self.X = X
+        if A_list is not None:
+            self.A_list = A_list
+        if C is not None:
+            self.C = C
+
+        if self.X is None or self.A_list is None or self.C is None:
+            raise RuntimeError("Preconditioner data not set")
+
+        X = self.X.to(self.device)
+        C = self.C.to(self.device)
+        A_list = self.A_list
+        self.scale = scale
+
+        m = len(A_list) + 1
+        inv_diag = torch.zeros(m, dtype=X.dtype, device=self.device)
+
+        for i, A_i in enumerate(A_list):
+            A_i_dense = torch.from_numpy(A_i.toarray()).to(
+                dtype=X.dtype, device=self.device
+            )
+            A_i_sym = self._symmetrize_dense_upper(A_i_dense)
+            AX = A_i_sym @ X
+            diag_val = torch.trace(AX @ AX) * self.scale
+            inv_diag[i] = 1.0 / diag_val if diag_val != 0 else 1.0
+
+        C_sym = self._symmetrize_dense_upper(C)
+        CX = C_sym @ X
+        diag_cost = torch.trace(CX @ CX) * self.scale
+        inv_diag[m - 1] = 1.0 / diag_cost if diag_cost != 0 else 1.0
+
+        self.inv_diag = inv_diag
+        self.is_initialized = True
+        return self
+
+    def solve(self, b: torch.Tensor) -> torch.Tensor:
+        if not self.is_initialized or self.inv_diag is None:
+            raise RuntimeError("Preconditioner not initialized")
+        return self.inv_diag * b
 
 
 class LowRankPrecond:
@@ -152,9 +239,6 @@ class LowRankPrecond:
         self._sparse_factor = None
         self._dense_ldlt = None
         self._build_preconditioner()
-
-    def set_scale(self, scale: float) -> None:
-        self.scale = scale
 
     def _build_preconditioner(self) -> None:
         if self.method == "DenseLDLT":

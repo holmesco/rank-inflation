@@ -35,7 +35,9 @@ def test_cg_solver_matches_inverse():
         return B @ x
 
     cg = ConjugateGradientSolver(max_iter=1000, tol=1e-10, verbose=True)
-    x_cg, num_iter = cg.solve(b, matvec)
+    result = cg.solve(b, matvec)
+    x_cg = result.solution
+    num_iter = result.num_iterations
 
     # Residual
     r = b - B @ x_cg
@@ -70,7 +72,9 @@ def test_cg_solver_with_jacobi_preconditioner():
         return x / diag_B
 
     cg = ConjugateGradientSolver(max_iter=1000, tol=1e-8)
-    x_cg, num_iter = cg.solve(b, matvec, precond_solve_fn=jacobi_precond)
+    result = cg.solve(b, matvec, precond_solve_fn=jacobi_precond)
+    x_cg = result.solution
+    num_iter = result.num_iterations
 
     # Direct solution
     x_true = torch.linalg.solve(B, b)
@@ -82,7 +86,8 @@ def test_cg_solver_with_jacobi_preconditioner():
 
     # Check that convergence is achieved in fewer iterations than unpreconditioned (optional, for demonstration)
     cg_no_precond = ConjugateGradientSolver(max_iter=1000, tol=1e-8)
-    _, num_iter_no_precond = cg_no_precond.solve(b, matvec)
+    result_no_precond = cg_no_precond.solve(b, matvec)
+    num_iter_no_precond = result_no_precond.num_iterations
     assert (
         num_iter <= num_iter_no_precond
     ), "Preconditioner did not improve or match convergence speed."

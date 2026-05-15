@@ -2,8 +2,18 @@
 Conjugate Gradient solver implementation with optional preconditioner.
 """
 
-from typing import Callable, Optional, Tuple
+from dataclasses import dataclass
+from typing import Callable, Optional
 import torch
+
+
+@dataclass
+class ConjugateGradientResult:
+    """Result of a Conjugate Gradient solve."""
+
+    solution: torch.Tensor
+    num_iterations: int
+    final_residual: torch.Tensor
 
 
 class ConjugateGradientSolver:
@@ -35,8 +45,7 @@ class ConjugateGradientSolver:
         self.max_iter = max_iter
         self.tol = tol
         self.verbose = verbose
-        self.iter_count = 0
-        self.residual_norms = []
+        
 
     def solve(
         self,
@@ -44,7 +53,7 @@ class ConjugateGradientSolver:
         matvec_fn: Callable[[torch.Tensor], torch.Tensor],
         precond_solve_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
         x_init: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, int]:
+    ) -> ConjugateGradientResult:
         """
         Solve the linear system B * x = b using CG.
 
@@ -55,7 +64,7 @@ class ConjugateGradientSolver:
             x_init: Initial guess (default: zero vector)
 
         Returns:
-            (x, num_iterations) - solution vector and iteration count
+            ConjugateGradientResult with solution vector, iteration count, and final residual norm
         """
         device = b.device
         n = b.shape[0]
@@ -80,7 +89,6 @@ class ConjugateGradientSolver:
 
         # Store initial residual norm for relative tolerance check
         b_norm = b.norm()
-        self.residual_norms = [r.norm().item()]
 
         # Main CG loop
         for k in range(self.max_iter):
@@ -106,17 +114,19 @@ class ConjugateGradientSolver:
 
             # Compute residual norm for convergence check
             r_norm = r_new.norm()
-            self.residual_norms.append(r_norm.item())
 
             # Check convergence: ||B@x-b|| < tol * ||b||
             if r_norm < self.tol * b_norm:
-                self.iter_count = k + 1
                 if self.verbose:
                     print(
                         f"CG: Converged at iteration {k+1}, "
                         f"residual norm = {r_norm.item():.6e}"
                     )
-                return x, k + 1
+                return ConjugateGradientResult(
+                    solution=x,
+                    num_iterations=k + 1,
+                    final_residual=r_norm,
+                )
 
             # Compute beta for next search direction: beta = (r_new^T @ y_new) / (r^T @ y)
             rTy_new = torch.dot(r_new, y_new)
@@ -130,18 +140,22 @@ class ConjugateGradientSolver:
             y = y_new
 
             # Print iteration info
-            if self.verbose and (k + 1) % 10 == 0:
+            # if self.verbose and (k) % 10 == 0:
+            if self.verbose:
                 print(
                     f"CG iter {k+1:4d}: residual norm = {r_norm.item():.6e}, "
                     f"alpha = {alpha.item():.6e}, beta = {beta.item():.6e}"
                 )
 
         # Max iterations reached
-        self.iter_count = self.max_iter
         if self.verbose:
             print(
                 f"CG: Max iterations ({self.max_iter}) reached, "
                 f"final residual norm = {r.norm().item():.6e}"
             )
 
-        return x, self.max_iter
+        return ConjugateGradientResult(
+            solution=x,
+            num_iterations=self.max_iter,
+            final_residual=r.norm(),
+        )
