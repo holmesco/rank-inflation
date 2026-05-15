@@ -55,7 +55,7 @@ def compute_complementarity(H: torch.Tensor, Y_0: torch.Tensor) -> torch.Tensor:
     """
     HY = H @ Y_0
     YtHY = Y_0.T @ HY
-    return YtHY.norm()
+    return YtHY.trace()
 
 
 def check_certificate_psd(
@@ -93,12 +93,12 @@ def build_adjoint(
 
     Args:
         multipliers: Lagrange multipliers (m,)
-        A_list: List of m-1 sparse constraint matrices
-        C: Cost matrix (n × n)
+        A_list: List of m-1 sparse constraint matrices, assumed upper triangular
+        C: Cost matrix (n × n), assumed upper triangular
         scale: Scaling factor
 
     Returns:
-        Dual matrix S (n × n)
+        Dual matrix S (n × n), upper triagular
     """
     device = C.device
     dtype = C.dtype
@@ -111,7 +111,4 @@ def build_adjoint(
         A_i_dense = torch.from_numpy(A_list[i].toarray()).to(dtype=dtype, device=device)
         S = S + multipliers[i] * A_i_dense
 
-    # Ensure symmetry
-    S = (S + S.T) / 2
-
-    return scale * S
+    return scale * torch.triu(S)

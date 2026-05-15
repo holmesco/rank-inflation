@@ -199,7 +199,7 @@ TEST_P(LovazsParamTest, CertifyLDLT) {
   AnalyticCenterParams params;
   params.verbose = true;
   params.early_stop_cert = true;
-  params.rescale_lin_sys = true;
+  params.rescale_lin_sys = false;
   params.max_iter = 50;
   params.perturb_cost = true;
   params.perturb_constraints = true;

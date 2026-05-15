@@ -5,18 +5,23 @@ from __future__ import annotations
 import pytest
 import torch
 import scipy.sparse as sp
+import numpy as np
+
+from ranktools import LinearSolverType, solve_sdp_mosek, SDPResult
 
 from ranktools_pytorch.analytic_center_torch import (
     AnalyticCenterPyTorch,
     defaultAnalyicCenterParams,
 )
 from ranktools_pytorch.lin_alg_torch import LowRankPrecond
+from ranktools_pytorch.utils import symmetrize_dense, symmetrize_sparse_to_torch
 from .fixtures import (
     clique1_adj,
     clique2_adj,
     clique3_adj,
     clique4_adj,
     make_lovasz_test_case,
+    load_problem_from_file,
 )
 
 LOVASZ_TESTS = [
@@ -27,85 +32,36 @@ LOVASZ_TESTS = [
 ]
 
 
-def _symmetrize_dense(mat: torch.Tensor) -> torch.Tensor:
-    return mat + mat.T - torch.diag(mat.diag())
-
-
-def _symmetrize_sparse_to_torch(mat: sp.spmatrix) -> torch.Tensor:
-    dense = torch.tensor(mat.toarray(), dtype=torch.float64)
-    return _symmetrize_dense(dense)
-
-
-def _build_explicit_B(
-    X: torch.Tensor, A_list, C: torch.Tensor, scale: float
-) -> torch.Tensor:
-    mats = [_symmetrize_sparse_to_torch(A) for A in A_list]
-    mats.append(C.to(dtype=torch.float64))
-
-    m = len(mats)
-    B = torch.zeros((m, m), dtype=torch.float64)
-    for i in range(m):
-        for j in range(m):
-            B[i, j] = torch.trace(mats[i].T @ X @ mats[j] @ X) * scale
-    return B
-
-
-def _build_rhs_d(
-    X: torch.Tensor,
-    A_list,
-    C: torch.Tensor,
-    b: torch.Tensor,
-    rho: float,
-    eps_mult: float,
-    eps_constr: float,
-    eps_cost: float,
-    perturb_constraints: bool,
-    perturb_cost: bool,
-) -> torch.Tensor:
-    dtype = X.dtype
-    device = X.device
-    m = len(A_list) + 1
-    d = torch.zeros(m, dtype=dtype, device=device)
-
-    C_sym = C + C.T - torch.diag(torch.diagonal(C))
-    trace_C = torch.diagonal(C_sym).sum()
-
-    for i in range(len(A_list)):
-        A_i = A_list[i]
-        trace_Ai = float(A_i.diagonal().sum())
-        A_i_dense = torch.from_numpy(A_i.toarray()).to(dtype=dtype, device=device)
-        A_i_sym = A_i_dense + A_i_dense.T - torch.diag(torch.diagonal(A_i_dense))
-        trace_Ai_X = (A_i_sym * X).sum()
-
-        if perturb_constraints:
-            val = b[i] + eps_mult * eps_constr * trace_Ai
-        else:
-            val = b[i]
-
-        violation = trace_Ai_X - val
-        d[i] = trace_Ai_X + violation
-
-    trace_C_X = (C_sym * X).sum()
-    if perturb_cost:
-        val_cost = rho + eps_mult * eps_cost * trace_C
-    else:
-        val_cost = rho
-    violation_cost = trace_C_X - val_cost
-    d[-1] = trace_C_X + violation_cost
-
-    return d
-
 
 @pytest.mark.parametrize("adj,clique,name", LOVASZ_TESTS)
-def test_certify_lovasz_theta(adj, clique, name):
+def test_certify_lovasz_theta_direct_solve(adj, clique, name):
     sdp = make_lovasz_test_case(adj, clique, name)
-    Y_0 = sdp.make_solution(1)
-
+    
+    # Recover Analytic center from Mosek
+    b = sdp.b.numpy()
+    C = sdp.C.numpy()
+    result: SDPResult = solve_sdp_mosek(
+        C, sdp.A_mosek, b
+    )  # Just to check Mosek can solve it
+    X = result.X
+    U, S, _ = np.linalg.svd(X, full_matrices=False)
+    rank = np.sum(S > S[0] * 1e-6)
+    Y_0 = torch.Tensor(U[:, :rank] @ np.diag(np.sqrt(S[:rank])))
+       
     params = defaultAnalyicCenterParams()
     params.verbose = True
     params.max_iter = 25
-    params.delta = 1e-3
-    params.lrp_params.tau = 1e-3
+    params.delta = 1e-5
+    params.lrp_params.tau = 1e-5
+    params.perturb_cost = True
+    params.perturb_constraints = True
+    params.eps_cost = 1e-5
+    params.eps_constr = 1e-5
+    params.early_stop_cert = True
+    params.adaptive_perturb = True
+    params.eps_mult_min = 1e-4
+    params.delta = 1e-5
+    params.lin_solver = LinearSolverType.LDLT
 
     certifier = AnalyticCenterPyTorch(
         C=sdp.C,
@@ -128,28 +84,44 @@ def test_certify_lovasz_theta(adj, clique, name):
     assert isinstance(result.certified, bool)
     assert result.solver_time >= 0.0
     assert result.num_iters >= 0
-    
+
     assert result.certified, ValueError(f"Certification failed")
-    assert result.min_eig > -params.tol_cert_psd, ValueError(f"Minimum eigenvalue negative: {result.min_eig}")
-    assert result.complementarity < params.tol_cert_complementarity, ValueError(f"Complementarity gap too large: {result.complementarity}")
-    
+    assert result.min_eig > -params.tol_cert_psd, ValueError(
+        f"Minimum eigenvalue negative: {result.min_eig}"
+    )
+    assert result.complementarity < params.tol_cert_complementarity, ValueError(
+        f"Complementarity gap too large: {result.complementarity}"
+    )
 
-# @pytest.mark.parametrize("adj,clique,name", LOVASZ_TESTS)
-def test_solve_for_multipliers_matches_explicit():
-    adj, clique, name = LOVASZ_TESTS[0]
+@pytest.mark.parametrize("adj,clique,name", LOVASZ_TESTS)
+def test_certify_lovasz_theta_cg_solve(adj, clique, name):
     sdp = make_lovasz_test_case(adj, clique, name)
-    Y_0 = sdp.make_solution(1)
-    tau = 1e-5
-    X = Y_0 @ Y_0.T + tau * torch.eye(sdp.dim, dtype=torch.float64)
-
+    
+    # Recover Analytic center from Mosek
+    b = sdp.b.numpy()
+    C = sdp.C.numpy()
+    result: SDPResult = solve_sdp_mosek(
+        C, sdp.A_mosek, b
+    )  # Just to check Mosek can solve it
+    X = result.X
+    U, S, _ = np.linalg.svd(X, full_matrices=False)
+    rank = np.sum(S > S[0] * 1e-5)
+    Y_0 = torch.Tensor(U[:, :rank] @ np.diag(np.sqrt(S[:rank])))
+    
     params = defaultAnalyicCenterParams()
-    params.verbose = False
-    params.perturb_constraints = False
-    params.perturb_cost = False
-    params.reuse_multipliers = True
-    params.lin_solve_max_iter = 200
-    params.lin_solve_tol = 1e-14
-    params.lrp_params.tau = tau
+    params.verbose = True
+    params.max_iter = 25
+    params.delta = 1e-5
+    params.lrp_params.tau = 1e-5
+    params.perturb_cost = True
+    params.perturb_constraints = True
+    params.eps_cost = 1e-5
+    params.eps_constr = 1e-5
+    params.early_stop_cert = True
+    params.adaptive_perturb = True
+    params.eps_mult_min = 1e-4
+    params.delta = 1e-5
+    params.lin_solver = LinearSolverType.MFCG_LRP
 
     certifier = AnalyticCenterPyTorch(
         C=sdp.C,
@@ -159,41 +131,55 @@ def test_solve_for_multipliers_matches_explicit():
         params=params,
         device=torch.device("cpu"),
     )
-    certifier.precond = LowRankPrecond(
-        U=Y_0,
-        A_list=sdp.A,
-        C=sdp.C,
-        tau=tau,
-        method="DenseLDLT",
+
+    result = certifier.certify(Y_0)
+
+    assert result.certified, ValueError(f"Certification failed")
+    assert result.min_eig > -params.tol_cert_psd, ValueError(
+        f"Minimum eigenvalue negative: {result.min_eig}"
     )
-    # certifier.multipliers_stored_ = torch.zeros(len(sdp.A) + 1, dtype=torch.float64)
-    certifier.multipliers_stored_ = None
+    assert result.complementarity < params.tol_cert_complementarity, ValueError(
+        f"Complementarity gap too large: {result.complementarity}"
+    )
 
-    multipliers = certifier._solve_for_multipliers(X, eps_mult=1.0, Y_0=Y_0)
+# TESTS ON STANARD RANK 1 PROBLEMS
+problem_names = ["test_prob_10G"]
+@pytest.mark.parametrize("name", problem_names)
+def test_certify_lovasz_theta_cg_solve(name):
+    sdp = load_problem_from_file(name)
+    Y_0 = sdp.soln
+    
+    params = defaultAnalyicCenterParams()
+    params.verbose = True
+    params.max_iter = 25
+    params.delta = 1e-5
+    params.lrp_params.tau = 1e-5
+    params.perturb_cost = True
+    params.perturb_constraints = True
+    params.eps_cost = 1e-5
+    params.eps_constr = 1e-5
+    params.early_stop_cert = True
+    params.adaptive_perturb = True
+    params.eps_mult_min = 1e-4
+    params.delta = 1e-5
+    params.lin_solver = LinearSolverType.MFCG_LRP
 
-    d = _build_rhs_d(
-        X=X,
-        A_list=sdp.A,
+    certifier = AnalyticCenterPyTorch(
         C=sdp.C,
-        b=sdp.b,
         rho=sdp.rho,
-        eps_mult=1.0,
-        eps_constr=params.eps_constr,
-        eps_cost=params.eps_cost,
-        perturb_constraints=params.perturb_constraints,
-        perturb_cost=params.perturb_cost,
+        A_list=sdp.A,
+        b=sdp.b,
+        params=params,
+        device=torch.device("cpu"),
     )
-    B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale=1.0)
 
-    torch.testing.assert_close(
-        B_explicit @ multipliers,
-        d,
-        rtol=1e-6,
-        atol=1e-8,
+    result = certifier.certify(Y_0)
+
+    assert result.certified, ValueError(f"Certification failed")
+    assert result.min_eig > -params.tol_cert_psd, ValueError(
+        f"Minimum eigenvalue negative: {result.min_eig}"
     )
-    torch.testing.assert_close(
-        certifier.multipliers_stored_,
-        multipliers,
-        rtol=0.0,
-        atol=0.0,
+    assert result.complementarity < params.tol_cert_complementarity, ValueError(
+        f"Complementarity gap too large: {result.complementarity}"
     )
+

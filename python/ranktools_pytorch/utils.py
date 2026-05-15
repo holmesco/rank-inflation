@@ -153,3 +153,14 @@ def sparse_upper_triangular_to_symmetric(A_sparse: sp.spmatrix) -> sp.csr_matrix
         Full symmetric matrix (A + A^T - diag(A))
     """
     return A_sparse + A_sparse.T - sp.diags(A_sparse.diagonal())
+
+
+def symmetrize_dense(mat: torch.Tensor) -> torch.Tensor:
+    """Symmetrize a dense matrix by copying upper triangle to lower."""
+    return mat + mat.T - torch.diag(mat.diag())
+
+
+def symmetrize_sparse_to_torch(mat: sp.spmatrix) -> torch.Tensor:
+    """Convert sparse matrix to dense torch tensor and symmetrize."""
+    dense = torch.tensor(mat.toarray(), dtype=torch.float64)
+    return symmetrize_dense(dense)

@@ -24,6 +24,7 @@ class SDPTestProblem:
     soln: torch.Tensor
     name: str
     soln_is_global: bool
+    A_mosek: List[sp.spmatrix] | None = None
 
     def make_solution(self, rank: int) -> torch.Tensor:
         """Retrieve zero padded solution for testing."""
@@ -63,6 +64,15 @@ def get_lovasz_constraints(dim: int, nonedges: Sequence[Edge]) -> List[sp.spmatr
     A.append(sp.identity(dim, format="csr"))
     return A
 
+def get_lovasz_constraints_mosek(dim: int, nonedges: Sequence[Edge]) -> List[sp.spmatrix]:
+    """Convert adjacency to Lovasz theta constraints (sparse upper-triangular)."""
+    A: List[sp.spmatrix] = []
+    for i, j in nonedges:
+        mat = sp.coo_matrix(([1.0,1.0], ([i,j], [j,i])), shape=(dim, dim)).tocsc()
+        A.append(mat)
+    # Trace constraint
+    A.append(sp.identity(dim, format="csr"))
+    return A
 
 def make_lovasz_test_case(
     adj: np.ndarray, clique: Sequence[int], name: str
@@ -74,6 +84,7 @@ def make_lovasz_test_case(
     rho = -float(len(clique))
 
     A = get_lovasz_constraints(dim, nonedges)
+    A_mosek = get_lovasz_constraints_mosek(dim, nonedges)
     b = torch.zeros(len(A), dtype=torch.float64)
     b[-1] = 1.0
 
@@ -87,6 +98,7 @@ def make_lovasz_test_case(
         C=C,
         rho=rho,
         A=A,
+        A_mosek=A_mosek,
         b=b,
         soln=soln,
         name=f"LovaszTheta_{name}",
