@@ -124,7 +124,8 @@ class AnalyticCenterPyTorch:
         A_list: List[sp.spmatrix],
         b: torch.Tensor,
         params: AnalyticCenterParams = defaultAnalyicCenterParams(),
-        device: torch.device = torch.device("cpu"),
+        main_gpu: bool = False,
+        precond_gpu: bool = False,
     ):
         """
         Initialize analytic center certifier.
@@ -135,14 +136,21 @@ class AnalyticCenterPyTorch:
             A_list: List of m constraint matrices (sparse, upper-triangular)
             b: Right-hand side for constraints (m,)
             params: Algorithm parameters
-            device: Torch device (cuda or cpu)
-        """
-        self.C = torch.triu(C).to(device=device, dtype=torch.float64)
+            main_gpu: Whether to run main computations on GPU
+            precond_gpu: Whether to run preconditioner computations on GPU"""
+        self.main_gpu = main_gpu
+        self.precond_gpu = precond_gpu
+    
+        if main_gpu:
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
+        
+        self.C = torch.triu(C).to(device=self.device, dtype=torch.float64)
         self.rho = rho
-        self.A_list = [sp.triu(A) for A in A_list]  # Keep as scipy sparse
-        self.b = b.to(device=device, dtype=torch.float64)
+        self.A_list = [sp.triu(A) for A in A_list]
+        self.b = b.to(device=self.device, dtype=torch.float64)
         self.params = params or AnalyticCenterParams()
-        self.device = device
 
         self.dim = C.shape[0]
         self.m = len(A_list) + 1  # +1 for cost constraint
@@ -152,8 +160,15 @@ class AnalyticCenterPyTorch:
             max_iter=self.params.lin_solve_max_iter,
             tol=self.params.lin_solve_tol,
         )
-        # preconditioner
-        self.precond: None | LowRankPrecond = None
+        # Initialize preconditioner
+        precond_device = torch.device("cuda") if precond_gpu else torch.device("cpu")
+        self.precond = LowRankPrecond(
+            A_list=self.A_list,
+            C=self.C,
+            tau=self.params.lrp_params.tau,
+            method="DenseLDLT",
+            device=precond_device,
+        )
         # Stored multipliers
         self.multipliers_stored_: None | torch.Tensor = None
 
@@ -250,15 +265,8 @@ class AnalyticCenterPyTorch:
         multipliers = torch.ones(self.m, device=self.device, dtype=torch.float64)
 
         # Set up preconditioner
-        self.precond = LowRankPrecond(
-            U=Y_0,
-            A_list=self.A_list,
-            C=self.C,
-            tau=self.params.lrp_params.tau,
-            method="DenseLDLT",
-            device=self.device,
-        )
-
+        self.precond.build_preconditioner(U=Y_0)
+        
         # Main centering loop
         cert_complementarity = False
         cert_psd = False

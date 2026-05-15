@@ -69,7 +69,6 @@ def test_certify_lovasz_theta_direct_solve(adj, clique, name):
         A_list=sdp.A,
         b=sdp.b,
         params=params,
-        device=torch.device("cpu"),
     )
 
     result = certifier.certify(Y_0)
@@ -129,7 +128,6 @@ def test_certify_lovasz_theta_cg_solve(adj, clique, name):
         A_list=sdp.A,
         b=sdp.b,
         params=params,
-        device=torch.device("cpu"),
     )
 
     result = certifier.certify(Y_0)
@@ -170,7 +168,6 @@ def test_certify_lovasz_theta_cg_solve(name):
         A_list=sdp.A,
         b=sdp.b,
         params=params,
-        device=torch.device("cpu"),
     )
 
     result = certifier.certify(Y_0)

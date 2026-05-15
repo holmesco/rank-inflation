@@ -215,7 +215,6 @@ class LowRankPrecond:
 
     def __init__(
         self,
-        U: torch.Tensor,
         A_list: List[sp.spmatrix],
         C: torch.Tensor,
         tau: float = 1e-5,
@@ -223,24 +222,25 @@ class LowRankPrecond:
         use_approx: bool = False,
         device: torch.device = torch.device("cpu"),
     ):
-        self.U = U.to(device)
         self.A_list = A_list
         self.C = torch.triu(C).to(device)
         self.tau = tau
         self.method = method.name if hasattr(method, "name") else str(method)
         self.use_approx = use_approx
         self.device = device
-        self.n = U.shape[0]
-        self.r = U.shape[1]
         self.m = len(A_list) + 1
         self.scale = 1.0
         self.is_initialized = False
 
         self._sparse_factor = None
         self._dense_ldlt = None
-        self._build_preconditioner()
 
-    def _build_preconditioner(self) -> None:
+    def build_preconditioner(self, U: torch.Tensor) -> None:
+        # Store the low-rank factor U on the specified device
+        self.U = U.to(self.device)
+        self.n = U.shape[0]
+        self.r = U.shape[1]
+        # Build the preconditioner
         if self.method == "DenseLDLT":
             self.build_ldlt_dense()
         elif self.method in ("SparseLDLT", "SparseLDLT_ZL"):

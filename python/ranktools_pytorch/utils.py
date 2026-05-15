@@ -44,11 +44,7 @@ def line_search_factorization(
             # Not PSD, reduce step size
             alpha *= reduction_factor
 
-    # Minimum step size reached
-    # Need to handle this case better
-    X_new = X + alpha_min * dX 
-    L = None
-    return alpha_min, X_new, L
+    raise ValueError("Line search failed: no positive definite step found.")
 
 
 def eval_constraints(
