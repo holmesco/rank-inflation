@@ -263,26 +263,26 @@ class LowRankPrecond:
         V = self.build_top_right(self.U, self.tau)
 
         tau2 = self.tau**2
-        AtA = (A_bar.T @ A_bar).toarray()
+        AtA = torch.from_numpy((A_bar.T @ A_bar).toarray()).to(dtype=torch.float64, device=self.device)
+        V = torch.from_numpy(V).to(dtype=torch.float64, device=self.device)
 
         n_sys = self.m + V.shape[1]
-        Sys = np.zeros((n_sys, n_sys), dtype=np.float64)
-        Sys[: self.m, : self.m] = AtA * tau2
-        Sys[: self.m, self.m :] = V * self.tau
-        Sys[self.m :, self.m :] = -np.eye(V.shape[1]) * tau2
-
-        try:
-            # Note: ldl already permutes the L matrix so that it isn't upper triangular
-            L, D, perm = la.ldl(Sys, lower=False)
-            L_perm = L[perm, :]
-            L_t = torch.from_numpy(L_perm).to(dtype=torch.float64, device=self.device)
-            D_t = torch.from_numpy(D).to(dtype=torch.float64, device=self.device)
-            perm_t = torch.as_tensor(perm, dtype=torch.long, device=self.device)
-            self._dense_ldlt = (L_t, D_t, perm_t)
-            self.is_initialized = True
-        except Exception as exc:
-            raise RuntimeError(f"Dense LDLT factorization failed: {exc}")
-
+        self.Sys = torch.zeros((n_sys, n_sys), dtype=torch.float64, device=self.U.device)
+        self.Sys[: self.m, : self.m] = AtA * tau2
+        self.Sys[self.m :, : self.m] = V.T * self.tau
+        self.Sys[: self.m, self.m :] = V * self.tau
+        self.Sys[self.m :, self.m :] = -torch.eye(V.shape[1]) * tau2
+        
+        # Perform LDLT factorization (returns LD factorization and pivots)
+        LD, pivots, info = torch.linalg.ldl_factor_ex(self.Sys)  
+        if torch.any(info != 0):
+            raise RuntimeError(f"Dense LDLT factorization failed with info={info}")
+        # Store the factorization for use in solves
+        self._dense_ldlt = (LD, pivots)
+        # Mark initialized
+        self.is_initialized = True
+    
+        
     def build_ldlt_sparse(self) -> None:
         if self.U is None or self.C is None or self.A_list is None:
             raise RuntimeError("LowRankPrecond: Problem data not set.")
@@ -425,25 +425,13 @@ class LowRankPrecond:
     def solveDenseLDLT(self, b: torch.Tensor) -> torch.Tensor:
         if self._dense_ldlt is None:
             raise RuntimeError("Dense LDLT factorization not initialized")
-
-        L, D, perm = self._dense_ldlt
-        # pad rhs vector with zeros
-        if L.shape[0] > self.m:
-            pad = torch.zeros(L.shape[0] - self.m, dtype=b.dtype, device=b.device)
-            b = torch.cat((b, pad))
-        # Permute and solve
-        b_perm = b[perm, None]
-        # Solve L y = b_perm
-        y = torch.linalg.solve_triangular(L, b_perm, upper=True, unitriangular=True)
-        # Rescale, solve D z = y,
-        d_diag = torch.diag(D)
-        z = y / d_diag[:, None]
-        # back-substitute L^T x_perm = z
-        x_perm = torch.linalg.solve_triangular(
-            L.transpose(-1, -2), z, upper=False, unitriangular=True
-        )
-        x = torch.empty_like(x_perm)
-        x[perm] = x_perm
+        # Expand dimension of b
+        sysdim = self.Sys.shape[0]
+        rhs = torch.zeros(sysdim, dtype=b.dtype, device=b.device)
+        rhs[: self.m] = b.reshape(-1)
+        # Solve and extract solution for multipliers
+        LD, pivots = self._dense_ldlt
+        x = torch.linalg.ldl_solve(LD, pivots, rhs[:,None])
         return x[: self.m].squeeze(-1)
 
     def solveSparseLDLT(self, b_np: np.ndarray) -> np.ndarray:

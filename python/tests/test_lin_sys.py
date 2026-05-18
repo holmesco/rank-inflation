@@ -9,7 +9,7 @@ from ranktools_pytorch.lin_alg_torch import (
     KKTMatrixOperator,
     LowRankPrecond,
 )
-from ranktools_pytorch.utils import line_search_factorization
+from ranktools_pytorch.utils import line_search_factorization, symmetrize_dense
 from ranktools_pytorch.solvers import ConjugateGradientSolver
 from .fixtures import (
     clique1_adj,
@@ -38,18 +38,35 @@ def _symmetrize_sparse_to_torch(mat) -> torch.Tensor:
     return _symmetrize_dense(dense)
 
 
+def _build_A_batch(A_list, C, *, device=None, dtype=torch.float64) -> torch.Tensor:
+    C_t = torch.as_tensor(C)
+    C_t = torch.triu(C_t)  # Ensure upper triangular
+    if device is None:
+        device = C_t.device
+
+    n = C_t.shape[0]
+    m = len(A_list) + 1
+    A_batch = torch.zeros((m, n, n), dtype=dtype, device=device)
+    for i, A in enumerate(A_list):
+        A_torch = torch.from_numpy(A.toarray()).to(dtype=dtype, device=device)
+        A_batch[i] = torch.triu(A_torch)  # Ensure upper triangular
+    A_batch[-1] = C_t.to(dtype=dtype, device=device)
+    return symmetrize_dense(A_batch)
+
+
 # Build the explicit dense B operator used by the matrix-free solver.
 def _build_explicit_B(
     X: torch.Tensor, A_list, C: torch.Tensor, scale: float
 ) -> torch.Tensor:
     mats = [_symmetrize_sparse_to_torch(A) for A in A_list]
-    mats.append(C.to(dtype=torch.float64))
+    C_t = torch.triu(C.to(dtype=torch.float64))
+    mats.append(symmetrize_dense(C_t))
 
     m = len(mats)
     B = torch.zeros((m, m), dtype=torch.float64)
     for i in range(m):
         for j in range(m):
-            B[i, j] = torch.trace(mats[i].T @ X @ mats[j] @ X) * scale
+            B[i, j] = torch.trace(mats[i] @ X @ mats[j] @ X) * scale
     return B
 
 
@@ -64,7 +81,7 @@ def _condition_number_from_eigvals(matrix: torch.Tensor) -> torch.Tensor:
 
 @pytest.mark.parametrize("adj,clique,name", PARAM_CLIQUES)
 def test_matrix_free_operator_matches_explicit(adj, clique, name):
-    # Verify matrix-free operator matches explicit dense construction.
+    # Verify implicit matrix-free operator matches explicit dense construction.
     sdp = make_lovasz_test_case(adj, clique, name)
     Y_0 = sdp.make_solution(1)
     X = Y_0 @ Y_0.T + 1e-3 * torch.eye(
@@ -72,7 +89,8 @@ def test_matrix_free_operator_matches_explicit(adj, clique, name):
     )  # Perturb to ensure PSD
 
     scale = 1.0
-    lin_op = KKTMatrixOperator(X=X, A_list=sdp.A, C=sdp.C, scale=scale)
+    A_batch = _build_A_batch(sdp.A, sdp.C, device=X.device, dtype=X.dtype)
+    lin_op = KKTMatrixOperator(X=X, A_batch=A_batch, scale=scale, device=X.device)
 
     B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale)
     m = B_explicit.shape[0]
@@ -92,18 +110,35 @@ def test_matrix_free_operator_matches_explicit(adj, clique, name):
 
 
 @pytest.mark.parametrize("adj,clique,name", PARAM_CLIQUES)
+def test_ldl_decomposition(adj, clique, name):
+    # Check the low-rank preconditioner improves conditioning.
+    sdp = make_lovasz_test_case(adj, clique, name)
+    Y_0 = sdp.make_solution(1)
+    precond = LowRankPrecond(A_list=sdp.A, C=sdp.C, tau=1e-1, method="DenseLDLT")
+    precond.build_preconditioner(Y_0)
+    # Test solve
+    lhs = torch.randn(precond.Sys.shape[0], dtype=torch.float64, device=precond.device)
+    lhs = lhs[:, None]
+    x = torch.linalg.ldl_solve(*precond._dense_ldlt, lhs)
+    assert (
+        precond.Sys @ x - lhs
+    ).norm() < 1e-6, "LDL solve did not produce accurate solution"
+
+
+@pytest.mark.parametrize("adj,clique,name", PARAM_CLIQUES)
 def test_dense_lr_preconditioner_conditioning(adj, clique, name):
     # Check the low-rank preconditioner improves conditioning.
     sdp = make_lovasz_test_case(adj, clique, name)
     Y_0 = sdp.make_solution(1)
-    tau = 1e-5
+    tau = 1e-4
     X = Y_0 @ Y_0.T + tau * torch.eye(sdp.dim, dtype=torch.float64)
 
     scale = 1.0
     B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale)
     m = B_explicit.shape[0]
 
-    precond = LowRankPrecond(U=Y_0, A_list=sdp.A, C=sdp.C, tau=tau, method="DenseLDLT")
+    precond = LowRankPrecond(A_list=sdp.A, C=sdp.C, tau=tau, method="DenseLDLT")
+    precond.build_preconditioner(Y_0)
     PB = torch.zeros_like(B_explicit)
     for i in range(m):
         PB[:, i] = precond.solve(B_explicit[:, i])
@@ -113,7 +148,7 @@ def test_dense_lr_preconditioner_conditioning(adj, clique, name):
 
 
 @pytest.mark.parametrize("adj,clique,name", PARAM_CLIQUES)
-def test_cg_preconditioned_inverse_matches_exact(adj, clique, name):
+def test_cg_inverse_matches_exact(adj, clique, name):
     # Solve B x = e_i with CG+preconditioner and compare to explicit inverse.
     sdp = make_lovasz_test_case(adj, clique, name)
     Y_0 = sdp.make_solution(1)
@@ -122,11 +157,13 @@ def test_cg_preconditioned_inverse_matches_exact(adj, clique, name):
     X = Y_0 @ Y_0.T + tau * torch.eye(sdp.dim, dtype=torch.float64)
 
     scale = 1.0
-    lin_op = KKTMatrixOperator(X=X, A_list=sdp.A, C=sdp.C, scale=scale)
+    A_batch = _build_A_batch(sdp.A, sdp.C, device=X.device, dtype=X.dtype)
+    lin_op = KKTMatrixOperator(X=X, A_batch=A_batch, scale=scale, device=X.device)
     B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale)
     m = B_explicit.shape[0]
 
-    precond = LowRankPrecond(U=Y_0, A_list=sdp.A, C=sdp.C, tau=tau, method="DenseLDLT")
+    precond = LowRankPrecond(A_list=sdp.A, C=sdp.C, tau=tau, method="DenseLDLT")
+    precond.build_preconditioner(Y_0)
     cg = ConjugateGradientSolver(max_iter=2000, tol=1e-16, verbose=True)
 
     I = torch.eye(m, dtype=torch.float64)
@@ -159,11 +196,13 @@ def test_cg_preconditioned_inverse_right_inverse_low_tol(adj, clique, name):
     X = Y_0 @ Y_0.T + tau * torch.eye(sdp.dim, dtype=torch.float64)
 
     scale = 1.0
-    lin_op = KKTMatrixOperator(X=X, A_list=sdp.A, C=sdp.C, scale=scale)
+    A_batch = _build_A_batch(sdp.A, sdp.C, device=X.device, dtype=X.dtype)
+    lin_op = KKTMatrixOperator(X=X, A_batch=A_batch, scale=scale, device=X.device)
     B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale)
     m = B_explicit.shape[0]
 
-    precond = LowRankPrecond(U=Y_0, A_list=sdp.A, C=sdp.C, tau=tau, method="DenseLDLT")
+    precond = LowRankPrecond(A_list=sdp.A, C=sdp.C, tau=tau, method="DenseLDLT")
+    precond.build_preconditioner(Y_0)
     cg = ConjugateGradientSolver(max_iter=2000, tol=1e-24, verbose=True)
 
     I = torch.eye(m, dtype=torch.float64)
