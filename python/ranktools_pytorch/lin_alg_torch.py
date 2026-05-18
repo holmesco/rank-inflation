@@ -73,7 +73,7 @@ class KKTMatrixOperator:
         self.scale = scale
         self.device = device
         self.n = X.shape[0]
-        self.m = A_batch.shape[0]  
+        self.m = A_batch.shape[0]
         self.A_batch = A_batch.to(device)
 
     def matvec(self, y: torch.Tensor) -> torch.Tensor:
@@ -87,7 +87,7 @@ class KKTMatrixOperator:
             Result vector (m,)
         """
         return self._matvec_batched(y)
-        
+
     def _matvec_batched(self, y: torch.Tensor) -> torch.Tensor:
         y = y.to(self.device)
         # Build Adjoint
@@ -274,7 +274,11 @@ class LowRankPrecond:
         try:
             # Note: ldl already permutes the L matrix so that it isn't upper triangular
             L, D, perm = la.ldl(Sys, lower=False)
-            self._dense_ldlt = (L[perm, :], D, perm)
+            L_perm = L[perm, :]
+            L_t = torch.from_numpy(L_perm).to(dtype=torch.float64, device=self.device)
+            D_t = torch.from_numpy(D).to(dtype=torch.float64, device=self.device)
+            perm_t = torch.as_tensor(perm, dtype=torch.long, device=self.device)
+            self._dense_ldlt = (L_t, D_t, perm_t)
             self.is_initialized = True
         except Exception as exc:
             raise RuntimeError(f"Dense LDLT factorization failed: {exc}")
@@ -418,32 +422,49 @@ class LowRankPrecond:
         C_upper = np.triu(C_np)
         return C_upper + C_upper.T - np.diag(np.diag(C_upper))
 
+    def solveDenseLDLT(self, b: torch.Tensor) -> torch.Tensor:
+        if self._dense_ldlt is None:
+            raise RuntimeError("Dense LDLT factorization not initialized")
+
+        L, D, perm = self._dense_ldlt
+        # pad rhs vector with zeros
+        if L.shape[0] > self.m:
+            pad = torch.zeros(L.shape[0] - self.m, dtype=b.dtype, device=b.device)
+            b = torch.cat((b, pad))
+        # Permute and solve
+        b_perm = b[perm, None]
+        # Solve L y = b_perm
+        y = torch.linalg.solve_triangular(L, b_perm, upper=True, unitriangular=True)
+        # Rescale, solve D z = y,
+        d_diag = torch.diag(D)
+        z = y / d_diag[:, None]
+        # back-substitute L^T x_perm = z
+        x_perm = torch.linalg.solve_triangular(
+            L.transpose(-1, -2), z, upper=False, unitriangular=True
+        )
+        x = torch.empty_like(x_perm)
+        x[perm] = x_perm
+        return x[: self.m].squeeze(-1)
+
+    def solveSparseLDLT(self, b_np: np.ndarray) -> np.ndarray:
+        if self._sparse_factor is None:
+            raise RuntimeError("Sparse LDLT factorization not initialized")
+
+        sysdim = self._sparse_factor.L.shape[0]
+        rhs = np.zeros(sysdim, dtype=np.float64)
+        rhs[: self.m] = b_np
+        return self._sparse_factor.solve(rhs)[: self.m]
+
     @record_function("LowRankPrecond.solve")
     def solve(self, b: torch.Tensor) -> torch.Tensor:
         if not self.is_initialized:
             raise RuntimeError("Preconditioner not initialized")
 
-        b_np = b.detach().cpu().numpy() / self.scale
-
         if self.method == "DenseLDLT":
-            L, D, perm = self._dense_ldlt
-            # pad rhs vector with zeros
-            b_np = np.concatenate((b_np, np.zeros(L.shape[0] - self.m)))
-            # Permute and solve
-            b_perm = b_np[perm]
-            y = la.solve_triangular(L, b_perm, lower=False, unit_diagonal=True)
-            z = y / np.diag(D)
-            x_perm = la.solve_triangular(L.T, z, lower=True, unit_diagonal=True)
-            x_np = np.empty_like(x_perm)
-            x_np[perm] = x_perm
-            x_np = x_np[: self.m]
+            b_t = b.to(dtype=torch.float64, device=self.device) / self.scale
+            x_t = self.solveDenseLDLT(b_t)
+            return x_t
         else:
-            sysdim = self._sparse_factor.L.shape[0]
-            rhs = np.zeros(sysdim, dtype=np.float64)
-            rhs[: self.m] = b_np
-            x_np = self._sparse_factor.solve(rhs)[: self.m]
-
-        return torch.from_numpy(x_np).to(dtype=torch.float64, device=self.device)
-
-
-LowRankPreconditioner = LowRankPrecond
+            b_np = b.detach().cpu().numpy() / self.scale
+            x_np = self.solveSparseLDLT(b_np)
+            return torch.from_numpy(x_np).to(dtype=torch.float64, device=self.device)
