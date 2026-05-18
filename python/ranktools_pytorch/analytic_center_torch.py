@@ -130,7 +130,6 @@ class AnalyticCenterPyTorch:
         params: AnalyticCenterParams = defaultAnalyicCenterParams(),
         main_gpu: bool = False,
         precond_gpu: bool = False,
-        batch_constraints: bool = False,
     ):
         """
         Initialize analytic center certifier.
@@ -146,7 +145,6 @@ class AnalyticCenterPyTorch:
         # flags
         self.main_gpu = main_gpu
         self.precond_gpu = precond_gpu
-        self.batch_constraints = batch_constraints
         if main_gpu:
             self.device = torch.device("cuda")
         else:
@@ -160,29 +158,28 @@ class AnalyticCenterPyTorch:
         self.dim = C.shape[0]
         self.m = len(A_list) + 1  # +1 for cost constraint
 
-        # If batching, pre-build the constraint and cost matrices into batched tensors
+        # Pre-build the constraint and cost matrices into batched tensors
         self.A_batch: None | torch.Tensor = None
         self.b_batch: None | torch.Tensor = None
-        if batch_constraints:
-            if params.verbose:
-                print("Building batched constraint matrix...")
-            A_batch = torch.zeros(
-                (self.m, self.dim, self.dim), dtype=torch.float64, device=self.device
+        if params.verbose:
+            print("Building batched constraint matrix...")
+        A_batch = torch.zeros(
+            (self.m, self.dim, self.dim), dtype=torch.float64, device=self.device
+        )
+        for i, A in enumerate(range(len(A_list))):
+            A_batch[i] = torch.from_numpy(self.A_list[i].toarray()).to(
+                dtype=torch.float64, device=self.device
             )
-            for i, A in enumerate(range(len(A_list))):
-                A_batch[i] = torch.from_numpy(self.A_list[i].toarray()).to(
-                    dtype=torch.float64, device=self.device
-                )
-            A_batch[self.m - 1] = self.C
-            # Symmetrize the upper triangular matrices to get the full constraint matrices
-            self.A_batch = symmetrize_dense(A_batch)
-            # rhs of constraints
-            self.b_batch = torch.hstack(
-                [
-                    self.b,
-                    torch.tensor(self.rho, dtype=torch.float64, device=self.device),
-                ]
-            )
+        A_batch[self.m - 1] = self.C
+        # Symmetrize the upper triangular matrices to get the full constraint matrices
+        self.A_batch = symmetrize_dense(A_batch)
+        # rhs of constraints
+        self.b_batch = torch.hstack(
+            [
+                self.b,
+                torch.tensor(self.rho, dtype=torch.float64, device=self.device),
+            ]
+        )
 
         # CG solver (reused for each iteration)
         self.cg_solver = ConjugateGradientSolver(
@@ -217,8 +214,6 @@ class AnalyticCenterPyTorch:
         Returns:
             AnalyticCenterResult with certificate and statistics
         """
-        import time
-
         start_time = time.time()
 
         Y_0 = Y_0.to(device=self.device, dtype=torch.float64)
@@ -310,10 +305,7 @@ class AnalyticCenterPyTorch:
             violation_norm = violation.norm()
             barrier = 1 / multipliers[-1]
             # Compute the dual matrix (adjoint) for the Newton step
-            if self.batch_constraints:
-                S = build_adjoint_batched(multipliers, self.A_batch, scale=1.0)
-            else:
-                S = build_adjoint(multipliers, self.A_list, self.C)
+            S = build_adjoint_batched(multipliers, self.A_batch, scale=1.0)
             # Define the Newton step
             delta_X = X - X @ S @ X
             delta_X_norm = delta_X.norm()
@@ -413,10 +405,8 @@ class AnalyticCenterPyTorch:
             # Define matrix-free operator for CG
             linop = KKTMatrixOperator(
                 X=X,
-                A_list=self.A_list,
-                C=self.C,
                 device=self.device,
-                A_batched=self.A_batch if self.batch_constraints else None,
+                A_batch=self.A_batch,
             )
             # Solve via CG
             assert self.precond is not None and self.precond.is_initialized, ValueError(
@@ -453,67 +443,31 @@ class AnalyticCenterPyTorch:
         m = len(self.A_list) + 1
         d = torch.zeros(m, dtype=dtype, device=device)
 
-        if not self.batch_constraints:
-            violation = torch.zeros(m, dtype=dtype, device=device)
-            for i in range(len(self.A_list)):
-                A_i = self.A_list[i]
-                trace_Ai = float(A_i.diagonal().sum())
-                A_i_dense = torch.from_numpy(A_i.toarray()).to(
-                    dtype=dtype, device=device
-                )
-                A_i_sym = (
-                    A_i_dense + A_i_dense.T - torch.diag(torch.diagonal(A_i_dense))
-                )
-                trace_Ai_X = (A_i_sym * X).sum()
-                # Get adjusted rhs of constraint equation
-                if self.params.perturb_constraints:
-                    val = self.b[i] + eps_mult * self.params.eps_constr * trace_Ai
-                else:
-                    val = self.b[i]
-                # Get violation
-                violation[i] = trace_Ai_X - val
-                # Update KKT rhs
-                d[i] = trace_Ai_X + violation[i]
+        # Batched constraints: self.A_batch already symmetrized (includes cost)
+        A_batch = self.A_batch
+        if A_batch is None:
+            raise ValueError("A_batch was not initialized for batched constraints.")
+        # Compute tr(A_i X) for all i in batch
+        trace_AX = (A_batch * X).sum(dim=(1, 2))
 
-            # Get LHS of constraint equation
-            C_sym = self.C + self.C.T - torch.diag(torch.diagonal(self.C))
-            trace_C = torch.diagonal(C_sym).sum()
-            trace_C_X = (C_sym * X).sum()
-            # Get adjusted rhs of constraint equation
+        # Build perturbed rhs for constraints and cost
+        if self.params.perturb_constraints or self.params.perturb_cost:
+            trace_A = torch.diagonal(A_batch, dim1=1, dim2=2).sum(dim=1)
+            b_batch = self.b_batch.clone()
+            if self.params.perturb_constraints:
+                b_batch[:-1] = (
+                    b_batch[:-1] + eps_mult * self.params.eps_constr * trace_A[:-1]
+                )
             if self.params.perturb_cost:
-                val_cost = self.rho + eps_mult * self.params.eps_cost * trace_C
-            else:
-                val_cost = self.rho
-            # Get violation
-            violation[-1] = trace_C_X - val_cost
-            # Update KKT rhs
-            d[-1] = trace_C_X + violation[-1]
+                b_batch[-1] = (
+                    b_batch[-1] + eps_mult * self.params.eps_cost * trace_A[-1]
+                )
         else:
-            # Batched constraints: self.A_batch already symmetrized (includes cost)
-            A_batch = self.A_batch
-            if A_batch is None:
-                raise ValueError("A_batch was not initialized for batched constraints.")
-            # Compute tr(A_i X) for all i in batch
-            trace_AX = (A_batch * X).sum(dim=(1, 2))
+            b_batch = self.b_batch
 
-            # Build perturbed rhs for constraints and cost
-            if self.params.perturb_constraints or self.params.perturb_cost:
-                trace_A = torch.diagonal(A_batch, dim1=1, dim2=2).sum(dim=1)
-                b_batch = self.b_batch.clone()
-                if self.params.perturb_constraints:
-                    b_batch[:-1] = (
-                        b_batch[:-1] + eps_mult * self.params.eps_constr * trace_A[:-1]
-                    )
-                if self.params.perturb_cost:
-                    b_batch[-1] = (
-                        b_batch[-1] + eps_mult * self.params.eps_cost * trace_A[-1]
-                    )
-            else:
-                b_batch = self.b_batch
-
-            # Violations and KKT rhs
-            violation = trace_AX - b_batch
-            d = trace_AX + violation
+        # Violations and KKT rhs
+        violation = trace_AX - b_batch
+        d = trace_AX + violation
 
         return d, violation
 
@@ -521,24 +475,14 @@ class AnalyticCenterPyTorch:
         """Build the explicit B matrix for direct solves (used in LDLT option).
         Matrix is given by B_ij = tr(A_i X A_j X) * scale, where A_i are the constraint and cost matrices.
         """
-        if self.batch_constraints:
-            A_batch = self.A_batch
-            if A_batch is None:
-                raise ValueError("A_batch was not initialized for batched constraints.")
-            # A_batch already contains symmetrized constraints and cost
-            # Compute AX for all constraints in batch
-            AX = torch.matmul(A_batch, X)
-            # B_ij = tr(A_i X A_j X) = sum_{k,l} (AX_i)_{k,l} * (AX_j)_{l,k}
-            B = torch.einsum("ikl,jlk->ij", AX, AX) * scale
-        else:
-            mats = [symmetrize_sparse_to_torch(A) for A in self.A_list]
-            mats.append(symmetrize_dense(self.C))
-
-            m = len(mats)
-            B = torch.zeros((m, m), dtype=torch.float64)
-            for i in range(m):
-                for j in range(m):
-                    B[i, j] = torch.trace(mats[i].T @ X @ mats[j] @ X) * scale
+        A_batch = self.A_batch
+        if A_batch is None:
+            raise ValueError("A_batch was not initialized for batched constraints.")
+        # A_batch already contains symmetrized constraints and cost
+        # Compute AX for all constraints in batch
+        AX = torch.matmul(A_batch, X)
+        # B_ij = tr(A_i X A_j X) = sum_{k,l} (AX_i)_{k,l} * (AX_j)_{l,k}
+        B = torch.einsum("ikl,jlk->ij", AX, AX) * scale
         return B
 
     def _print_result(self, result: AnalyticCenterResult):

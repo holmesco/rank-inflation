@@ -8,6 +8,7 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 import scipy.linalg as la
 import numpy as np
+from torch.profiler import record_function
 
 from ranktools_pytorch.certificate import build_adjoint, build_adjoint_batched
 
@@ -54,9 +55,7 @@ class KKTMatrixOperator:
     def __init__(
         self,
         X: torch.Tensor,
-        A_list: List[sp.spmatrix],
-        C: torch.Tensor,
-        A_batched: Optional[torch.Tensor] = None,
+        A_batch: Optional[torch.Tensor] = None,
         scale: float = 1.0,
         device: torch.device = torch.device("cpu"),
     ):
@@ -71,17 +70,11 @@ class KKTMatrixOperator:
             device: Torch device (CPU or GPU)
         """
         self.X = X.to(device)
-        self.C = C.to(device)
-        self.A_list = A_list
         self.scale = scale
         self.device = device
         self.n = X.shape[0]
-        self.m = len(A_list) + 1  # +1 for cost constraint
-        if A_batched is not None:
-            self.A_batch = A_batched.to(device)
-            self.batch_constraints = True
-        else:
-            self.batch_constraints = False
+        self.m = A_batch.shape[0]  
+        self.A_batch = A_batch.to(device)
 
     def matvec(self, y: torch.Tensor) -> torch.Tensor:
         """
@@ -93,11 +86,8 @@ class KKTMatrixOperator:
         Returns:
             Result vector (m,)
         """
-        if self.batch_constraints:
-            return self._matvec_batched(y)
-        else:
-            return self.matvec_loop(y)
-
+        return self._matvec_batched(y)
+        
     def _matvec_batched(self, y: torch.Tensor) -> torch.Tensor:
         y = y.to(self.device)
         # Build Adjoint
@@ -428,6 +418,7 @@ class LowRankPrecond:
         C_upper = np.triu(C_np)
         return C_upper + C_upper.T - np.diag(np.diag(C_upper))
 
+    @record_function("LowRankPrecond.solve")
     def solve(self, b: torch.Tensor) -> torch.Tensor:
         if not self.is_initialized:
             raise RuntimeError("Preconditioner not initialized")
@@ -441,7 +432,7 @@ class LowRankPrecond:
             # Permute and solve
             b_perm = b_np[perm]
             y = la.solve_triangular(L, b_perm, lower=False, unit_diagonal=True)
-            z = np.linalg.solve(D, y)
+            z = y / np.diag(D)
             x_perm = la.solve_triangular(L.T, z, lower=True, unit_diagonal=True)
             x_np = np.empty_like(x_perm)
             x_np[perm] = x_perm
