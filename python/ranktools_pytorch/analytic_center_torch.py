@@ -10,6 +10,8 @@ from typing import List, Optional, Tuple
 import time
 import torch
 import scipy.sparse as sp
+from torch.autograd.profiler import record_function
+
 
 from .lin_alg_torch import KKTMatrixOperator, LowRankPrecond
 from .solvers import ConjugateGradientSolver
@@ -128,7 +130,7 @@ class AnalyticCenterPyTorch:
         params: AnalyticCenterParams = defaultAnalyicCenterParams(),
         main_gpu: bool = False,
         precond_gpu: bool = False,
-        batch_constraints: bool = True,
+        batch_constraints: bool = False,
     ):
         """
         Initialize analytic center certifier.
@@ -162,6 +164,8 @@ class AnalyticCenterPyTorch:
         self.A_batch: None | torch.Tensor = None
         self.b_batch: None | torch.Tensor = None
         if batch_constraints:
+            if params.verbose:
+                print("Building batched constraint matrix...")
             A_batch = torch.zeros(
                 (self.m, self.dim, self.dim), dtype=torch.float64, device=self.device
             )
@@ -170,6 +174,7 @@ class AnalyticCenterPyTorch:
                     dtype=torch.float64, device=self.device
                 )
             A_batch[self.m - 1] = self.C
+            # Symmetrize the upper triangular matrices to get the full constraint matrices
             self.A_batch = symmetrize_dense(A_batch)
             # rhs of constraints
             self.b_batch = torch.hstack(
@@ -253,6 +258,7 @@ class AnalyticCenterPyTorch:
 
         return result
 
+    @record_function("GetAnalyticCenter")
     def _get_analytic_center(
         self,
         Y_0: torch.Tensor,
@@ -312,28 +318,30 @@ class AnalyticCenterPyTorch:
             delta_X = X - X @ S @ X
             delta_X_norm = delta_X.norm()
             #  Line search for PSDness
-            L_prev = L.clone()
-            alpha, X_new, L = line_search_factorization(
-                X,
-                delta_X,
-                alpha_init=self.params.alpha_init,
-                alpha_min=self.params.alpha_min,
-            )
+            with record_function("LineSearch"):
+                L_prev = L.clone()
+                alpha, X_new, L = line_search_factorization(
+                    X,
+                    delta_X,
+                    alpha_init=self.params.alpha_init,
+                    alpha_min=self.params.alpha_min,
+                )
             # Update solution
             X = X_new
             # Construct the certificate matrix by rescaling the adjoint
             H = S * barrier
-            # compute complementarity
-            complementarity = compute_complementarity(H, Y_0)
-            # compute centrality metric
-            centrality = (
-                L_prev.T @ S @ L_prev - torch.eye(self.dim, device=self.device)
-            ).norm()
-            # Compute deviation angle
-            cos_angle = (Y_0.T @ X @ Y_0).trace() / Y_0.norm() ** 2 / X.norm()
-            angle = torch.acos(torch.clamp(cos_angle, -1.0, 1.0)).item()
+            with record_function("CertificateMetrics"):
+                # compute complementarity
+                complementarity = compute_complementarity(H, Y_0)
+                # compute centrality metric
+                centrality = (
+                    L_prev.T @ S @ L_prev - torch.eye(self.dim, device=self.device)
+                ).norm()
+                # Compute deviation angle
+                cos_angle = (Y_0.T @ X @ Y_0).trace() / Y_0.norm() ** 2 / X.norm()
+                angle = torch.acos(torch.clamp(cos_angle, -1.0, 1.0)).item()
 
-            # Step 6: Print iteration info
+            #  Print iteration info
             # TODO Logging should not use print statements because they can slow down GPU code.
             if self.params.verbose and iter_idx % 10 == 0:
                 print(
@@ -351,11 +359,11 @@ class AnalyticCenterPyTorch:
 
             # Early stopping with certificate
             if self.params.early_stop_cert and iter_idx > 0:
-
                 cert_complementarity = (
                     complementarity < self.params.tol_cert_complementarity
                 )
-                cert_psd = check_certificate_psd(H, tol=self.params.tol_cert_psd)
+                with record_function("CheckCertificatePSD"):
+                    cert_psd = check_certificate_psd(H, tol=self.params.tol_cert_psd)
 
             # Check step size
             small_step = delta_X_norm < self.params.tol_step_norm and (
@@ -377,6 +385,7 @@ class AnalyticCenterPyTorch:
 
         return X, multipliers, violation
 
+    @record_function("SolveForMultipliers")
     def _solve_for_multipliers(self, X: torch.Tensor, eps_mult: float) -> torch.Tensor:
         """
         Solve for Lagrange multipliers using CG with matrix-free operator.
@@ -425,6 +434,7 @@ class AnalyticCenterPyTorch:
 
         return multipliers, violation
 
+    @record_function("BuildRHSVector")
     def build_rhs_vector(
         self, X: torch.Tensor, eps_mult: float
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -508,14 +518,27 @@ class AnalyticCenterPyTorch:
         return d, violation
 
     def _build_explicit_B(self, X: torch.Tensor, scale: float) -> torch.Tensor:
-        mats = [symmetrize_sparse_to_torch(A) for A in self.A_list]
-        mats.append(symmetrize_dense(self.C))
+        """Build the explicit B matrix for direct solves (used in LDLT option).
+        Matrix is given by B_ij = tr(A_i X A_j X) * scale, where A_i are the constraint and cost matrices.
+        """
+        if self.batch_constraints:
+            A_batch = self.A_batch
+            if A_batch is None:
+                raise ValueError("A_batch was not initialized for batched constraints.")
+            # A_batch already contains symmetrized constraints and cost
+            # Compute AX for all constraints in batch
+            AX = torch.matmul(A_batch, X)
+            # B_ij = tr(A_i X A_j X) = sum_{k,l} (AX_i)_{k,l} * (AX_j)_{l,k}
+            B = torch.einsum("ikl,jlk->ij", AX, AX) * scale
+        else:
+            mats = [symmetrize_sparse_to_torch(A) for A in self.A_list]
+            mats.append(symmetrize_dense(self.C))
 
-        m = len(mats)
-        B = torch.zeros((m, m), dtype=torch.float64)
-        for i in range(m):
-            for j in range(m):
-                B[i, j] = torch.trace(mats[i].T @ X @ mats[j] @ X) * scale
+            m = len(mats)
+            B = torch.zeros((m, m), dtype=torch.float64)
+            for i in range(m):
+                for j in range(m):
+                    B[i, j] = torch.trace(mats[i].T @ X @ mats[j] @ X) * scale
         return B
 
     def _print_result(self, result: AnalyticCenterResult):
