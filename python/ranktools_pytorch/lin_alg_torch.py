@@ -225,6 +225,7 @@ class LowRankPrecond:
         method: str = "DenseLDLT",
         use_approx: bool = False,
         device: torch.device = torch.device("cpu"),
+        solve_device: torch.device = torch.device("cpu"),
     ):
         self.A_list = A_list
         self.C = torch.triu(C).to(device)
@@ -232,6 +233,8 @@ class LowRankPrecond:
         self.method = method.name if hasattr(method, "name") else str(method)
         self.use_approx = use_approx
         self.device = device
+        # Device where the main solve is taking place
+        self.solve_device = solve_device
         self.m = len(A_list) + 1
         self.scale = 1.0
         self.is_initialized = False
@@ -263,26 +266,33 @@ class LowRankPrecond:
         V = self.build_top_right(self.U, self.tau)
 
         tau2 = self.tau**2
-        AtA = torch.from_numpy((A_bar.T @ A_bar).toarray()).to(dtype=torch.float64, device=self.device)
+        AtA = torch.from_numpy((A_bar.T @ A_bar).toarray()).to(
+            dtype=torch.float64, device=self.device
+        )
         V = torch.from_numpy(V).to(dtype=torch.float64, device=self.device)
 
         n_sys = self.m + V.shape[1]
-        self.Sys = torch.zeros((n_sys, n_sys), dtype=torch.float64, device=self.U.device)
+        self.Sys = torch.zeros(
+            (n_sys, n_sys), dtype=torch.float64, device=self.U.device
+        )
         self.Sys[: self.m, : self.m] = AtA * tau2
         self.Sys[self.m :, : self.m] = V.T * self.tau
         self.Sys[: self.m, self.m :] = V * self.tau
         self.Sys[self.m :, self.m :] = -torch.eye(V.shape[1]) * tau2
-        
+
         # Perform LDLT factorization (returns LD factorization and pivots)
-        LD, pivots, info = torch.linalg.ldl_factor_ex(self.Sys)  
+        LD, pivots, info = torch.linalg.ldl_factor_ex(self.Sys)
         if torch.any(info != 0):
             raise RuntimeError(f"Dense LDLT factorization failed with info={info}")
+        # Move factorization to solve device if different from construction device
+        if self.solve_device != self.device:
+            LD = LD.to(self.solve_device)
+            pivots = pivots.to(self.solve_device)
         # Store the factorization for use in solves
         self._dense_ldlt = (LD, pivots)
         # Mark initialized
         self.is_initialized = True
-    
-        
+
     def build_ldlt_sparse(self) -> None:
         if self.U is None or self.C is None or self.A_list is None:
             raise RuntimeError("LowRankPrecond: Problem data not set.")
@@ -431,7 +441,7 @@ class LowRankPrecond:
         rhs[: self.m] = b.reshape(-1)
         # Solve and extract solution for multipliers
         LD, pivots = self._dense_ldlt
-        x = torch.linalg.ldl_solve(LD, pivots, rhs[:,None])
+        x = torch.linalg.ldl_solve(LD, pivots, rhs[:, None])
         return x[: self.m].squeeze(-1)
 
     def solveSparseLDLT(self, b_np: np.ndarray) -> np.ndarray:
@@ -449,7 +459,7 @@ class LowRankPrecond:
             raise RuntimeError("Preconditioner not initialized")
 
         if self.method == "DenseLDLT":
-            b_t = b.to(dtype=torch.float64, device=self.device) / self.scale
+            b_t = b / self.scale
             x_t = self.solveDenseLDLT(b_t)
             return x_t
         else:

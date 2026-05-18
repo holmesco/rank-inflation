@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import pytest
 import torch
-import scipy.sparse as sp
 import numpy as np
-from torch.profiler import profile, ProfilerActivity, record_function
 
 
 from ranktools import LinearSolverType, solve_sdp_mosek, SDPResult
@@ -16,7 +13,6 @@ from ranktools_pytorch.analytic_center_torch import (
     defaultAnalyicCenterParams,
 )
 from ranktools_pytorch.lin_alg_torch import LowRankPrecond
-from ranktools_pytorch.utils import symmetrize_dense, symmetrize_sparse_to_torch
 from tests.fixtures import (
     clique1_adj,
     clique2_adj,
@@ -52,7 +48,7 @@ def profile_certify(adj, clique, name):
     Y_0 = torch.Tensor(U[:, :rank] @ np.diag(np.sqrt(S[:rank])))
 
     params = defaultAnalyicCenterParams()
-    params.verbose = True
+    params.verbose = False
     params.max_iter = 25
     params.delta = 1e-5
     params.lrp_params.tau = 1e-5
@@ -72,6 +68,7 @@ def profile_certify(adj, clique, name):
         A_list=sdp.A,
         b=sdp.b,
         params=params,
+        main_gpu=True,
     )
     schedule = torch.profiler.schedule(wait=0, warmup=1, active=1, repeat=1)
 

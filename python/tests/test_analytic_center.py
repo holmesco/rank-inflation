@@ -145,12 +145,63 @@ def test_certify_lovasz_theta_cg_solve(adj, clique, name):
         f"Complementarity gap too large: {result.complementarity}"
     )
 
+@pytest.mark.parametrize("adj,clique,name", LOVASZ_TESTS)
+def test_certify_lovasz_theta_cg_solve_gpu(adj, clique, name):
+    sdp = make_lovasz_test_case(adj, clique, name)
+
+    # Recover Analytic center from Mosek
+    b = sdp.b.numpy()
+    C = sdp.C.numpy()
+    result: SDPResult = solve_sdp_mosek(
+        C, sdp.A_mosek, b
+    )  # Just to check Mosek can solve it
+    X = result.X
+    U, S, _ = np.linalg.svd(X, full_matrices=False)
+    rank = np.sum(S > S[0] * 1e-5)
+    Y_0 = torch.Tensor(U[:, :rank] @ np.diag(np.sqrt(S[:rank])))
+
+    params = defaultAnalyicCenterParams()
+    params.verbose = True
+    params.max_iter = 25
+    params.delta = 1e-5
+    params.lrp_params.tau = 1e-5
+    params.perturb_cost = True
+    params.perturb_constraints = True
+    params.eps_cost = 1e-5
+    params.eps_constr = 1e-5
+    params.early_stop_cert = True
+    params.adaptive_perturb = True
+    params.eps_mult_min = 1e-4
+    params.delta = 1e-5
+    params.lin_solver = LinearSolverType.MFCG_LRP
+
+    certifier = AnalyticCenterPyTorch(
+        C=sdp.C,
+        rho=sdp.rho,
+        A_list=sdp.A,
+        b=sdp.b,
+        params=params,
+        main_gpu=True,
+    )
+
+    result = certifier.certify(Y_0)
+
+    assert result.certified, ValueError(f"Certification failed")
+    assert result.min_eig > -params.tol_cert_psd, ValueError(
+        f"Minimum eigenvalue negative: {result.min_eig}"
+    )
+    assert result.complementarity < params.tol_cert_complementarity, ValueError(
+        f"Complementarity gap too large: {result.complementarity}"
+    )
+
+
+
 # TESTS ON STANARD RANK 1 PROBLEMS
 problem_names = ["test_prob_10G"]
 
 
 @pytest.mark.parametrize("name", problem_names)
-def test_certify_standard_cg_solve(name):
+def test_certify_R1_testset_cg_solve(name):
     sdp = load_problem_from_file(name)
     Y_0 = sdp.soln
 

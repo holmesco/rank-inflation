@@ -194,6 +194,7 @@ class AnalyticCenterPyTorch:
             tau=self.params.lrp_params.tau,
             method="DenseLDLT",
             device=precond_device,
+            solve_device=self.device,
         )
         # Stored multipliers
         self.multipliers_stored_: None | torch.Tensor = None
