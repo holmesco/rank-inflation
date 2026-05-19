@@ -75,7 +75,7 @@ class KKTMatrixOperator:
         self.n = X.shape[0]
         self.m = A_batch.shape[0]
         self.A_batch = A_batch.to(device)
-
+        
     def matvec(self, y: torch.Tensor) -> torch.Tensor:
         """
         Compute B * y = A_bar^T (X ⊗ X) A_bar * y.
@@ -89,7 +89,6 @@ class KKTMatrixOperator:
         return self._matvec_batched(y)
 
     def _matvec_batched(self, y: torch.Tensor) -> torch.Tensor:
-        y = y.to(self.device)
         # Build Adjoint
         S = build_adjoint_batched(y, self.A_batch, scale=1.0)
         # Compute X @ S @ X

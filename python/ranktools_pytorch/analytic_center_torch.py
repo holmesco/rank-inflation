@@ -7,11 +7,11 @@ preconditioner for GPU acceleration of dense matrix operations.
 
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
+import logging
 import time
 import torch
 import scipy.sparse as sp
 from torch.autograd.profiler import record_function
-
 
 from .lin_alg_torch import KKTMatrixOperator, LowRankPrecond
 from .solvers import ConjugateGradientSolver
@@ -167,6 +167,7 @@ class AnalyticCenterPyTorch:
             (self.m, self.dim, self.dim), dtype=torch.float64, device=self.device
         )
         for i, A in enumerate(range(len(A_list))):
+            # TODO pass to gpu then convert to dense to avoid GPU-CPU transfer of dense matrices. We should be able to do sparse-dense multiplication on GPU directly. Once running should test this.
             A_batch[i] = torch.from_numpy(self.A_list[i].toarray()).to(
                 dtype=torch.float64, device=self.device
             )
@@ -198,6 +199,8 @@ class AnalyticCenterPyTorch:
         )
         # Stored multipliers
         self.multipliers_stored_: None | torch.Tensor = None
+        self._logger = logging.getLogger(__name__)
+        self._log_header_emitted = False
 
     def certify(
         self,
@@ -332,22 +335,20 @@ class AnalyticCenterPyTorch:
                 ).norm()
                 # Compute deviation angle
                 cos_angle = (Y_0.T @ X @ Y_0).trace() / Y_0.norm() ** 2 / X.norm()
-                angle = torch.acos(torch.clamp(cos_angle, -1.0, 1.0)).item()
+                angle = torch.acos(torch.clamp(cos_angle, -1.0, 1.0))
 
-            #  Print iteration info
-            # TODO Logging should not use print statements because they can slow down GPU code.
-            if self.params.verbose and iter_idx % 10 == 0:
-                print(
-                    f"{'Iter':>5} {'Violation':>12} {'StepNorm':>12} "
-                    f"{'Alpha':>12} {'EpsMult':>12} {'Barrier':>12} "
-                    f"{'Centrality':>12} {'Angle':>12} {'Compl':>12}"
-                )
-
+            #  Log iteration info (avoid print to reduce GPU sync overhead)
             if self.params.verbose:
-                print(
-                    f"{iter_idx+1:5d} {violation_norm:12.6e} {delta_X_norm:12.6e} "
-                    f"{alpha:12.6e} {eps_mult:12.6e} {barrier:12.6e} "
-                    f"{centrality:12.6e} {angle:12.6e} {complementarity:12.6e}"
+                self._log_iteration(
+                    iter_idx=iter_idx,
+                    violation_norm=violation_norm,
+                    delta_X_norm=delta_X_norm,
+                    alpha=alpha,
+                    eps_mult=eps_mult,
+                    barrier=barrier,
+                    centrality=centrality,
+                    angle=angle,
+                    complementarity=complementarity,
                 )
 
             # Early stopping with certificate
@@ -377,6 +378,54 @@ class AnalyticCenterPyTorch:
                     )
 
         return X, multipliers, violation
+
+    def _log_iteration(
+        self,
+        iter_idx: int,
+        violation_norm: torch.Tensor,
+        delta_X_norm: torch.Tensor,
+        alpha: float,
+        eps_mult: float,
+        barrier: torch.Tensor,
+        centrality: torch.Tensor,
+        angle: float,
+        complementarity: torch.Tensor,
+    ) -> None:
+        """Log a single iteration without blocking GPU execution."""
+        if not self._log_header_emitted:
+            header_fmt = "%5s %12s %12s %12s %12s %12s %12s %12s %12s"
+            header_vals = (
+                "Iter",
+                "Violation",
+                "StepNorm",
+                "Alpha",
+                "EpsMult",
+                "Barrier",
+                "Centrality",
+                "Angle",
+                "Compl",
+            )
+            self._logger.info(header_fmt, *header_vals)
+            if not self.main_gpu:
+                print(header_fmt % header_vals)
+            self._log_header_emitted = True
+
+        row = (
+            iter_idx + 1,
+            violation_norm.detach().cpu().item(),
+            delta_X_norm.detach().cpu().item(),
+            float(alpha),
+            float(eps_mult),
+            barrier.detach().cpu().item(),
+            centrality.detach().cpu().item(),
+            float(angle),
+            complementarity.detach().cpu().item(),
+        )
+
+        row_fmt = "%5d %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e %12.6e"
+        self._logger.info(row_fmt, *row)
+        if not self.main_gpu:
+            print(row_fmt % row)
 
     @record_function("SolveForMultipliers")
     def _solve_for_multipliers(self, X: torch.Tensor, eps_mult: float) -> torch.Tensor:
