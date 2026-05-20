@@ -6,6 +6,7 @@ venv/
 .venv/
 results/
 python/examples/
+trace_dir/
 
 # files
 *.asv
