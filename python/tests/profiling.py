@@ -40,10 +40,10 @@ def profile_certify(adj, clique, name):
     # Recover Analytic center from Mosek
     b = sdp.b.numpy()
     C = sdp.C.numpy()
-    result: SDPResult = solve_sdp_mosek(
+    result_sdp: SDPResult = solve_sdp_mosek(
         C, sdp.A_mosek, b
     )  # Just to check Mosek can solve it
-    X = result.X
+    X = result_sdp.X
     U, S, _ = np.linalg.svd(X, full_matrices=False)
     rank = np.sum(S > S[0] * 1e-5)
     Y_0 = torch.Tensor(U[:, :rank] @ np.diag(np.sqrt(S[:rank])))
@@ -97,7 +97,7 @@ def profile_certify(adj, clique, name):
     assert result.complementarity < params.tol_cert_complementarity, ValueError(
         f"Complementarity gap too large: {result.complementarity}"
     )
-
+    print(f"Profiling complete. Time: {result.solver_time:.4f} seconds")
 
 if __name__ == "__main__":
     profile_certify(*LOVASZ_TESTS[0])
