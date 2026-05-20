@@ -238,6 +238,7 @@ class LowRankPrecond:
         self.scale = 1.0
         self.is_initialized = False
 
+        # Intialize storage
         self._sparse_factor = None
         self._dense_ldlt = None
 
@@ -246,6 +247,8 @@ class LowRankPrecond:
         self.U = U.to(self.device)
         self.n = U.shape[0]
         self.r = U.shape[1]
+        # Build the augmented system once
+        self.build_aug_sys()
         # Build the preconditioner
         if self.method == "DenseLDLT":
             self.build_ldlt_dense()
@@ -256,28 +259,12 @@ class LowRankPrecond:
                 f"LowRankPrecond only supports DenseLDLT and SparseLDLT. "
                 f"Got method={self.method}."
             )
+        
 
+    
     def build_ldlt_dense(self) -> None:
-        if self.U is None or self.C is None or self.A_list is None:
-            raise RuntimeError("LowRankPrecond: Problem data not set.")
-
-        A_bar = self.build_constraint_matrix(self.A_list, self.C)
-        V = self.build_top_right(self.U, self.tau)
-
-        tau2 = self.tau**2
-        AtA = torch.from_numpy((A_bar.T @ A_bar).toarray()).to(
-            dtype=torch.float64, device=self.device
-        )
-        V = torch.from_numpy(V).to(dtype=torch.float64, device=self.device)
-
-        n_sys = self.m + V.shape[1]
-        self.Sys = torch.zeros(
-            (n_sys, n_sys), dtype=torch.float64, device=self.U.device
-        )
-        self.Sys[: self.m, : self.m] = AtA * tau2
-        self.Sys[self.m :, : self.m] = V.T * self.tau
-        self.Sys[: self.m, self.m :] = V * self.tau
-        self.Sys[self.m :, self.m :] = -torch.eye(V.shape[1]) * tau2
+        if self.Sys is None:
+            raise RuntimeError("LowRankPrecond: Augmented system not built.")
 
         # Perform LDLT factorization (returns LD factorization and pivots)
         LD, pivots, info = torch.linalg.ldl_factor_ex(self.Sys)
@@ -343,6 +330,28 @@ class LowRankPrecond:
             self.is_initialized = True
         except Exception as exc:
             raise RuntimeError(f"Sparse LDLT factorization failed: {exc}")
+
+    def build_aug_sys(self) -> None:
+        if self.U is None or self.C is None or self.A_list is None:
+            raise RuntimeError("LowRankPrecond: Problem data not set.")
+
+        A_bar = self.build_constraint_matrix(self.A_list, self.C)
+        V = self.build_top_right(self.U, self.tau)
+
+        tau2 = self.tau**2
+        AtA = torch.from_numpy((A_bar.T @ A_bar).toarray()).to(
+            dtype=torch.float64, device=self.device
+        )
+        V = torch.from_numpy(V).to(dtype=torch.float64, device=self.device)
+
+        n_sys = self.m + V.shape[1]
+        self.Sys = torch.zeros(
+            (n_sys, n_sys), dtype=torch.float64, device=self.U.device
+        )
+        self.Sys[: self.m, : self.m] = AtA * tau2
+        self.Sys[self.m :, : self.m] = V.T * self.tau
+        self.Sys[: self.m, self.m :] = V * self.tau
+        self.Sys[self.m :, self.m :] = -torch.eye(V.shape[1]) * tau2
 
     @staticmethod
     def build_constraint_matrix(
