@@ -145,6 +145,7 @@ def test_certify_lovasz_theta_cg_solve(adj, clique, name):
         f"Complementarity gap too large: {result.complementarity}"
     )
 
+
 @pytest.mark.parametrize("adj,clique,name", LOVASZ_TESTS)
 def test_certify_lovasz_theta_cg_solve_gpu(adj, clique, name):
     sdp = make_lovasz_test_case(adj, clique, name)
@@ -174,7 +175,6 @@ def test_certify_lovasz_theta_cg_solve_gpu(adj, clique, name):
     params.eps_mult_min = 1e-4
     params.delta = 1e-5
     params.lin_solver = LinearSolverType.MFCG_LRP
-    
 
     certifier = AnalyticCenterPyTorch(
         C=sdp.C,
@@ -194,7 +194,6 @@ def test_certify_lovasz_theta_cg_solve_gpu(adj, clique, name):
     assert result.complementarity < params.tol_cert_complementarity, ValueError(
         f"Complementarity gap too large: {result.complementarity}"
     )
-
 
 
 # TESTS ON STANARD RANK 1 PROBLEMS

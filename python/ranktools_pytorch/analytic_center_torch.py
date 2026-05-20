@@ -70,7 +70,7 @@ def defaultAnalyicCenterParams() -> AnalyticCenterParams:
 
     # Low-rank preconditioner params
     params.lrp_params.tau = 1.0e-5
-    params.lrp_params.method = LowRankPrecondMethod.DenseQR
+    params.lrp_params.method = LowRankPrecondMethod.DenseLU
     params.lrp_params.use_approx = False
     params.lrp_params.ldlt_zero_thresh = 1.0e-14
 

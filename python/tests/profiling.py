@@ -62,7 +62,7 @@ def profile_certify(adj, clique, name):
     params.eps_mult_min = 1e-4
     params.delta = 1e-5
     params.lin_solver = LinearSolverType.MFCG_LRP
-    params.lrp_params.method = LowRankPrecondMethod.DenseQR
+    params.lrp_params.method = LowRankPrecondMethod.DenseLU
 
     certifier = AnalyticCenterPyTorch(
         C=sdp.C,
@@ -98,6 +98,7 @@ def profile_certify(adj, clique, name):
         f"Complementarity gap too large: {result.complementarity}"
     )
     print(f"Profiling complete. Time: {result.solver_time:.4f} seconds")
+
 
 if __name__ == "__main__":
     profile_certify(*LOVASZ_TESTS[0])

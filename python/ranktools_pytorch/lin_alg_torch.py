@@ -255,7 +255,7 @@ class LowRankPrecond:
         # Build the preconditioner
         if self.method == LowRankPrecondMethod.DenseLDLT:
             self.build_ldlt_dense()
-        elif self.method == LowRankPrecondMethod.DenseQR:
+        elif self.method == LowRankPrecondMethod.DenseLU:
             self.build_lu_dense()
         elif self.method == LowRankPrecondMethod.SparseLDLT:
             self.build_ldlt_sparse()
@@ -469,7 +469,7 @@ class LowRankPrecond:
             b_t = b / self.scale
             x_t = self.solveDenseLDLT(b_t)
             return x_t
-        elif self.method == LowRankPrecondMethod.DenseQR:
+        elif self.method == LowRankPrecondMethod.DenseLU:
             b_t = b / self.scale
             x_t = self.solveDenseLU(b_t)
             return x_t

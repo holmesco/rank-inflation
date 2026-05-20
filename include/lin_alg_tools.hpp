@@ -183,7 +183,9 @@ enum class LowRankPrecondMethod {
   SparseLDLT,
   SparseLDLT_ZL,
   DenseQR,
-  SparseQR
+  SparseQR,
+  DenseLU,
+  DirectInverse,
 };
 
 struct LowRankPrecondParams {

@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy
 import scipy.sparse
 import typing
-__all__: list[str] = ['AnalyticCenter', 'AnalyticCenterParams', 'AnalyticCenterResult', 'CG', 'DenseLDLT', 'DenseQR', 'LDLT', 'LinearSolverType', 'LowRankPrecondMethod', 'LowRankPrecondParams', 'MFCG_DP', 'MFCG_LRP', 'RankReductionParams', 'SDPResult', 'SparseLDLT', 'SparseLDLT_ZL', 'SparseQR', 'rank_reduction', 'solve_sdp_mosek']
+__all__: list[str] = ['AnalyticCenter', 'AnalyticCenterParams', 'AnalyticCenterResult', 'CG', 'DenseLDLT', 'DenseLU', 'DenseQR', 'DirectInverse', 'LDLT', 'LinearSolverType', 'LowRankPrecondMethod', 'LowRankPrecondParams', 'MFCG_DP', 'MFCG_LRP', 'RankReductionParams', 'SDPResult', 'SparseLDLT', 'SparseLDLT_ZL', 'SparseQR', 'rank_reduction', 'solve_sdp_mosek']
 class AnalyticCenter:
     params: AnalyticCenterParams
     def __init__(self, C: numpy.ndarray, rho: float, A: list[scipy.sparse.csc_matrix], b: list[float], params: ... = ...) -> None:
@@ -255,13 +255,19 @@ class LowRankPrecondMethod:
       DenseQR : Dense QR factorization approach
     
       SparseQR : Sparse QR factorization approach
+    
+      DenseLU : Dense LU factorization approach
+    
+      DirectInverse : Direct inverse approach
     """
     DenseLDLT: typing.ClassVar[LowRankPrecondMethod]  # value = <LowRankPrecondMethod.DenseLDLT: 0>
+    DenseLU: typing.ClassVar[LowRankPrecondMethod]  # value = <LowRankPrecondMethod.DenseLU: 5>
     DenseQR: typing.ClassVar[LowRankPrecondMethod]  # value = <LowRankPrecondMethod.DenseQR: 3>
+    DirectInverse: typing.ClassVar[LowRankPrecondMethod]  # value = <LowRankPrecondMethod.DirectInverse: 6>
     SparseLDLT: typing.ClassVar[LowRankPrecondMethod]  # value = <LowRankPrecondMethod.SparseLDLT: 1>
     SparseLDLT_ZL: typing.ClassVar[LowRankPrecondMethod]  # value = <LowRankPrecondMethod.SparseLDLT_ZL: 2>
     SparseQR: typing.ClassVar[LowRankPrecondMethod]  # value = <LowRankPrecondMethod.SparseQR: 4>
-    __members__: typing.ClassVar[dict[str, LowRankPrecondMethod]]  # value = {'DenseLDLT': <LowRankPrecondMethod.DenseLDLT: 0>, 'SparseLDLT': <LowRankPrecondMethod.SparseLDLT: 1>, 'SparseLDLT_ZL': <LowRankPrecondMethod.SparseLDLT_ZL: 2>, 'DenseQR': <LowRankPrecondMethod.DenseQR: 3>, 'SparseQR': <LowRankPrecondMethod.SparseQR: 4>}
+    __members__: typing.ClassVar[dict[str, LowRankPrecondMethod]]  # value = {'DenseLDLT': <LowRankPrecondMethod.DenseLDLT: 0>, 'SparseLDLT': <LowRankPrecondMethod.SparseLDLT: 1>, 'SparseLDLT_ZL': <LowRankPrecondMethod.SparseLDLT_ZL: 2>, 'DenseQR': <LowRankPrecondMethod.DenseQR: 3>, 'SparseQR': <LowRankPrecondMethod.SparseQR: 4>, 'DenseLU': <LowRankPrecondMethod.DenseLU: 5>, 'DirectInverse': <LowRankPrecondMethod.DirectInverse: 6>}
     def __eq__(self, other: typing.Any) -> bool:
         ...
     def __getstate__(self) -> int:
@@ -376,7 +382,9 @@ def solve_sdp_mosek(C: numpy.ndarray, As: list[scipy.sparse.csc_matrix], b: list
     """
 CG: LinearSolverType  # value = <LinearSolverType.CG: 1>
 DenseLDLT: LowRankPrecondMethod  # value = <LowRankPrecondMethod.DenseLDLT: 0>
+DenseLU: LowRankPrecondMethod  # value = <LowRankPrecondMethod.DenseLU: 5>
 DenseQR: LowRankPrecondMethod  # value = <LowRankPrecondMethod.DenseQR: 3>
+DirectInverse: LowRankPrecondMethod  # value = <LowRankPrecondMethod.DirectInverse: 6>
 LDLT: LinearSolverType  # value = <LinearSolverType.LDLT: 0>
 MFCG_DP: LinearSolverType  # value = <LinearSolverType.MFCG_DP: 2>
 MFCG_LRP: LinearSolverType  # value = <LinearSolverType.MFCG_LRP: 3>

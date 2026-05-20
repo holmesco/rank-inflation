@@ -165,7 +165,7 @@ def test_dense_lr_precond_lu_conditioning(adj, clique, name):
     m = B_explicit.shape[0]
 
     precond = LowRankPrecond(
-        A_list=sdp.A, C=sdp.C, tau=tau, method=LowRankPrecondMethod.DenseQR
+        A_list=sdp.A, C=sdp.C, tau=tau, method=LowRankPrecondMethod.DenseLU
     )
     precond.build_preconditioner(Y_0)
     PB = torch.zeros_like(B_explicit)
