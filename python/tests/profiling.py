@@ -11,6 +11,7 @@ from ranktools import LinearSolverType, solve_sdp_mosek, SDPResult
 from ranktools_pytorch.analytic_center_torch import (
     AnalyticCenterPyTorch,
     defaultAnalyicCenterParams,
+    LowRankPrecondMethod,
 )
 from ranktools_pytorch.lin_alg_torch import LowRankPrecond
 from tests.fixtures import (
@@ -61,6 +62,7 @@ def profile_certify(adj, clique, name):
     params.eps_mult_min = 1e-4
     params.delta = 1e-5
     params.lin_solver = LinearSolverType.MFCG_LRP
+    params.lrp_params.method = LowRankPrecondMethod.DenseQR
 
     certifier = AnalyticCenterPyTorch(
         C=sdp.C,

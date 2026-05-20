@@ -9,6 +9,7 @@ from ranktools_pytorch.lin_alg_torch import (
     KKTMatrixOperator,
     LowRankPrecond,
 )
+from ranktools import LowRankPrecondMethod
 from ranktools_pytorch.utils import line_search_factorization, symmetrize_dense
 from ranktools_pytorch.solvers import ConjugateGradientSolver
 from .fixtures import (
@@ -114,7 +115,9 @@ def test_ldl_decomposition(adj, clique, name):
     # Check the low-rank preconditioner improves conditioning.
     sdp = make_lovasz_test_case(adj, clique, name)
     Y_0 = sdp.make_solution(1)
-    precond = LowRankPrecond(A_list=sdp.A, C=sdp.C, tau=1e-1, method="DenseLDLT")
+    precond = LowRankPrecond(
+        A_list=sdp.A, C=sdp.C, tau=1e-1, method=LowRankPrecondMethod.DenseLDLT
+    )
     precond.build_preconditioner(Y_0)
     # Test solve
     lhs = torch.randn(precond.Sys.shape[0], dtype=torch.float64, device=precond.device)
@@ -126,7 +129,7 @@ def test_ldl_decomposition(adj, clique, name):
 
 
 @pytest.mark.parametrize("adj,clique,name", PARAM_CLIQUES)
-def test_dense_lr_preconditioner_conditioning(adj, clique, name):
+def test_dense_lr_precond_ldl_conditioning(adj, clique, name):
     # Check the low-rank preconditioner improves conditioning.
     sdp = make_lovasz_test_case(adj, clique, name)
     Y_0 = sdp.make_solution(1)
@@ -137,7 +140,33 @@ def test_dense_lr_preconditioner_conditioning(adj, clique, name):
     B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale)
     m = B_explicit.shape[0]
 
-    precond = LowRankPrecond(A_list=sdp.A, C=sdp.C, tau=tau, method="DenseLDLT")
+    precond = LowRankPrecond(
+        A_list=sdp.A, C=sdp.C, tau=tau, method=LowRankPrecondMethod.DenseLDLT
+    )
+    precond.build_preconditioner(Y_0)
+    PB = torch.zeros_like(B_explicit)
+    for i in range(m):
+        PB[:, i] = precond.solve(B_explicit[:, i])
+
+    cond_est = _condition_number_from_eigvals(PB)
+    assert cond_est < 1.2, f"Preconditioned operator poorly conditioned: {cond_est}"
+
+
+@pytest.mark.parametrize("adj,clique,name", PARAM_CLIQUES)
+def test_dense_lr_precond_lu_conditioning(adj, clique, name):
+    # Check the low-rank preconditioner improves conditioning.
+    sdp = make_lovasz_test_case(adj, clique, name)
+    Y_0 = sdp.make_solution(1)
+    tau = 1e-4
+    X = Y_0 @ Y_0.T + tau * torch.eye(sdp.dim, dtype=torch.float64)
+
+    scale = 1.0
+    B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale)
+    m = B_explicit.shape[0]
+
+    precond = LowRankPrecond(
+        A_list=sdp.A, C=sdp.C, tau=tau, method=LowRankPrecondMethod.DenseQR
+    )
     precond.build_preconditioner(Y_0)
     PB = torch.zeros_like(B_explicit)
     for i in range(m):
@@ -162,7 +191,9 @@ def test_cg_inverse_matches_exact(adj, clique, name):
     B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale)
     m = B_explicit.shape[0]
 
-    precond = LowRankPrecond(A_list=sdp.A, C=sdp.C, tau=tau, method="DenseLDLT")
+    precond = LowRankPrecond(
+        A_list=sdp.A, C=sdp.C, tau=tau, method=LowRankPrecondMethod.DenseLDLT
+    )
     precond.build_preconditioner(Y_0)
     cg = ConjugateGradientSolver(max_iter=2000, tol=1e-16, verbose=True)
 
@@ -201,7 +232,9 @@ def test_cg_preconditioned_inverse_right_inverse_low_tol(adj, clique, name):
     B_explicit = _build_explicit_B(X, sdp.A, sdp.C, scale)
     m = B_explicit.shape[0]
 
-    precond = LowRankPrecond(A_list=sdp.A, C=sdp.C, tau=tau, method="DenseLDLT")
+    precond = LowRankPrecond(
+        A_list=sdp.A, C=sdp.C, tau=tau, method=LowRankPrecondMethod.DenseLDLT
+    )
     precond.build_preconditioner(Y_0)
     cg = ConjugateGradientSolver(max_iter=2000, tol=1e-24, verbose=True)
 

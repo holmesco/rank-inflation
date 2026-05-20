@@ -11,6 +11,7 @@ import numpy as np
 from torch.profiler import record_function
 
 from ranktools_pytorch.certificate import build_adjoint, build_adjoint_batched
+from ranktools import LowRankPrecondMethod
 
 
 def sparse_upper_dot_dense(
@@ -75,7 +76,7 @@ class KKTMatrixOperator:
         self.n = X.shape[0]
         self.m = A_batch.shape[0]
         self.A_batch = A_batch.to(device)
-        
+
     def matvec(self, y: torch.Tensor) -> torch.Tensor:
         """
         Compute B * y = A_bar^T (X ⊗ X) A_bar * y.
@@ -221,7 +222,7 @@ class LowRankPrecond:
         A_list: List[sp.spmatrix],
         C: torch.Tensor,
         tau: float = 1e-5,
-        method: str = "DenseLDLT",
+        method: LowRankPrecondMethod = LowRankPrecondMethod.DenseLDLT,
         use_approx: bool = False,
         device: torch.device = torch.device("cpu"),
         solve_device: torch.device = torch.device("cpu"),
@@ -229,7 +230,7 @@ class LowRankPrecond:
         self.A_list = A_list
         self.C = torch.triu(C).to(device)
         self.tau = tau
-        self.method = method.name if hasattr(method, "name") else str(method)
+        self.method = method
         self.use_approx = use_approx
         self.device = device
         # Device where the main solve is taking place
@@ -241,6 +242,8 @@ class LowRankPrecond:
         # Intialize storage
         self._sparse_factor = None
         self._dense_ldlt = None
+        self._dense_lu = None
+        self.Sys = None
 
     def build_preconditioner(self, U: torch.Tensor) -> None:
         # Store the low-rank factor U on the specified device
@@ -250,18 +253,35 @@ class LowRankPrecond:
         # Build the augmented system once
         self.build_aug_sys()
         # Build the preconditioner
-        if self.method == "DenseLDLT":
+        if self.method == LowRankPrecondMethod.DenseLDLT:
             self.build_ldlt_dense()
-        elif self.method in ("SparseLDLT", "SparseLDLT_ZL"):
+        elif self.method == LowRankPrecondMethod.DenseQR:
+            self.build_lu_dense()
+        elif self.method == LowRankPrecondMethod.SparseLDLT:
             self.build_ldlt_sparse()
         else:
             raise NotImplementedError(
                 f"LowRankPrecond only supports DenseLDLT and SparseLDLT. "
                 f"Got method={self.method}."
             )
-        
 
-    
+    def build_lu_dense(self) -> None:
+        if self.Sys is None:
+            raise RuntimeError("LowRankPrecond: Augmented system not built.")
+
+        # Perform LDLT factorization (returns LD factorization and pivots)
+        LU, pivots, info = torch.linalg.lu_factor_ex(self.Sys)
+        if torch.any(info != 0):
+            raise RuntimeError(f"Dense LDLT factorization failed with info={info}")
+        # Move factorization to solve device if different from construction device
+        if self.solve_device != self.device:
+            LU = LU.to(self.solve_device)
+            pivots = pivots.to(self.solve_device)
+        # Store the factorization for use in solves
+        self._dense_lu = (LU, pivots)
+        # Mark initialized
+        self.is_initialized = True
+
     def build_ldlt_dense(self) -> None:
         if self.Sys is None:
             raise RuntimeError("LowRankPrecond: Augmented system not built.")
@@ -440,9 +460,30 @@ class LowRankPrecond:
         C_upper = np.triu(C_np)
         return C_upper + C_upper.T - np.diag(np.diag(C_upper))
 
+    @record_function("LowRankPrecond.solve")
+    def solve(self, b: torch.Tensor) -> torch.Tensor:
+        if not self.is_initialized:
+            raise RuntimeError("Preconditioner not initialized")
+
+        if self.method == LowRankPrecondMethod.DenseLDLT:
+            b_t = b / self.scale
+            x_t = self.solveDenseLDLT(b_t)
+            return x_t
+        elif self.method == LowRankPrecondMethod.DenseQR:
+            b_t = b / self.scale
+            x_t = self.solveDenseLU(b_t)
+            return x_t
+        elif self.method == LowRankPrecondMethod.SparseLDLT:
+            b_np = b.detach().cpu().numpy() / self.scale
+            x_np = self.solveSparseLDLT(b_np)
+            return torch.from_numpy(x_np).to(dtype=torch.float64, device=self.device)
+        else:
+            raise NotImplementedError(
+                f"LowRankPrecond only supports DenseLDLT and SparseLDLT. "
+                f"Got method={self.method}."
+            )
+
     def solveDenseLDLT(self, b: torch.Tensor) -> torch.Tensor:
-        if self._dense_ldlt is None:
-            raise RuntimeError("Dense LDLT factorization not initialized")
         # Expand dimension of b
         sysdim = self.Sys.shape[0]
         rhs = torch.zeros(sysdim, dtype=b.dtype, device=b.device)
@@ -450,6 +491,16 @@ class LowRankPrecond:
         # Solve and extract solution for multipliers
         LD, pivots = self._dense_ldlt
         x = torch.linalg.ldl_solve(LD, pivots, rhs[:, None])
+        return x[: self.m].squeeze(-1)
+
+    def solveDenseLU(self, b: torch.Tensor) -> torch.Tensor:
+        # Expand dimension of b
+        sysdim = self.Sys.shape[0]
+        rhs = torch.zeros(sysdim, dtype=b.dtype, device=b.device)
+        rhs[: self.m] = b.reshape(-1)
+        # Solve and extract solution for multipliers
+        LU, pivots = self._dense_lu
+        x = torch.linalg.lu_solve(LU, pivots, rhs[:, None])
         return x[: self.m].squeeze(-1)
 
     def solveSparseLDLT(self, b_np: np.ndarray) -> np.ndarray:
@@ -460,17 +511,3 @@ class LowRankPrecond:
         rhs = np.zeros(sysdim, dtype=np.float64)
         rhs[: self.m] = b_np
         return self._sparse_factor.solve(rhs)[: self.m]
-
-    @record_function("LowRankPrecond.solve")
-    def solve(self, b: torch.Tensor) -> torch.Tensor:
-        if not self.is_initialized:
-            raise RuntimeError("Preconditioner not initialized")
-
-        if self.method == "DenseLDLT":
-            b_t = b / self.scale
-            x_t = self.solveDenseLDLT(b_t)
-            return x_t
-        else:
-            b_np = b.detach().cpu().numpy() / self.scale
-            x_np = self.solveSparseLDLT(b_np)
-            return torch.from_numpy(x_np).to(dtype=torch.float64, device=self.device)

@@ -174,6 +174,7 @@ def test_certify_lovasz_theta_cg_solve_gpu(adj, clique, name):
     params.eps_mult_min = 1e-4
     params.delta = 1e-5
     params.lin_solver = LinearSolverType.MFCG_LRP
+    
 
     certifier = AnalyticCenterPyTorch(
         C=sdp.C,

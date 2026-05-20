@@ -70,7 +70,7 @@ def defaultAnalyicCenterParams() -> AnalyticCenterParams:
 
     # Low-rank preconditioner params
     params.lrp_params.tau = 1.0e-5
-    params.lrp_params.method = LowRankPrecondMethod.DenseLDLT
+    params.lrp_params.method = LowRankPrecondMethod.DenseQR
     params.lrp_params.use_approx = False
     params.lrp_params.ldlt_zero_thresh = 1.0e-14
 
@@ -193,7 +193,7 @@ class AnalyticCenterPyTorch:
             A_list=self.A_list,
             C=self.C,
             tau=self.params.lrp_params.tau,
-            method="DenseLDLT",
+            method=self.params.lrp_params.method,
             device=precond_device,
             solve_device=self.device,
         )
