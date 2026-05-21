@@ -234,7 +234,7 @@ class AnalyticCenter {
   // Matrix Free, Low Rank Preconditioned Conjugate Gradient solver
   // We store this so that we can reuse the preconditioner.
   mutable std::unique_ptr<Eigen::ConjugateGradient<
-      MultiplierLinSys, Eigen::Upper | Eigen::Lower, LowRankPrecond>>
+      KKTSysLinOp, Eigen::Upper | Eigen::Lower, LowRankPrecond>>
       lr_solver;
   // Expected rank of the initial solution
   mutable int rank_init;
@@ -251,7 +251,7 @@ class AnalyticCenter {
     Vector d;          // RHS vector (m)
     Vector violation;  // constraint violation (m)
     SpMatrix A_bar;
-    std::unique_ptr<MultiplierLinSys>
+    std::unique_ptr<KKTSysLinOp>
         B_mf;  // Matrix-free operator for B (if using matrix-free solver)
     const Matrix&
         X_;  // current primal solution (for building matrix-free operator)

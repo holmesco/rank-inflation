@@ -29,7 +29,7 @@ inline std::string print_solver(LinearSolverType solver) {
 // --------------- MATRIX-FREE METHODS -----------
 
 // declare class for matrix-free linear system
-class MultiplierLinSys;
+class KKTSysLinOp;
 using Eigen::SparseMatrix;
 
 inline double sparse_upper_dot_dense(const SparseMatrix<double>& A_upper,
@@ -51,9 +51,9 @@ inline double sparse_upper_dot_dense(const SparseMatrix<double>& A_upper,
 
 namespace Eigen {
 namespace internal {
-// MultiplierLinSys looks-like a dense matrix, so we inheret its traits:
+// KKTSysLinOp looks-like a dense matrix, so we inheret its traits:
 template <>
-struct traits<MultiplierLinSys> : public traits<Eigen::SparseMatrix<double>> {};
+struct traits<KKTSysLinOp> : public traits<Eigen::SparseMatrix<double>> {};
 }  // namespace internal
 }  // namespace Eigen
 
@@ -61,7 +61,7 @@ struct traits<MultiplierLinSys> : public traits<Eigen::SparseMatrix<double>> {};
 // to use Eigen's iterative solvers with a custom matrix-vector product defined
 // by the sparse matrix of the problem, without explicitly forming the dense
 // matrix.
-class MultiplierLinSys : public Eigen::EigenBase<MultiplierLinSys> {
+class KKTSysLinOp : public Eigen::EigenBase<KKTSysLinOp> {
  public:
   // Required typedefs, constants, and method:
   typedef double Scalar;
@@ -76,9 +76,9 @@ class MultiplierLinSys : public Eigen::EigenBase<MultiplierLinSys> {
   Index cols() const { return static_cast<Eigen::Index>(ncons); }
 
   template <typename Rhs>
-  Eigen::Product<MultiplierLinSys, Rhs, Eigen::AliasFreeProduct> operator*(
+  Eigen::Product<KKTSysLinOp, Rhs, Eigen::AliasFreeProduct> operator*(
       const Eigen::MatrixBase<Rhs>& x) const {
-    return Eigen::Product<MultiplierLinSys, Rhs, Eigen::AliasFreeProduct>(
+    return Eigen::Product<KKTSysLinOp, Rhs, Eigen::AliasFreeProduct>(
         *this, x.derived());
   }
   const Eigen::MatrixXd& X_;
@@ -90,31 +90,31 @@ class MultiplierLinSys : public Eigen::EigenBase<MultiplierLinSys> {
 
   // API to set the data of the linear system (the cost matrix and the
   // constraint matrices)
-  MultiplierLinSys(const Eigen::MatrixXd& X,
-                   const std::vector<Eigen::SparseMatrix<double>>& As,
-                   const Eigen::MatrixXd& C, double scale)
+  KKTSysLinOp(const Eigen::MatrixXd& X,
+              const std::vector<Eigen::SparseMatrix<double>>& As,
+              const Eigen::MatrixXd& C, double scale)
       : X_(X), As_(As), C_(C), ncons(As.size() + 1), scale_(scale) {}
 };
 
-// Implementation of MultiplierLinSys * Eigen::DenseVector though a
+// Implementation of KKTSysLinOp * Eigen::DenseVector though a
 // specialization of internal::generic_product_impl:
 namespace Eigen {
 namespace internal {
 
 template <typename Rhs>
-struct generic_product_impl<MultiplierLinSys, Rhs, SparseShape, DenseShape,
+struct generic_product_impl<KKTSysLinOp, Rhs, SparseShape, DenseShape,
                             GemvProduct>  // GEMV stands for matrix-vector
-    : generic_product_impl_base<MultiplierLinSys, Rhs,
-                                generic_product_impl<MultiplierLinSys, Rhs>> {
-  typedef typename Product<MultiplierLinSys, Rhs>::Scalar Scalar;
+    : generic_product_impl_base<KKTSysLinOp, Rhs,
+                                generic_product_impl<KKTSysLinOp, Rhs>> {
+  typedef typename Product<KKTSysLinOp, Rhs>::Scalar Scalar;
 
   // Custom implementation of the matrix-vector product for our linear system.
   // Computes a matrix vector product y = B*x = A_bar^T (X kron X) A_bar *x
   // without explicitly forming the dense matrix. Complexity: O(n^2 m) where n
   // is the dimension of the SDP and m is the number of constraints.
   template <typename Dest>
-  static void scaleAndAddTo(Dest& dst, const MultiplierLinSys& lhs,
-                            const Rhs& rhs, const Scalar& alpha) {
+  static void scaleAndAddTo(Dest& dst, const KKTSysLinOp& lhs, const Rhs& rhs,
+                            const Scalar& alpha) {
     // Construct product S = sum_i A_i * y_i
     // NOTE: Cannot parallelize this loop because of common S
     Eigen::MatrixXd S = rhs(rhs.size() - 1) * lhs.C_;
@@ -138,7 +138,7 @@ struct generic_product_impl<MultiplierLinSys, Rhs, SparseShape, DenseShape,
 
 // ----------- PRECONDITIONERS ------------------
 
-// Diagonal preconditioner for MultiplierLinSys.
+// Diagonal preconditioner for KKTSysLinOp.
 class MultiplierDiagPreconditioner {
  public:
   typedef double Scalar;
@@ -148,7 +148,7 @@ class MultiplierDiagPreconditioner {
   MultiplierDiagPreconditioner() : is_initialized_(false) {}
 
   // Eigen's CG calls compute(mat) with the matrix-free operator
-  MultiplierDiagPreconditioner& compute(const MultiplierLinSys& op) {
+  MultiplierDiagPreconditioner& compute(const KKTSysLinOp& op) {
     inv_diag_.resize(op.ncons);
     for (int i = 0; i < op.ncons - 1; ++i) {
       const Eigen::MatrixXd AX =
@@ -259,7 +259,7 @@ class LowRankPrecond {
   void set_scale(double scale) { scale_ = scale; }
 
   // Eigen's CG calls compute(mat) with the matrix-free operator
-  LowRankPrecond& compute(const MultiplierLinSys& op) {
+  LowRankPrecond& compute(const KKTSysLinOp& op) {
     // Store scaling factor of linear operator
     scale_ = op.scale_;
     if (is_initialized_) {

@@ -480,6 +480,8 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(
     // adjusted rhs to include violation if enabled
     sys.d(i) += sys.violation(i);
   }
+  // TEST low rank approximation of matrix X for faster solve.
+
   // Rescaling for linear system
   sys.scale_ =
       params_.rescale_lin_sys ? (1.0 / (eps_mult * params_.eps_cost)) : 1.0;
@@ -487,7 +489,7 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(
   if (params_.lin_solver == LinearSolverType::MFCG_DP ||
       params_.lin_solver == LinearSolverType::MFCG_LRP) {
     // If using matrix-free solver, build the matrix-free operator for the LHS
-    sys.B_mf = std::make_unique<MultiplierLinSys>(X, A_, C_, sys.scale_);
+    sys.B_mf = std::make_unique<KKTSysLinOp>(X, A_, C_, sys.scale_);
   } else {
     std::vector<Matrix> AX_local(m);
 #ifdef RANKTOOLS_PARALLEL
@@ -543,8 +545,8 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
   } else if (params_.lin_solver == LinearSolverType::MFCG_DP) {
     // Solve the linear system with Matrix-Free Conjugate Gradient (MFCG) method
     // with diagonal preconditioner.
-    MultiplierLinSys& lin_op = *(sys.B_mf);
-    Eigen::ConjugateGradient<MultiplierLinSys, Eigen::Upper | Eigen::Lower,
+    KKTSysLinOp& lin_op = *(sys.B_mf);
+    Eigen::ConjugateGradient<KKTSysLinOp, Eigen::Upper | Eigen::Lower,
                              MultiplierDiagPreconditioner>
         solver;
     // Set solve parameters
@@ -572,12 +574,12 @@ Vector AnalyticCenter::solve_ac_system(const LinSysData& sys,
   } else if (params_.lin_solver == LinearSolverType::MFCG_LRP) {
     // Solve the linear system with Matrix-Free Conjugate Gradient (MFCG) method
     // with low rank preconditioner.
-    MultiplierLinSys& lin_op = *(sys.B_mf);
+    KKTSysLinOp& lin_op = *(sys.B_mf);
     // To avoid repeatedly initializing the preconditioner in each iteration, we
     // maintain a stored instance of the solver.
     if (!lr_solver) {
       lr_solver = std::make_unique<Eigen::ConjugateGradient<
-          MultiplierLinSys, Eigen::Upper | Eigen::Lower, LowRankPrecond>>();
+          KKTSysLinOp, Eigen::Upper | Eigen::Lower, LowRankPrecond>>();
       // Retrieve the preconditioner
       LowRankPrecond& lr_precond = lr_solver->preconditioner();
       // Intialize parameters

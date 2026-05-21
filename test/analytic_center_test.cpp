@@ -301,7 +301,7 @@ TEST(MatrixFree, Product) {
   auto system = problem.build_ac_system(X, eps_mult);
   // Build the matrix-free operator
   double scale = 1 / (params.eps_cost * eps_mult);
-  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, scale);
+  auto lin_op = KKTSysLinOp(X, problem.A_, problem.C_, scale);
   // Test on columns of identity
   auto Id = Matrix::Identity(sdp.dim, sdp.dim);
   for (int i = 0; i < sdp.dim; i++) {
@@ -344,7 +344,7 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   auto system = problem.build_ac_system(X, eps_mult);
   // Build the matrix-free operator
   double scale = 1 / (params.eps_cost * eps_mult);
-  auto lin_op = MultiplierLinSys(X, problem.A_, problem.C_, scale);
+  auto lin_op = KKTSysLinOp(X, problem.A_, problem.C_, scale);
   MultiplierDiagPreconditioner precond;
   precond.compute(lin_op);
   // Check that the preconditioner computed successfully
@@ -366,7 +366,7 @@ TEST(MatrixFree, DiagonalPreconditioner) {
   }
 
   // Verify that the preconditioned CG solves the system correctly
-  Eigen::ConjugateGradient<MultiplierLinSys, Eigen::Upper | Eigen::Lower,
+  Eigen::ConjugateGradient<KKTSysLinOp, Eigen::Upper | Eigen::Lower,
                            MultiplierDiagPreconditioner>
       pcg;
   pcg.compute(lin_op);
