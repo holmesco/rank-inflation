@@ -69,4 +69,12 @@ inline double logdet(const Matrix& X) {
   double val = 2.0 * L.diagonal().array().log().sum();
   return val;
 }
+
+/**
+ * Performs a low-rank eigenvalue decomposition of a symmetric matrix and
+ * returns the factor corresponding to the positive eigenvalues above a given
+ * threshold. Also subtracts a shift tau from the eigenvalues before thresholding, which can be
+ */
+Matrix low_rank_eigen_factorization(const Matrix& A, double tau);
+
 }  // namespace RankTools

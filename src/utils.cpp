@@ -97,7 +97,9 @@ Matrix get_positive_eigspace(const Matrix& mat, double threshold) {
   // 1. Count positive eigenvalues
   int positiveCount = 0;
   for (int i = evals.size() - 1; i >= 0; --i) {
-    if (evals[i] > threshold*evals[mat.cols()-1]) {  // relative threshold to handle scale
+    if (evals[i] >
+        threshold *
+            evals[mat.cols() - 1]) {  // relative threshold to handle scale
       positiveCount++;
     } else {
       break;
@@ -174,6 +176,39 @@ QRResult get_soln_qr_dense(const Matrix& A, const Vector& b,
   result.R_diagonal = qr.matrixQR().diagonal();
   result.residual_norm = (A * result.solution - b).norm();
   return result;
+}
+
+Matrix low_rank_eigen_factorization(const Matrix& A, double tau) {
+  // Symmetric eigendecomposition for PSD matrices
+  Eigen::SelfAdjointEigenSolver<Matrix> solver(A);
+
+  if (solver.info() != Eigen::Success) {
+    throw std::runtime_error("Eigenvalue decomposition failed.");
+  }
+  
+  const Vector& evals = solver.eigenvalues();
+  Vector evals_shifted = evals.array() - tau;
+  const Matrix& evecs = solver.eigenvectors();
+
+  // Count positive shifted eigenvalues efficiently (sorted ascending)
+  int k = 0;
+  for (int i = static_cast<int>(evals_shifted.size()) - 1; i >= 0; --i) {
+    if (evals_shifted[i] > 0.0) {
+      ++k;
+    } else {
+      break;
+    }
+  }
+
+  if (k == 0) return Matrix(A.rows(), 0);
+
+  // Eigenvalues are sorted in increasing order; take the largest k components
+  Vector topEvals =
+      evals_shifted.tail(k).array().sqrt();  // Take square root for factorization
+  Matrix topEvecs = evecs.rightCols(k);
+
+  // Reconstruct the low-rank approximation
+  return topEvecs * topEvals.asDiagonal();
 }
 
 }  // namespace RankTools

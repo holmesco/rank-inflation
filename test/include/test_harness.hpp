@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "analytic_center.hpp"
-#include "rank_inflation.hpp"
 
 using namespace RankTools;
 
@@ -53,10 +52,6 @@ struct SDPTestProblem {
 
   AnalyticCenter make(const AnalyticCenterParams& params) const {
     return AnalyticCenter(C, rho, A, b, params);
-  }
-
-  inline RankInflation make(const RankInflateParams& params) const {
-    return RankInflation(C, rho, A, b, params);
   }
 
   // Returns a testable subclass that exposes protected methods as public.
