@@ -6,14 +6,29 @@ build-backend = "scikit_build_core.build"
 name = "ranktools"
 version = "0.0.1"
 description = "Python bindings for RankTools AnalyticCenter solver"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
 	"numpy<2",
-	"scipy",
+	"scipy>=1.7.0",
+	"pytest>=7.0.0",
+	"matplotlib>=3.5.0",
+	"torch==2.5.1",
+	"pytest",
 ]
 
 [project.optional-dependencies]
 test = ["pytest"]
+dev = ["black>=24.0"]
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu121" }
+torchaudio = { index = "pytorch-cu121" }
+torchvision = { index = "pytorch-cu121" }
 
 [tool.scikit-build]
 # Tell scikit-build-core to pass the flag that enables the pybind11 target
@@ -21,6 +36,8 @@ cmake.args = ["-DBUILD_PYTHON_BINDINGS=ON", "-DBUILD_TESTS=OFF"]
 cmake.minimum-version = "3.15"
 # The compiled module and its stub are installed to the wheel root
 wheel.install-dir = "."
+# Include pure-Python packages under python/
+wheel.packages = ["python/ranktools_pytorch"]
 
 # ---------------------------------------------------------------------------
 # Optional install-time flags (passed via pip's -C / --config-settings)
@@ -31,3 +48,9 @@ wheel.install-dir = "."
 #   pip install . -C cmake.define.ENABLE_PARALLEL=ON    # turn on parallel loops (enabled by default)
 #   pip install . -C cmake.define.CMAKE_BUILD_TYPE=Debug                     # Debug build
 #   pip install . -C cmake.define.CMAKE_BUILD_TYPE=Debug -C cmake.define.DEBUG_FLAG=ON  # both
+
+
+[tool.black]
+line-length = 88
+target-version = ["py311", "py312"]
+include = '\\.pyi?$'
