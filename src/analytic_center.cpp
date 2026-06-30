@@ -330,6 +330,10 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     if (params_.rescale_lin_sys) {
       S = S / (eps_mult * params_.eps_cost);
     }
+    // Compute centrality metric from He et al. 1997
+    // When this is below 1, the dual matrix is guaranteed to be PSD, so this
+    // can be used as an early stopping condition for the centering iterations.
+    cent_metric = (L.transpose() * S * L - Matrix::Identity(dim, dim)).norm();
     // Get Newton step direction towards analytic center
     auto deltaX = X - X * S * X;
     // Line search to find step that ensures PSDness of the solution
@@ -337,10 +341,6 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
     // but this backtracking
     alpha = 1.0;
     std::tie(alpha, L) = line_search_factorization(X, deltaX);
-    // Compute centrality metric from He et al. 1997
-    // When this is below 1, the dual matrix is guaranteed to be PSD, so this
-    // can be used as an early stopping condition for the centering iterations.
-    cent_metric = (L.transpose() * S * L - Matrix::Identity(dim, dim)).norm();
     // Compute the angle between the current solution and the initial solution
     // as a measure of deviation from the initial solution for early stopping.
     double cos_angle = (Y_0.transpose() * X * Y_0).trace() /
@@ -353,6 +353,8 @@ std::pair<Matrix, Vector> AnalyticCenter::get_analytic_center(
         std::cout << "Starting Analytic Center Iterations..." << std::endl;
         std::cout << "Running with Linear Solver: "
                   << print_solver(params_.lin_solver) << std::endl;
+        std::cout << "Preconditioner: " << print_precond(params_.lrp_params.method)
+                  << std::endl;
       }
       if (n_iter % 10 == 1) {
         std::printf("%6s %12s %12s %12s %12s %12s %12s %12s %12s\n", "Iter",
@@ -477,7 +479,7 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(
     }
     // compute violation
     sys.violation(i) = sys.d(i) - val;
-    // adjusted rhs to include violation if enabled
+    // adjusted rhs to include violation
     sys.d(i) += sys.violation(i);
   }
   // TEST low rank approximation of matrix X for faster solve.

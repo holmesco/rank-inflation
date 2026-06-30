@@ -188,6 +188,27 @@ enum class LowRankPrecondMethod {
   DirectInverse,
 };
 
+inline std::string print_precond(LowRankPrecondMethod method) {
+  switch (method) {
+    case LowRankPrecondMethod::DenseLDLT:
+      return "Dense LDLT";
+    case LowRankPrecondMethod::SparseLDLT:
+      return "Sparse LDLT";
+    case LowRankPrecondMethod::SparseLDLT_ZL:
+      return "Sparse LDLT (Zhang and Lavaei)";
+    case LowRankPrecondMethod::DenseQR:
+      return "Dense QR";
+    case LowRankPrecondMethod::SparseQR:
+      return "Sparse QR";
+    case LowRankPrecondMethod::DenseLU:
+      return "Dense LU";
+    case LowRankPrecondMethod::DirectInverse:
+      return "Direct Inverse";
+    default:
+      return "Unknown";
+  }
+}
+
 struct LowRankPrecondParams {
   // Diagonal perturbation parameter.
   double tau = 1e-5;
