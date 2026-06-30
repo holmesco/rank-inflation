@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy
 import scipy.sparse
 import typing
-__all__: list[str] = ['AnalyticCenter', 'AnalyticCenterParams', 'AnalyticCenterResult', 'CG', 'DenseLDLT', 'DenseLU', 'DenseQR', 'DirectInverse', 'LDLT', 'LinearSolverType', 'LowRankPrecondMethod', 'LowRankPrecondParams', 'MFCG_DP', 'MFCG_LRP', 'RankReductionParams', 'SDPResult', 'SparseLDLT', 'SparseLDLT_ZL', 'SparseQR', 'rank_reduction', 'solve_sdp_mosek']
+__all__: list[str] = ['AnalyticCenter', 'AnalyticCenterParams', 'AnalyticCenterResult', 'CG', 'DenseLDLT', 'DenseLU', 'DenseQR', 'DirectInverse', 'LDLT', 'LinearSolverType', 'LowRankPrecondMethod', 'LowRankPrecondParams', 'MFCG_DP', 'MFCG_LRP', 'MaxCliqueCertifier', 'RankReductionParams', 'SDPResult', 'SparseLDLT', 'SparseLDLT_ZL', 'SparseQR', 'rank_reduction', 'solve_sdp_mosek']
 class AnalyticCenter:
     params: AnalyticCenterParams
     def __init__(self, C: numpy.ndarray, rho: float, A: list[scipy.sparse.csc_matrix], b: list[float], params: ... = ...) -> None:
@@ -302,6 +302,129 @@ class LowRankPrecondParams:
     def __init__(self) -> None:
         ...
     def __repr__(self) -> str:
+        ...
+class MaxCliqueCertifier:
+    params: AnalyticCenterParams
+    def __init__(self, M: numpy.ndarray, rho: float, params: ... = ...) -> None:
+        """
+        Construct a MaxCliqueCertifier for the maximum-clique / Lovasz-theta SDP.
+        
+        Behaves exactly like AnalyticCenter, except that the constraint matrices A and
+        right-hand side b are not supplied by the caller. They are constructed from the
+        cost matrix M: there is one constraint per non-edge enforcing that the
+        corresponding off-diagonal entry of the solution is zero, plus a trace
+        constraint fixing the trace to one. The non-edges are taken to be the
+        off-diagonal (i, j) indices of M whose entries are exactly equal to zero.
+        
+        Parameters
+        ----------
+        M : numpy.ndarray (n, n)
+            Cost matrix. Its off-diagonal zero entries define the non-edge constraints.
+        rho : float
+            Optimal cost value (scalar offset).
+        params : AnalyticCenterParams, optional
+            Algorithm parameters.
+        """
+    def build_adjoint(self, coeffs: numpy.ndarray) -> numpy.ndarray:
+        """
+        Build the adjoint matrix sum_i coeffs[i] * A_i + coeffs[-1] * C.
+        """
+    def build_certificate_from_dual(self, multipliers: numpy.ndarray) -> numpy.ndarray:
+        """
+        Backward-compatible alias for build_adjoint(multipliers).
+        """
+    def certify(self, Y_0: numpy.ndarray, perturb: typing.Any = None) -> AnalyticCenterResult:
+        """
+        Run analytic centering to certify the local solution Y_0.
+        
+        If perturb is provided, it is used as the initial perturbation matrix.
+        Otherwise, params.delta * Identity is used as the fallback.
+        
+        Parameters
+        ----------
+        Y_0 : numpy.ndarray (n, r)
+            Initial low-rank factor.
+        perturb : numpy.ndarray (n, n), optional
+            Initial perturbation matrix. If not provided, uses params.delta * Identity.
+        
+        Returns
+        -------
+        AnalyticCenterResult
+        """
+    def check_certificate(self, H: numpy.ndarray, Y: numpy.ndarray) -> tuple[float, float]:
+        """
+        Check global optimality of a solution.
+        
+        Returns whether the certificate matrix is PSD and the complementarity
+        of the provided solution.
+        
+        Returns
+        -------
+        tuple(min_eig, complementarity)
+        """
+    def eval_certificate(self, H: numpy.ndarray, Y: numpy.ndarray) -> tuple[float, float]:
+        """
+        Evaluate the optimality certificate.
+        
+        Returns the minimum eigenvalue of the certificate matrix and the
+        evaluation of the certificate matrix at the solution (first order
+        condition).
+        
+        Parameters
+        ----------
+        H : numpy.ndarray (n, n)
+            Certificate matrix.
+        Y : numpy.ndarray (n, r)
+            Low-rank factor of the solution.
+        
+        Returns
+        -------
+        tuple(min_eig, first_order_cond)
+        """
+    def eval_constraints(self, X: numpy.ndarray) -> numpy.ndarray:
+        """
+        Evaluate constraint violations at X.
+        """
+    def export_problem(self, file_path: str, problem_name: str, solution: numpy.ndarray) -> None:
+        """
+        Export the current problem to a text file.
+        
+        The file format matches `load_problem_from_file` in the C++ test helpers.
+        
+        Parameters
+        ----------
+        file_path : str
+            Destination file path.
+        problem_name : str
+            Value written to the `name` field.
+        solution : numpy.ndarray
+            Solution matrix written in the `soln` block.
+        """
+    def get_analytic_center(self, Y_0: numpy.ndarray, perturb: typing.Any = None) -> tuple[numpy.ndarray, numpy.ndarray]:
+        """
+        Compute the analytic center starting from Y_0.
+        
+        If perturb is provided, it is used as the initial perturbation matrix.
+        Otherwise, params.delta * Identity is used as the fallback.
+        
+        Parameters
+        ----------
+        Y_0 : numpy.ndarray (n, r)
+            Initial point (low-rank factor; X_0 = Y_0 @ Y_0.T).
+        perturb : numpy.ndarray (n, n), optional
+            Initial perturbation matrix. If not provided, uses params.delta * Identity.
+        
+        Returns
+        -------
+        tuple(X, multipliers)
+            X : numpy.ndarray (n, n)  — centered primal solution.
+            multipliers : numpy.ndarray (m,) — optimal dual multipliers.
+        """
+    @property
+    def dim(self) -> int:
+        ...
+    @property
+    def m(self) -> int:
         ...
 class RankReductionParams:
     eig_tol: float

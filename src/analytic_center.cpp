@@ -495,7 +495,7 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(
   } else {
     std::vector<Matrix> AX_local(m);
 #ifdef RANKTOOLS_PARALLEL
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for schedule(static)
 #endif
     for (int i = 0; i < a_size; ++i) {
       AX_local[i] = A_[i].selfadjointView<Eigen::Upper>() * X;
@@ -503,6 +503,9 @@ AnalyticCenter::LinSysData AnalyticCenter::build_ac_system(
     AX_local[m - 1] = C_.selfadjointView<Eigen::Upper>() * X;
 
     sys.B.setZero();
+#ifdef RANKTOOLS_PARALLEL
+#pragma omp parallel for schedule(static)
+#endif
     for (int i = 0; i < m; i++) {
       for (int j = i; j < m; j++) {
         sys.B(i, j) = sys.scale_ * (AX_local[i] * AX_local[j]).trace();

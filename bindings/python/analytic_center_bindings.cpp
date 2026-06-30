@@ -14,6 +14,7 @@
 
 #include "analytic_center.hpp"
 #include "interior_point_sdp.hpp"
+#include "max_clique_certifier.hpp"
 #include "rank_reduction.hpp"
 
 namespace py = pybind11;
@@ -80,6 +81,65 @@ class PyAnalyticCenter {
   std::vector<Eigen::SparseMatrix<double>> A_;
   std::vector<double> b_;
   AnalyticCenter ac_;
+};
+
+// ---------------------------------------------------------------------------
+// Wrapper: MaxCliqueCertifier builds (and owns copies of) its own constraint
+// matrices from the cost matrix M, so unlike PyAnalyticCenter this wrapper does
+// not need to hold A and b itself. It simply forwards the inherited public API.
+// ---------------------------------------------------------------------------
+class PyMaxCliqueCertifier {
+ public:
+  PyMaxCliqueCertifier(const Matrix& M, double rho, AnalyticCenterParams params)
+      : mcc_(M, rho, std::move(params)) {}
+
+  // ---- forwarded public API ----
+
+  int dim() const { return mcc_.dim; }
+  int m() const { return mcc_.m; }
+  AnalyticCenterParams& params() { return mcc_.params_; }
+  const AnalyticCenterParams& params() const { return mcc_.params_; }
+
+  Vector eval_constraints(const Matrix& X) const {
+    return mcc_.eval_constraints(X);
+  }
+
+  AnalyticCenterResult certify(const Matrix& Y_0,
+                               const Matrix* perturb = nullptr) const {
+    return mcc_.certify(Y_0, perturb);
+  }
+
+  std::pair<Matrix, Vector> get_analytic_center(
+      const Matrix& Y_0, const Matrix* perturb = nullptr) const {
+    return mcc_.get_analytic_center(Y_0, perturb);
+  }
+
+  Matrix build_adjoint(const Vector& coeffs) const {
+    return mcc_.build_adjoint(coeffs);
+  }
+
+  Matrix build_certificate_from_dual(const Vector& multipliers) const {
+    return build_adjoint(multipliers);
+  }
+
+  void export_problem(const std::string& file_path,
+                      const std::string& problem_name,
+                      const Matrix& solution) const {
+    mcc_.export_problem(file_path, problem_name, solution);
+  }
+
+  std::pair<double, double> eval_certificate(const Matrix& H,
+                                             const Matrix& Y) const {
+    return mcc_.eval_certificate(H, Y);
+  }
+
+  std::pair<double, double> check_certificate(const Matrix& H,
+                                              const Matrix& Y) const {
+    return mcc_.check_certificate(H, Y);
+  }
+
+ private:
+  MaxCliqueCertifier mcc_;
 };
 
 // ---------------------------------------------------------------------------
@@ -367,6 +427,156 @@ Returns
 tuple(min_eig, first_order_cond)
 )pbdoc")
       .def("check_certificate", &PyAnalyticCenter::check_certificate,
+           py::arg("H"), py::arg("Y"),
+           R"pbdoc(
+Check global optimality of a solution.
+
+Returns whether the certificate matrix is PSD and the complementarity
+of the provided solution.
+
+Returns
+-------
+tuple(min_eig, complementarity)
+)pbdoc");
+
+  // ---- MaxCliqueCertifier (via PyMaxCliqueCertifier wrapper) ----
+  py::class_<PyMaxCliqueCertifier>(m, "MaxCliqueCertifier")
+      .def(py::init<const Matrix&, double, AnalyticCenterParams>(),
+           py::arg("M"), py::arg("rho"),
+           py::arg("params") = AnalyticCenterParams(),
+           R"pbdoc(
+Construct a MaxCliqueCertifier for the maximum-clique / Lovasz-theta SDP.
+
+Behaves exactly like AnalyticCenter, except that the constraint matrices A and
+right-hand side b are not supplied by the caller. They are constructed from the
+cost matrix M: there is one constraint per non-edge enforcing that the
+corresponding off-diagonal entry of the solution is zero, plus a trace
+constraint fixing the trace to one. The non-edges are taken to be the
+off-diagonal (i, j) indices of M whose entries are exactly equal to zero.
+
+Parameters
+----------
+M : numpy.ndarray (n, n)
+    Cost matrix. Its off-diagonal zero entries define the non-edge constraints.
+rho : float
+    Optimal cost value (scalar offset).
+params : AnalyticCenterParams, optional
+    Algorithm parameters.
+)pbdoc")
+      .def_property_readonly("dim", &PyMaxCliqueCertifier::dim)
+      .def_property_readonly("m", &PyMaxCliqueCertifier::m)
+      .def_property(
+          "params", py::overload_cast<>(&PyMaxCliqueCertifier::params),
+          [](PyMaxCliqueCertifier& self, const AnalyticCenterParams& p) {
+            self.params() = p;
+          },
+          py::return_value_policy::reference_internal)
+      .def("eval_constraints", &PyMaxCliqueCertifier::eval_constraints,
+           py::arg("X"), "Evaluate constraint violations at X.")
+      .def(
+          "certify",
+          [](const PyMaxCliqueCertifier& self, const Matrix& Y_0,
+             const py::object& perturb = py::none()) {
+            if (perturb.is_none()) {
+              return self.certify(Y_0, nullptr);
+            } else {
+              auto perturb_mat = perturb.cast<Matrix>();
+              return self.certify(Y_0, &perturb_mat);
+            }
+          },
+          py::arg("Y_0"), py::arg("perturb") = py::none(),
+          R"pbdoc(
+Run analytic centering to certify the local solution Y_0.
+
+If perturb is provided, it is used as the initial perturbation matrix.
+Otherwise, params.delta * Identity is used as the fallback.
+
+Parameters
+----------
+Y_0 : numpy.ndarray (n, r)
+    Initial low-rank factor.
+perturb : numpy.ndarray (n, n), optional
+    Initial perturbation matrix. If not provided, uses params.delta * Identity.
+
+Returns
+-------
+AnalyticCenterResult
+)pbdoc")
+      .def(
+          "get_analytic_center",
+          [](const PyMaxCliqueCertifier& self, const Matrix& Y_0,
+             const py::object& perturb = py::none()) {
+            if (perturb.is_none()) {
+              return self.get_analytic_center(Y_0, nullptr);
+            } else {
+              auto perturb_mat = perturb.cast<Matrix>();
+              return self.get_analytic_center(Y_0, &perturb_mat);
+            }
+          },
+          py::arg("Y_0"), py::arg("perturb") = py::none(),
+          R"pbdoc(
+Compute the analytic center starting from Y_0.
+
+If perturb is provided, it is used as the initial perturbation matrix.
+Otherwise, params.delta * Identity is used as the fallback.
+
+Parameters
+----------
+Y_0 : numpy.ndarray (n, r)
+    Initial point (low-rank factor; X_0 = Y_0 @ Y_0.T).
+perturb : numpy.ndarray (n, n), optional
+    Initial perturbation matrix. If not provided, uses params.delta * Identity.
+
+Returns
+-------
+tuple(X, multipliers)
+    X : numpy.ndarray (n, n)  — centered primal solution.
+    multipliers : numpy.ndarray (m,) — optimal dual multipliers.
+)pbdoc")
+      .def("build_adjoint", &PyMaxCliqueCertifier::build_adjoint,
+           py::arg("coeffs"),
+           "Build the adjoint matrix sum_i coeffs[i] * A_i + coeffs[-1] * C.")
+      .def("build_certificate_from_dual",
+           &PyMaxCliqueCertifier::build_certificate_from_dual,
+           py::arg("multipliers"),
+           "Backward-compatible alias for build_adjoint(multipliers).")
+      .def("export_problem", &PyMaxCliqueCertifier::export_problem,
+           py::arg("file_path"), py::arg("problem_name"), py::arg("solution"),
+           R"pbdoc(
+Export the current problem to a text file.
+
+The file format matches `load_problem_from_file` in the C++ test helpers.
+
+Parameters
+----------
+file_path : str
+    Destination file path.
+problem_name : str
+    Value written to the `name` field.
+solution : numpy.ndarray
+    Solution matrix written in the `soln` block.
+)pbdoc")
+      .def("eval_certificate", &PyMaxCliqueCertifier::eval_certificate,
+           py::arg("H"), py::arg("Y"),
+           R"pbdoc(
+Evaluate the optimality certificate.
+
+Returns the minimum eigenvalue of the certificate matrix and the
+evaluation of the certificate matrix at the solution (first order
+condition).
+
+Parameters
+----------
+H : numpy.ndarray (n, n)
+    Certificate matrix.
+Y : numpy.ndarray (n, r)
+    Low-rank factor of the solution.
+
+Returns
+-------
+tuple(min_eig, first_order_cond)
+)pbdoc")
+      .def("check_certificate", &PyMaxCliqueCertifier::check_certificate,
            py::arg("H"), py::arg("Y"),
            R"pbdoc(
 Check global optimality of a solution.
