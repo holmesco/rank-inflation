@@ -43,6 +43,8 @@ class PyAnalyticCenter {
     return ac_.eval_constraints(X);
   }
 
+  SDPResult solve_sdp_mosek() const { return ac_.solve_sdp_mosek(); }
+
   AnalyticCenterResult certify(const Matrix& Y_0,
                                const Matrix* perturb = nullptr) const {
     return ac_.certify(Y_0, perturb);
@@ -103,6 +105,8 @@ class PyMaxCliqueCertifier {
   Vector eval_constraints(const Matrix& X) const {
     return mcc_.eval_constraints(X);
   }
+
+  SDPResult solve_sdp_mosek() const { return mcc_.solve_sdp_mosek(); }
 
   AnalyticCenterResult certify(const Matrix& Y_0,
                                const Matrix* perturb = nullptr) const {
@@ -324,6 +328,17 @@ params : AnalyticCenterParams, optional
           py::return_value_policy::reference_internal)
       .def("eval_constraints", &PyAnalyticCenter::eval_constraints,
            py::arg("X"), "Evaluate constraint violations at X.")
+      .def("solve_sdp_mosek", &PyAnalyticCenter::solve_sdp_mosek,
+           R"pbdoc(
+Solve the problem's SDP using MOSEK.
+
+Builds the primal SDP from this object's cost matrix and constraints and
+solves it with MOSEK.
+
+Returns
+-------
+SDPResult
+)pbdoc")
       .def(
           "certify",
           [](const PyAnalyticCenter& self, const Matrix& Y_0,
@@ -473,6 +488,17 @@ params : AnalyticCenterParams, optional
           py::return_value_policy::reference_internal)
       .def("eval_constraints", &PyMaxCliqueCertifier::eval_constraints,
            py::arg("X"), "Evaluate constraint violations at X.")
+      .def("solve_sdp_mosek", &PyMaxCliqueCertifier::solve_sdp_mosek,
+           R"pbdoc(
+Solve the problem's SDP using MOSEK.
+
+Builds the primal SDP from this object's cost matrix and constraints and
+solves it with MOSEK.
+
+Returns
+-------
+SDPResult
+)pbdoc")
       .def(
           "certify",
           [](const PyMaxCliqueCertifier& self, const Matrix& Y_0,

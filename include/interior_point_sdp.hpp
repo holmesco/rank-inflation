@@ -5,7 +5,7 @@
 //   std::vector<Eigen::SparseMatrix<double>> As = ...; // each n x n
 //   Eigen::VectorXd b = ...; // m
 //   Eigen::MatrixXd X = solve_sdp(C, As, b);
-
+#pragma once
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
 #include <iostream>

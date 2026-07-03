@@ -202,6 +202,11 @@ Vector AnalyticCenter::eval_constraints(const Matrix& X) const {
   return result;
 }
 
+RankTools::SDPResult AnalyticCenter::solve_sdp_mosek() const{
+  return RankTools::solve_sdp_mosek(C_, A_, b_, params_.verbose);
+}
+
+
 Matrix AnalyticCenter::build_adjoint(const Vector& coeffs) const {
   // 1. Calculate the weighted sum of the upper-triangular parts
   // Construct product S = sum_i A_i * y_i

@@ -5,6 +5,7 @@
 
 #include "lin_alg_tools.hpp"
 #include "utils.hpp"
+#include "interior_point_sdp.hpp"
 
 namespace RankTools {
 
@@ -181,6 +182,8 @@ class AnalyticCenter {
 
   // Evaluate constraints (and cost if enabled) and compute the gradients
   Vector eval_constraints(const Matrix& Y) const;
+
+  RankTools::SDPResult solve_sdp_mosek() const;
 
   // Run analytic centering algorithm starting to certify local solution Y_0.
   // Returns the final result, including the centered primal solution, the

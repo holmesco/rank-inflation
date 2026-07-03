@@ -602,15 +602,6 @@ TEST_P(LovazsParamTest, CertifyMFCGDiagPrecond) {
 // center, so we use the Mosek solution as the candidate solution to certify.
 TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   const auto& sdp = GetParam();
-  // Solve using Mosek to get analytic center solution
-  auto mosek_soln = solve_sdp_mosek(sdp.C, sdp.A, sdp.b);
-  auto Y_mosek = get_positive_eigspace(mosek_soln.X, 1e-3);
-  auto rank_mosek = Y_mosek.cols();
-  std::cout << "Rank at IP Solution: " << rank_mosek << std::endl;
-  auto X_mosek = Y_mosek * Y_mosek.transpose();
-  // std::cout << std::fixed << std::setprecision(9);
-  // std::cout << "Mosek Solution: " << std::endl << Y_mosek << std::endl;
-
   // parameters
   AnalyticCenterParams params;
   params.verbose = true;
@@ -627,6 +618,16 @@ TEST_P(GenericParamTest, Certify_MFCG_LRP_Global) {
   params.delta = delta;
   // generate problem
   AnalyticCenter problem = sdp.make(params);
+
+  // Solve using Mosek to get analytic center solution
+  auto mosek_soln = problem.solve_sdp_mosek();
+  auto Y_mosek = get_positive_eigspace(mosek_soln.X, 1e-3);
+  auto rank_mosek = Y_mosek.cols();
+  std::cout << "Rank at IP Solution: " << rank_mosek << std::endl;
+  auto X_mosek = Y_mosek * Y_mosek.transpose();
+  // std::cout << std::fixed << std::setprecision(9);
+  // std::cout << "Mosek Solution: " << std::endl << Y_mosek << std::endl;
+
   // Update cost based on the mosek solution
   problem.rho_ = (sdp.C * mosek_soln.X).trace();
   // run certification

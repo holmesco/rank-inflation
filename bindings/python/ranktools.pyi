@@ -120,6 +120,17 @@ class AnalyticCenter:
             X : numpy.ndarray (n, n)  — centered primal solution.
             multipliers : numpy.ndarray (m,) — optimal dual multipliers.
         """
+    def solve_sdp_mosek(self) -> ...:
+        """
+        Solve the problem's SDP using MOSEK.
+        
+        Builds the primal SDP from this object's cost matrix and constraints and
+        solves it with MOSEK.
+        
+        Returns
+        -------
+        SDPResult
+        """
     @property
     def dim(self) -> int:
         ...
@@ -419,6 +430,17 @@ class MaxCliqueCertifier:
         tuple(X, multipliers)
             X : numpy.ndarray (n, n)  — centered primal solution.
             multipliers : numpy.ndarray (m,) — optimal dual multipliers.
+        """
+    def solve_sdp_mosek(self) -> ...:
+        """
+        Solve the problem's SDP using MOSEK.
+        
+        Builds the primal SDP from this object's cost matrix and constraints and
+        solves it with MOSEK.
+        
+        Returns
+        -------
+        SDPResult
         """
     @property
     def dim(self) -> int:
